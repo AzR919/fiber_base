@@ -5,26 +5,38 @@ Main file for argparsing
 
 import argparse
 
-def get_arg():
+def get_args():
 
     """Argument parser"""
     parser = argparse.ArgumentParser(
         description="Fiber seq test runs",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # Data
     data_group = parser.add_argument_group("Data Configuration")
-    data_group.add_argument("--data_path", type=str,
+    data_group.add_argument("--fiber_data_path", type=str,
                            default="/home/azr")
-    data_group.add_argument("--input_window", type=int,
+    data_group.add_argument("--other_data_path", type=str,
+                           default="/home/azr")
+    data_group.add_argument("--context_length", type=int,
                            default=2048)
-
+    data_group.add_argument("--fibers_per_entry", type=int,
+                             default=32)
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument("--model", type=str,
                              default="base")
+    
+    # Train
+    trainer_group = parser.add_argument_group("Model Architecture")
+    trainer_group.add_argument("--epochs", type=int,
+                             default=2)
+    trainer_group.add_argument("--iters_per_epoch", type=int,
+                             default=1024)
+    trainer_group.add_argument("--batch_size", type=int,
+                             default=32)
+    
 
     # I/O
     io_group = parser.add_argument_group("Model I/O")

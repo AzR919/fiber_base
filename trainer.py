@@ -2,3 +2,46 @@
 Main train loop
 
 """
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+class Trainer:
+    def __init__(self, model, dataset, epochs=10, batch_size=32, lr=1e-4, patience=5):
+
+        self.model = model
+        self.dataset = dataset
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model.to(self.device)
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', patience=patience
+        )
+        self.criterion = nn.MSELoss()
+
+    def train_step(self, batch):
+
+        self.model.train()
+        m6as, dna, target = [b.to(self.device) for b in batch]
+        self.optimizer.zero_grad()
+        output = self.model(m6as, dna)
+        loss = self.criterion(output, target)
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+
+    def train(self):
+
+        loader = DataLoader(self.dataset, batch_size=self.batch_size)
+        for epoch in range(self.epochs):
+            total_loss = 0
+            for batch in loader:
+                loss = self.train_step(batch)
+                total_loss += loss
+            avg_loss = total_loss / len(loader)
+            self.scheduler.step(avg_loss)
+            print(f"Epoch {epoch+1}, Loss: {avg_loss:.6f}")
