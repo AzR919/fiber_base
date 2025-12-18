@@ -5,6 +5,8 @@ Main train loop
 
 import torch
 import torch.nn as nn
+
+from utils import plot_sample
 from torch.utils.data import DataLoader
 
 class Trainer:
@@ -13,6 +15,7 @@ class Trainer:
         self.model = model
         self.dataset = dataset
         self.epochs = epochs
+        self.iters_per_epoch = dataset.iters_per_epoch
         self.batch_size = batch_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -32,7 +35,7 @@ class Trainer:
         loss = self.criterion(output, target)
         loss.backward()
         self.optimizer.step()
-        return loss.item()
+        return loss.item(), output
 
     def train(self):
 
@@ -40,8 +43,10 @@ class Trainer:
         for epoch in range(self.epochs):
             total_loss = 0
             for batch in loader:
-                loss = self.train_step(batch)
+                loss, output = self.train_step(batch)
                 total_loss += loss
-            avg_loss = total_loss / len(loader)
+            avg_loss = total_loss / self.iters_per_epoch
             self.scheduler.step(avg_loss)
             print(f"Epoch {epoch+1}, Loss: {avg_loss:.6f}")
+
+            plot_sample(batch[0], output, batch[2], epoch)

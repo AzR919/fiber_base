@@ -107,7 +107,7 @@ class fiber_data_iterator(IterableDataset):
 
         fibers = []
         with open(os.devnull, 'w') as devnull:
-            with contextlib.redirect_stdout(devnull):
+            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
                 possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
         # with stdout_redirected(to=os.devnull):
