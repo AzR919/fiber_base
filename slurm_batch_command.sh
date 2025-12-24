@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-0:30:00  # 0 days, 23 hours, 59 minutes
+#SBATCH --time=0-3:00:00  # 0 days, 23 hours, 59 minutes
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -39,7 +39,8 @@ source /home/azr/lab/misc/menv/bin/activate
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
     --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF743ULW.bw \
-    --batch_size 8 --epochs 100
+    --batch_size 8 --epochs 100 --model simple \
+    --res_dir ./results --name_suffix ccre_simple_add_model
 
 # Print job completion time
 echo "Job finished on $(date)"

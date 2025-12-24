@@ -3,6 +3,8 @@ Common utility functions
 
 """
 
+import os
+
 import torch
 import random
 import numpy as np
@@ -25,7 +27,10 @@ def set_seed(seed):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-def plot_sample(inp, out, tar, extra):
+def plot_sample(dir, inp, out, tar, extra):
+
+    os.makedirs(dir, exist_ok=True)
+    save_path = os.path.join(dir, f"Epoch_{extra}.png")
 
     # ================== 3. Plot ==================
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
@@ -43,7 +48,7 @@ def plot_sample(inp, out, tar, extra):
         m6a_positions = torch.where(fiber > 0.5)[0]
         ax2.hlines(-i, 0, len(fiber)-1, color='black', lw=0.6)
         if len(m6a_positions) > 0:
-            ax2.scatter(m6a_positions, [-i]*len(m6a_positions), 
+            ax2.scatter(m6a_positions, [-i]*len(m6a_positions),
                     color='red', s=15, zorder=5)
 
     ax2.set_ylim(-inp.shape[2] - 0.5, 0.5)
@@ -52,5 +57,5 @@ def plot_sample(inp, out, tar, extra):
     ax2.set_xlim(0, inp.shape[1])
 
     plt.tight_layout()
-    plt.savefig(f"../results/model_io_plot_{extra}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()

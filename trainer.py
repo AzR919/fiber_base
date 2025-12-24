@@ -10,7 +10,8 @@ from utils import plot_sample
 from torch.utils.data import DataLoader
 
 class Trainer:
-    def __init__(self, model, dataset, epochs=10, batch_size=32, lr=1e-4, patience=5):
+    def __init__(self, model, dataset, epochs=10,
+                 batch_size=32, lr=1e-4, patience=5):
 
         self.model = model
         self.dataset = dataset
@@ -37,7 +38,7 @@ class Trainer:
         self.optimizer.step()
         return loss.item(), output
 
-    def train(self):
+    def train(self, save_dir):
 
         loader = DataLoader(self.dataset, batch_size=self.batch_size)
         for epoch in range(self.epochs):
@@ -49,4 +50,4 @@ class Trainer:
             self.scheduler.step(avg_loss)
             print(f"Epoch {epoch+1}, Loss: {avg_loss:.6f}")
 
-            plot_sample(batch[0], output, batch[2], epoch)
+            plot_sample(save_dir, batch[0], output, batch[2], epoch)

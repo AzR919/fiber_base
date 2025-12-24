@@ -27,7 +27,7 @@ def get_args():
     model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument("--model", type=str,
                              default="base")
-    
+
     # Train
     trainer_group = parser.add_argument_group("Model Architecture")
     trainer_group.add_argument("--epochs", type=int,
@@ -36,12 +36,12 @@ def get_args():
                              default=1024)
     trainer_group.add_argument("--batch_size", type=int,
                              default=32)
-    
+
 
     # I/O
     io_group = parser.add_argument_group("Model I/O")
     io_group.add_argument("--res_dir", type=str,
-                          default="../results",
+                          default="./results",
                           help="Directory to save trained models")
     io_group.add_argument("--name_suffix", type=str, default="",
                          help="Suffix to append to auto-generated model name")

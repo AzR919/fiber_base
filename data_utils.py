@@ -11,6 +11,7 @@ import random
 import pyBigWig
 import contextlib
 import numpy as np
+import pandas as pd
 
 # from w_redirect import stdout_redirected
 from torch.utils.data import IterableDataset
@@ -19,7 +20,7 @@ class fiber_data_iterator(IterableDataset):
 
     def __init__(self, fiber_data_path, other_bw,
                  fibers_per_entry, context_length,
-                 iters_per_epoch, fasta_path,
+                 iters_per_epoch, fasta_path, ccre_path,
                  chr_sizes_file=None):
 
         self.fiber_bam = pyft.Fiberbam(fiber_data_path)
@@ -31,6 +32,8 @@ class fiber_data_iterator(IterableDataset):
 
         self.load_fasta(fasta_path)
         self.load_genomic_coords(chr_sizes_file)
+
+        self.load_ccres(ccre_path)
 
     def load_fasta(self, fasta_path):
 
@@ -77,7 +80,8 @@ class fiber_data_iterator(IterableDataset):
         return dna_to_onehot(seq)
 
     def load_genomic_coords(self, chr_sizes_file, mode="train"):
-        main_chrs = ["chr" + str(x) for x in range(1, 23)] + ["chrX"]
+        # main_chrs = ["chr" + str(x) for x in range(1, 23)] + ["chrX"]
+        main_chrs = ["chr21"]
         # if mode == "train":
         #     main_chrs.remove("chr21") # reserved for test
         # self.chr_sizes = {}
@@ -92,6 +96,13 @@ class fiber_data_iterator(IterableDataset):
         possible_chr_sizes = self.other_bw.chroms()
         self.chr_sizes = {k: possible_chr_sizes[k] for k in main_chrs if k in possible_chr_sizes}
 
+    def load_ccres(self, bed_path):
+        # Load BED file (columns: chrom, start, end, name, score, strand, type...)
+        df = pd.read_csv(bed_path, sep='\t', header=None, usecols=[0, 1, 2])
+        df.columns = ['chrom', 'start', 'end']
+        # Filter for chromosomes present in your chr_sizes to avoid errors
+        self.ccre_list = df[df['chrom'].isin(self.chr_sizes.keys())].values.tolist()
+
     def generate_loci(self):
 
         random_chr = random.choice(list(self.chr_sizes.keys()))
@@ -101,6 +112,42 @@ class fiber_data_iterator(IterableDataset):
 
         return random_chr, random_start, random_end
 
+    def generate_ccre_loci(self, jitter_range=200):
+        """
+        Generates a genomic window centered around a random cCRE with optional jitter.
+
+        @args:
+            jitter_range (int): The maximum number of base pairs to shift the center.
+                                e.g., 200 means a shift between -200 and +200 bp.
+        """
+        # 1. Pick a random cCRE
+        ccre_chrom, ccre_start, ccre_end = random.choice(self.ccre_list)
+
+        # 2. Calculate the "true" center of the cCRE
+        true_center = (ccre_start + ccre_end) // 2
+
+        # 3. Apply Jitter
+        # This shifts the focus point slightly so the cCRE isn't always perfectly centered
+        jitter = random.randint(-jitter_range, jitter_range)
+        focal_point = true_center + jitter
+
+        # 4. Create the window around the focal point
+        half_window = self.context_length // 2
+        random_start = focal_point - half_window
+        random_end = random_start + self.context_length
+
+        # 5. Boundary Check (Crucial to prevent index errors)
+        max_size = self.chr_sizes[ccre_chrom]
+
+        if random_start < 0:
+            random_start = 0
+            random_end = self.context_length
+        elif random_end > max_size:
+            random_end = max_size
+            random_start = max_size - self.context_length
+
+        return ccre_chrom, int(random_start), int(random_end)
+
     def get_fiber_data(self, chrom, start, end):
 
         ML_THRESHOLD = 100
@@ -109,9 +156,6 @@ class fiber_data_iterator(IterableDataset):
         with open(os.devnull, 'w') as devnull:
             with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
                 possible_fibers = self.fiber_bam.fetch(chrom, start, end)
-
-        # with stdout_redirected(to=os.devnull):
-        #     possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
         for fiber in possible_fibers:
             data = np.zeros(end-start, dtype=np.float32)
@@ -151,7 +195,7 @@ class fiber_data_iterator(IterableDataset):
 
             while not found_possible_locus:
 
-                random_locus = self.generate_loci()
+                random_locus = self.generate_ccre_loci()
 
                 fiber_tensor = self.get_fiber_data(*random_locus)
                 if fiber_tensor is None:continue
