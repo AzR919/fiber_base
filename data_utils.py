@@ -16,6 +16,8 @@ import pandas as pd
 # from w_redirect import stdout_redirected
 from torch.utils.data import IterableDataset
 
+from utils import *
+
 class fiber_data_iterator(IterableDataset):
 
     def __init__(self, fiber_data_path, other_bw,
@@ -151,11 +153,10 @@ class fiber_data_iterator(IterableDataset):
     def get_fiber_data(self, chrom, start, end):
 
         ML_THRESHOLD = 100
-
         fibers = []
-        with open(os.devnull, 'w') as devnull:
-            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-                possible_fibers = self.fiber_bam.fetch(chrom, start, end)
+
+        with suppress_stdout_stderr():
+            possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
         for fiber in possible_fibers:
             data = np.zeros(end-start, dtype=np.float32)
