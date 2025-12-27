@@ -6,7 +6,7 @@ Main train loop
 import torch
 import torch.nn as nn
 
-from utils import plot_sample
+from utils import *
 from torch.utils.data import DataLoader
 
 class Trainer:
@@ -34,6 +34,11 @@ class Trainer:
         self.optimizer.zero_grad()
         output = self.model(m6as, dna)
         loss = self.criterion(output, target)
+        if torch.isnan(output).any().item() or torch.isnan(loss):
+            torch.save(output, "./ignore/output.pt")
+            torch.save(m6as, "./ignore/input.pt")
+            torch.save(target, "./ignore/target.pt")
+            exit(-1)
         loss.backward()
         self.optimizer.step()
         return loss.item(), output
@@ -41,6 +46,8 @@ class Trainer:
     def train(self, save_dir):
 
         loader = DataLoader(self.dataset, batch_size=self.batch_size)
+
+        losses = []
         for epoch in range(self.epochs):
             total_loss = 0
             for batch in loader:
@@ -48,6 +55,9 @@ class Trainer:
                 total_loss += loss
             avg_loss = total_loss / self.iters_per_epoch
             self.scheduler.step(avg_loss)
-            print(f"Epoch {epoch+1}, Loss: {avg_loss:.6f}")
+            print(f"Epoch {epoch}, Loss: {avg_loss:.6f}")
+            losses.append(avg_loss)
 
             plot_sample(save_dir, batch[0], output, batch[2], epoch)
+
+        plot_loss(save_dir, losses, epoch)

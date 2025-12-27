@@ -17,9 +17,10 @@
             },
             "args": [
                 "--fiber_data_path", "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram",
-                "--other_data_path", "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF743ULW.bw",
+                "--other_data_path", "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig",
                 "--model", "simple",
                 "--batch_size", "8",
+                "--fibers_per_entry", "256",
                 "--res_dir", "./results",
                 "--name_suffix", "debug",
             ]

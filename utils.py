@@ -35,32 +35,54 @@ def plot_sample(dir, inp, out, tar, extra):
     save_path = os.path.join(dir, f"Epoch_{extra}.png")
 
     # ================== 3. Plot ==================
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
-                                gridspec_kw={'height_ratios': [1, 4]})
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 8), sharex=True,
+                                gridspec_kw={'height_ratios': [1, 1, 4]})
 
     # Top: DNase-seq
-    ax1.plot(tar[0].cpu(), color='steelblue', alpha=0.7, label='Target')
+    ax1.plot(tar[0].cpu(), color='black', alpha=0.7, label='Target')
     ax1.plot(out[0].cpu().detach(), color='orange', alpha=0.7, label='Model Output')
     ax1.set_ylabel("Signal")
     ax1.set_title("Model Prediction")
     ax1.legend()
 
+    # Mid: sum m6as
+    pseudo_bulk_m6a = torch.sum(inp, dim=-1, keepdim=True)
+    ax2.plot(pseudo_bulk_m6a[0].cpu(), color='steelblue', alpha=0.7, label='Target')
+    ax2.set_ylabel("Total")
+    ax2.set_title("sum m6as")
+    ax2.legend()
+
     for i in range(inp.shape[2]):  # Plot first 10 fibers
         fiber = inp[0, :, i].cpu()
         m6a_positions = torch.where(fiber > 0.5)[0]
-        ax2.hlines(-i, 0, len(fiber)-1, color='black', lw=0.6)
+        ax3.hlines(-i, 0, len(fiber)-1, color='black', lw=0.6)
         if len(m6a_positions) > 0:
-            ax2.scatter(m6a_positions, [-i]*len(m6a_positions),
+            ax3.scatter(m6a_positions, [-i]*len(m6a_positions),
                     color='red', s=15, zorder=5)
 
-    ax2.set_ylim(-inp.shape[2] - 0.5, 0.5)
-    ax2.set_ylabel("Input Fibers")
-    ax2.set_xlabel("Genomic Position")
-    ax2.set_xlim(0, inp.shape[1])
+    ax3.set_ylim(-inp.shape[2] - 0.5, 0.5)
+    ax3.set_ylabel("Input Fibers")
+    ax3.set_xlabel("Genomic Position")
+    ax3.set_xlim(0, inp.shape[1])
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
+
+    plt.close()
+
+def plot_loss(dir, losses, extra):
+
+    os.makedirs(dir, exist_ok=True)
+    save_path = os.path.join(dir, f"Epoch_{extra}_loss.png")
+
+    plt.plot(losses)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Loss plot")
+
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.close()
 
 @contextmanager
 def suppress_stdout_stderr():
