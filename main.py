@@ -41,8 +41,8 @@ def main():
 
     data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
             fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
-            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/misc/hg38.fa",
-            ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/grch38_ccres.bed")
+            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
+            ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF428XFI_ENCFF280PUF_ENCFF469WVA_ENCFF644EEX.bed")
 
     model = model_selector(args.model, args)
 

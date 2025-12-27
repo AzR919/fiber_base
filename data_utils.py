@@ -103,7 +103,7 @@ class fiber_data_iterator(IterableDataset):
         df = pd.read_csv(bed_path, sep='\t', header=None, usecols=[0, 1, 2])
         df.columns = ['chrom', 'start', 'end']
         # Filter for chromosomes present in your chr_sizes to avoid errors
-        self.ccre_list = df[df['chrom'].isin(self.chr_sizes.keys())].values.tolist()
+        self.ccre_list = df[df['chrom'].isin(self.chr_sizes.keys())].values
 
     def generate_loci(self):
 
@@ -153,16 +153,17 @@ class fiber_data_iterator(IterableDataset):
     def get_fiber_data(self, chrom, start, end):
 
         ML_THRESHOLD = 100
-        fibers = []
+        fibers = np.zeros((self.fibers_per_entry, self.context_length), dtype=np.float32)
 
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
-        for fiber in possible_fibers:
-            data = np.zeros(end-start, dtype=np.float32)
+        for i, fiber in enumerate(possible_fibers):
+            if i == self.fibers_per_entry: break
+            # data = np.zeros(end-start, dtype=np.float32)
             # Skip short or secondary reads
-            if fiber.end - fiber.start < 1000:
-                continue
+            # if fiber.end - fiber.start < 1000:
+            #     continue
 
             # Extract high-confidence m6A in reference coordinates
             m6a_ref = []
@@ -171,14 +172,15 @@ class fiber_data_iterator(IterableDataset):
                 if start <= ref_pos < end and ml >= ML_THRESHOLD:
                     m6a_ref.append(ref_pos-start)
 
-            if len(m6a_ref) == 0:
-                continue
+            # if len(m6a_ref) == 0:
+            #     continue
 
-            data[m6a_ref] = 1
-            fibers.append(data)
-            if len(fibers)==self.fibers_per_entry: break
+            fibers[i,m6a_ref] = 1
+        #     data[m6a_ref] = 1
+        #     fibers.append(data)
+        #     if len(fibers)==self.fibers_per_entry: break
 
-        if len(fibers)!=self.fibers_per_entry: return None
+        # if len(fibers)!=self.fibers_per_entry: return None
 
         fibers_tensor = torch.from_numpy(np.array(fibers))
 
@@ -186,7 +188,7 @@ class fiber_data_iterator(IterableDataset):
 
     def get_other_bw_data(self, chrom, start, end):
 
-        return  torch.from_numpy(np.array(self.other_bw.values(chrom, start, end))).to(torch.float32)
+        return torch.asinh(torch.from_numpy(np.array(self.other_bw.values(chrom, start, end))).to(torch.float32))
 
     def __iter__(self):
 
@@ -199,11 +201,14 @@ class fiber_data_iterator(IterableDataset):
                 random_locus = self.generate_ccre_loci()
 
                 fiber_tensor = self.get_fiber_data(*random_locus)
-                if fiber_tensor is None:continue
-                else: found_possible_locus = True
+                if fiber_tensor is None : continue
 
                 other_tensor = self.get_other_bw_data(*random_locus)
+                has_nan = torch.isnan(other_tensor).any().item()
+                if has_nan : continue
+
                 dna = self.onehot_for_locus(random_locus)
+                found_possible_locus = True
 
             yield fiber_tensor, dna, other_tensor
 

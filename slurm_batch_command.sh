@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SBATCH --job-name=fiber_test_run
+#SBATCH --job-name=2025-12-27_04_ATAC_seq_nan_bug_fix
 #SBATCH --account=def-maxwl
-#SBATCH --output=logs/job_%j.out
-#SBATCH --error=logs/job_%j.err
+#SBATCH --output=logs/%x.out
+#SBATCH --error=logs/%x.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
@@ -38,9 +38,9 @@ source /home/azr/lab/misc/menv/bin/activate
 # Run the training
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF743ULW.bw \
-    --batch_size 8 --epochs 100 --model simple \
-    --res_dir ./results --name_suffix ccre_simple_add_model
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
+    --batch_size 8 --epochs 100 --model simple --fibers_per_entry 200 \
+    --res_dir ./results --name_suffix atac_seq_nan_bug_fix
 
 # Print job completion time
 echo "Job finished on $(date)"
