@@ -30,7 +30,7 @@ class Trainer:
     def train_step(self, batch):
 
         self.model.train()
-        m6as, dna, target = [b.to(self.device) for b in batch]
+        m6as, dna, target = [b.to(self.device) for b in batch[:3]]
         self.optimizer.zero_grad()
         output = self.model(m6as, dna)
         loss = self.criterion(output, target)
@@ -58,6 +58,6 @@ class Trainer:
             print(f"Epoch {epoch}, Loss: {avg_loss:.6f}")
             losses.append(avg_loss)
 
-            plot_sample(save_dir, batch[0], output, batch[2], epoch)
+            plot_sample(save_dir, batch[0], output, batch[2], batch[3], epoch)
 
-        plot_loss(save_dir, losses, epoch)
+        plot_loss(save_dir, losses, epoch+1)

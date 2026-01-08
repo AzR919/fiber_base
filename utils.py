@@ -29,7 +29,9 @@ def set_seed(seed):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-def plot_sample(dir, inp, out, tar, extra):
+def plot_sample(dir, inp, out, tar, locus, extra):
+
+    chr, start, end = locus[0][0], locus[1][0], locus[2][0]
 
     os.makedirs(dir, exist_ok=True)
     save_path = os.path.join(dir, f"Epoch_{extra}.png")
@@ -42,7 +44,7 @@ def plot_sample(dir, inp, out, tar, extra):
     ax1.plot(tar[0].cpu(), color='black', alpha=0.7, label='Target')
     ax1.plot(out[0].cpu().detach(), color='orange', alpha=0.7, label='Model Output')
     ax1.set_ylabel("Signal")
-    ax1.set_title("Model Prediction")
+    ax1.set_title(f"Model Prediction {chr}:{start}-{end}")
     ax1.legend()
 
     # Mid: sum m6as
@@ -53,12 +55,26 @@ def plot_sample(dir, inp, out, tar, extra):
     ax2.legend()
 
     for i in range(inp.shape[2]):  # Plot first 10 fibers
+        # fiber = inp[0, :, i].cpu()
+        # m6a_positions = torch.where(fiber > 0.5)[0]
+        # ax3.hlines(-i, 0, len(fiber)-1, color='black', lw=0.6)
+        # if len(m6a_positions) > 0:
+        #     ax3.scatter(m6a_positions, [-i]*len(m6a_positions),
+        #             color='red', s=15, zorder=5)
+
+        # MSP chunks: stretches of consecutive positions where fiber > 0.5
+        # Find runs of consecutive 1s
         fiber = inp[0, :, i].cpu()
-        m6a_positions = torch.where(fiber > 0.5)[0]
-        ax3.hlines(-i, 0, len(fiber)-1, color='black', lw=0.6)
-        if len(m6a_positions) > 0:
-            ax3.scatter(m6a_positions, [-i]*len(m6a_positions),
-                    color='red', s=15, zorder=5)
+        masked = (fiber > 0.5).float()
+        diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
+        starts = torch.where(diff == 1)[0]
+        ends = torch.where(diff == -1)[0]
+
+        for s, e in zip(starts, ends):
+            if e > s:  # Valid stretch
+                # Shade the MSP region (accessible chunk)
+                ax3.axhspan(-i - 0.3, -i + 0.3, xmin=(s/len(fiber)).item(), xmax=(e/len(fiber)).item(),
+                            color='blue', alpha=0.3, zorder=1)
 
     ax3.set_ylim(-inp.shape[2] - 0.5, 0.5)
     ax3.set_ylabel("Input Fibers")

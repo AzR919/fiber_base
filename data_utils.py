@@ -210,7 +210,7 @@ class fiber_data_iterator(IterableDataset):
                 dna = self.onehot_for_locus(random_locus)
                 found_possible_locus = True
 
-            yield fiber_tensor, dna, other_tensor
+            yield fiber_tensor, dna, other_tensor, random_locus
 
 def tester():
 

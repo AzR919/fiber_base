@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2025-12-27_04_ATAC_seq_nan_bug_fix
+#SBATCH --job-name=2025-12-28_00_ATAC_seq_better_plots
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -40,7 +40,7 @@ python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
     --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
     --batch_size 8 --epochs 100 --model simple --fibers_per_entry 200 \
-    --res_dir ./results --name_suffix atac_seq_nan_bug_fix
+    --res_dir ./results --name_suffix atac_seq_better_plot_name
 
 # Print job completion time
 echo "Job finished on $(date)"
