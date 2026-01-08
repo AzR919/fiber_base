@@ -9,7 +9,6 @@ import pysam
 import torch
 import random
 import pyBigWig
-import contextlib
 import numpy as np
 import pandas as pd
 
@@ -152,7 +151,7 @@ class fiber_data_iterator(IterableDataset):
 
     def get_fiber_data(self, chrom, start, end):
 
-        ML_THRESHOLD = 100
+        AQ_THRESHOLD = 200
         fibers = np.zeros((self.fibers_per_entry, self.context_length), dtype=np.float32)
 
         with suppress_stdout_stderr():
@@ -160,27 +159,15 @@ class fiber_data_iterator(IterableDataset):
 
         for i, fiber in enumerate(possible_fibers):
             if i == self.fibers_per_entry: break
-            # data = np.zeros(end-start, dtype=np.float32)
-            # Skip short or secondary reads
-            # if fiber.end - fiber.start < 1000:
-            #     continue
 
-            # Extract high-confidence m6A in reference coordinates
-            m6a_ref = []
-            for pos, ref_pos, ml in zip(fiber.m6a.starts, fiber.m6a.reference_starts, fiber.m6a.ml):
+            data = np.zeros((2048), dtype=np.float32)
+
+            for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
                 if ref_pos is None: continue
-                if start <= ref_pos < end and ml >= ML_THRESHOLD:
-                    m6a_ref.append(ref_pos-start)
+                if start <= ref_pos < end and aq >= AQ_THRESHOLD:
+                    data[ref_pos-start:ref_pos-start+len] = 1
 
-            # if len(m6a_ref) == 0:
-            #     continue
-
-            fibers[i,m6a_ref] = 1
-        #     data[m6a_ref] = 1
-        #     fibers.append(data)
-        #     if len(fibers)==self.fibers_per_entry: break
-
-        # if len(fibers)!=self.fibers_per_entry: return None
+            fibers[i] = data
 
         fibers_tensor = torch.from_numpy(np.array(fibers))
 
