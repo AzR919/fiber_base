@@ -167,7 +167,16 @@ class fiber_data_iterator(IterableDataset):
                 if start <= ref_pos < end and aq >= AQ_THRESHOLD:
                     data[ref_pos-start:ref_pos-start+len] = 1
 
-            fibers[i] = data
+            fibers[i] += data
+
+            # data_nuc = np.zeros((2048), dtype=np.float32)
+
+            # for ref_pos, len in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths):
+            #     if ref_pos is None: continue
+            #     if start <= ref_pos < end:
+            #         data_nuc[ref_pos-start:ref_pos-start+len] = -1
+
+            # fibers[i] += data_nuc
 
         fibers_tensor = torch.from_numpy(np.array(fibers))
 
@@ -199,8 +208,10 @@ class fiber_data_iterator(IterableDataset):
 
             yield fiber_tensor, dna, other_tensor, random_locus
 
-def tester():
+#--------------------------------------------------------------------------------------------------
+# testing
 
+def tester():
     pass
 
 if __name__=="__main__":
