@@ -1,6 +1,5 @@
 """
-Main file for argparsing
-
+File for argparsing
 """
 
 import argparse
@@ -53,3 +52,13 @@ def get_args():
     misc_group.add_argument('--seed', type=int, default=919)
 
     return parser.parse_args()
+
+#--------------------------------------------------------------------------------------------------
+# testing
+
+def tester():
+    pass
+
+if __name__=="__main__":
+
+    tester()

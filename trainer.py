@@ -61,3 +61,13 @@ class Trainer:
             plot_sample(save_dir, batch[0], output, batch[2], batch[3], epoch)
 
         plot_loss(save_dir, losses, epoch+1)
+
+#--------------------------------------------------------------------------------------------------
+# testing
+
+def tester():
+    pass
+
+if __name__=="__main__":
+
+    tester()

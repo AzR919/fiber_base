@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-01-08_00_DNase_msp_w_aq_new_ccre
+#SBATCH --job-name=2026-01-15_00_atac_fiber_conv_model
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -38,9 +38,9 @@ source /home/azr/lab/misc/menv/bin/activate
 # Run the training
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF743ULW_DNase.bigWig \
-    --batch_size 8 --epochs 100 --model simple --fibers_per_entry 200 \
-    --res_dir ./results --name_suffix dnase_msp_w_aq_new_ccre
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
+    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 \
+    --res_dir ./results --name_suffix atac_fiber_conv_model
 
 # Print job completion time
 echo "Job finished on $(date)"

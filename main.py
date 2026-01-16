@@ -5,31 +5,15 @@ Main file
 
 import os
 import sys
-import datetime
 
 from args import get_args
 from data_utils import fiber_data_iterator
 from trainer import Trainer
-from models import *
+from models import model_selector
 from utils import *
 
-def create_save_str(args):
-
-    now = datetime.datetime.now()
-    now = now.strftime("%y-%m-%d_T%H-%M-%S")
-
-    save_str = f"{now}_{args.name_suffix}"
-
-    return save_str
-
-def model_selector(model_arg, args):
-
-    model_name = model_arg.lower()
-
-    if model_name=="base": return Base_Model(args.fibers_per_entry)
-    if model_name=="simple": return Simple_Add_CNN_Model(args.fibers_per_entry)
-
-    raise NotImplementedError(f"Model not implemented: {model_arg}")
+#--------------------------------------------------------------------------------------------------
+# Main
 
 def main():
 
