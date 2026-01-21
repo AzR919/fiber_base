@@ -86,20 +86,20 @@ class Per_Fiber_Conv_Model(nn.Module):
         super().__init__()
 
         # 1. Input is (B, 1, L, d_fibers)
-        # We use a kernel of (1, K) to process each fiber independently
+        # We use a kernel of (K, 1) to process each fiber independently
         self.fiber_conv = nn.Sequential(
             nn.Conv2d(1, d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
             nn.BatchNorm2d(d_model),
             nn.ReLU(),
-            nn.Conv2d(d_model, d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
-            nn.BatchNorm2d(d_model),
+            nn.Conv2d(d_model, 1, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
+            nn.BatchNorm2d(1),
             nn.ReLU()
         )
 
         # 2. After processing fibers, we aggregate (Mean/Sum) and refine
-        # Now we are back to 1D: (B, d_model, L)
+        # Now we are back to 1D
         self.bulk_predictor = nn.Sequential(
-            nn.Conv1d(d_model, d_model, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.Conv1d(1, d_model, kernel_size=kernel_size, padding=kernel_size//2),
             nn.ReLU(),
             nn.Conv1d(d_model, 1, kernel_size=1),
             nn.Softplus() # Ensures positive bulk signal
@@ -109,19 +109,19 @@ class Per_Fiber_Conv_Model(nn.Module):
         # fibers: (B, L, N), dna: (B, L, 4)
 
         # Add channel dimension for 2D Conv
-        x = fibers.unsqueeze(1)         # (B, 1, L, N)
+        x = fibers.unsqueeze(1)                             # (B, 1, L, N)
 
         # Apply fiber-wise convolutions
-        x = self.fiber_conv(x)          # (B, d_model, L, N)
+        processed_fibers = self.fiber_conv(x)               # (B, 1, L, N)
 
-        # Aggregate across fibers (L dimension)
+        # Aggregate across fibers (N dimension)
         # This converts single-molecule features into a summary feature map
-        x = torch.mean(x, dim=-1)        # (B, d_model, L)
+        y = torch.sum(processed_fibers, dim=-1)            # (B, 1, L)
 
         # Final refinement to predict bulk
-        out = self.bulk_predictor(x)      # (B, 1, L)
+        out = self.bulk_predictor(y)                        # (B, 1, L)
 
-        return out.squeeze(1)           # (B, L)
+        return out.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
 
 #--------------------------------------------------------------------------------------------------
 # model selection based on cmd arg
