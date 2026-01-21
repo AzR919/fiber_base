@@ -109,6 +109,77 @@ def plot_sample(dir, inp, out, tar, locus, extra, plot_sum=False):
 
     plt.close()
 
+def plot_sample_out_fibers(dir, inp, out, out_fibers, tar, locus, extra, plot_sum=False):
+    """
+    out_fibers: Predicted assay per fiber (B, L, N)
+    """
+    chr, start, end = locus[0][0], locus[1][0], locus[2][0]
+    os.makedirs(dir, exist_ok=True)
+    save_path = os.path.join(dir, f"Epoch_{extra}.png")
+
+    # Adjusted height ratios to include the new per-fiber prediction plot
+    # ratios: Target, (Pseudo-bulk), Input Fibers, Output Fibers
+    if plot_sum:
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12), sharex=True,
+                                            gridspec_kw={'height_ratios': [1, 1, 4, 4]})
+    else:
+        fig, (ax1, ax3, ax4) = plt.subplots(3, 1, figsize=(12, 10), sharex=True,
+                                            gridspec_kw={'height_ratios': [1, 4, 4]})
+
+    # 1. Top: Bulk Assay (Target vs Model Bulk Output)
+    ax1.plot(tar[0].cpu(), color='black', alpha=0.7, label='Target Bulk')
+    ax1.plot(out[0].cpu().detach(), color='orange', alpha=0.7, label='Model Bulk Output')
+    ax1.set_ylabel("Signal")
+    ax1.set_title(f"Model Prediction {chr}:{start}-{end}")
+    ax1.legend()
+
+    if plot_sum:
+        # 2. Mid: Simple sum of m6as (Input Signal Density)
+        pseudo_bulk_m6a = torch.sum(inp, dim=-1)
+        ax2.plot(pseudo_bulk_m6a[0].cpu(), color='steelblue', alpha=0.7)
+        ax2.set_ylabel("Sum m6A")
+
+    # Helper function to plot binary "runs" to avoid duplicating code
+    def plot_stretches(ax, data_matrix, row_idx, threshold, color, invert=False):
+        fiber = data_matrix[0, :, row_idx].cpu().detach()
+        if invert:
+            masked = (fiber < -threshold).float()
+        else:
+            masked = (fiber > threshold).float()
+
+        diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
+        starts = torch.where(diff == 1)[0]
+        ends = torch.where(diff == -1)[0]
+
+        for s, e in zip(starts, ends):
+            if e > s:
+                ax.axhspan(-row_idx - 0.3, -row_idx + 0.3,
+                           xmin=(s/len(fiber)).item(), xmax=(e/len(fiber)).item(),
+                           color=color, alpha=0.3, zorder=1)
+
+    # 3. Input Fibers Plot
+    for i in range(inp.shape[2]):
+        plot_stretches(ax3, inp, i, 0.5, 'blue')   # MSPs
+        plot_stretches(ax3, inp, i, 0.5, 'green', invert=True) # Nucleosomes
+
+    ax3.set_ylabel("Input Fibers (m6A)")
+    ax3.set_ylim(-inp.shape[2] - 0.5, 0.5)
+
+    # 4. Output Predicted Fibers Plot
+    # We threshold the model's fiber-wise prediction to see where it "thinks" accessibility is
+    for i in range(out_fibers.shape[2]):
+        # Using a 0.5 threshold as requested; adjust if your model output is scaled differently
+        plot_stretches(ax4, out_fibers, i, 0.5, 'orange')
+
+    ax4.set_ylabel("Predicted Fibers (Assay)")
+    ax4.set_xlabel("Genomic Position")
+    ax4.set_ylim(-out_fibers.shape[2] - 0.5, 0.5)
+    ax4.set_xlim(0, inp.shape[1])
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
 def plot_loss(dir, losses, extra):
 
     os.makedirs(dir, exist_ok=True)

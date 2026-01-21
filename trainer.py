@@ -32,7 +32,7 @@ class Trainer:
         self.model.train()
         m6as, dna, target = [b.to(self.device) for b in batch[:3]]
         self.optimizer.zero_grad()
-        output = self.model(m6as, dna)
+        output, processed_fibers = self.model(m6as, dna)
         loss = self.criterion(output, target)
         if torch.isnan(output).any().item() or torch.isnan(loss):
             torch.save(output, "./ignore/output.pt")
@@ -41,7 +41,7 @@ class Trainer:
             exit(-1)
         loss.backward()
         self.optimizer.step()
-        return loss.item(), output
+        return loss.item(), output, processed_fibers
 
     def train(self, save_dir):
 
@@ -51,14 +51,14 @@ class Trainer:
         for epoch in range(self.epochs):
             total_loss = 0
             for batch in loader:
-                loss, output = self.train_step(batch)
+                loss, output, processed_fibers = self.train_step(batch)
                 total_loss += loss
             avg_loss = total_loss / self.iters_per_epoch
             self.scheduler.step(avg_loss)
             print(f"Epoch {epoch}, Loss: {avg_loss:.6f}")
             losses.append(avg_loss)
 
-            plot_sample(save_dir, batch[0], output, batch[2], batch[3], epoch)
+            plot_sample_out_fibers(save_dir, batch[0], output, processed_fibers, batch[2], batch[3], epoch)
 
         plot_loss(save_dir, losses, epoch+1)
 
