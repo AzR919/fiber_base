@@ -21,6 +21,11 @@ def get_args():
                            default=2048)
     data_group.add_argument("--fibers_per_entry", type=int,
                              default=32)
+    data_group.add_argument("--input_flags", type=str, default="1",
+                            help="binary indicators of what to use as input." \
+                            "1: m6a, 2: cpg, 3: msp, 4: nuc, 5: fire_msp")
+    data_group.add_argument("--num_input_features", type=int, default=0,
+                            help="computed at runtime")
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")
@@ -51,7 +56,12 @@ def get_args():
                             help='Enable debug mode with extra logging')
     misc_group.add_argument('--seed', type=int, default=919)
 
-    return parser.parse_args()
+    parsed_args = parser.parse_args()
+    parsed_args.input_flags = int(parsed_args.input_flags, 2)
+    parsed_args.num_input_features = parsed_args.input_flags.bit_count()
+
+    return parsed_args
+
 
 #--------------------------------------------------------------------------------------------------
 # testing

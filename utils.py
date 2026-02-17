@@ -158,23 +158,30 @@ def plot_sample_out_fibers(dir, inp, out, out_fibers, tar, locus, extra, plot_su
                            color=color, alpha=0.3, zorder=1)
 
     # 3. Input Fibers Plot
-    for i in range(inp.shape[2]):
-        plot_stretches(ax3, inp, i, 0.5, 'blue')   # MSPs
-        plot_stretches(ax3, inp, i, 0.5, 'green', invert=True) # Nucleosomes
+    for i in range(inp.shape[-1]):
+        plot_stretches(ax3, inp[2], i, 0.5, 'blue')     # msp
+        plot_stretches(ax3, inp[3], i, 0.5, 'green')    # nuc
+        plot_stretches(ax3, inp[4], i, 0.5, 'red')      # fire_msp
 
-    ax3.set_ylabel("Input Fibers (m6A)")
-    ax3.set_ylim(-inp.shape[2] - 0.5, 0.5)
+    ax3.set_ylabel("Input Fibers")
+    ax3.set_ylim(-inp.shape[-1] - 0.5, 0.5)
 
-    # 4. Output Predicted Fibers Plot
-    # We threshold the model's fiber-wise prediction to see where it "thinks" accessibility is
-    for i in range(out_fibers.shape[2]):
-        # Using a 0.5 threshold as requested; adjust if your model output is scaled differently
-        plot_stretches(ax4, out_fibers, i, 0.5, 'orange')
+    # 4. Output Predicted Fibers (Heatmap)
+    # out_fibers is (B, L, N). We take the first batch and transpose to (N, L)
+    # Transpose so that each row is a fiber
+    pred_matrix = out_fibers[0].cpu().detach().numpy().T
 
-    ax4.set_ylabel("Predicted Fibers (Assay)")
-    ax4.set_xlabel("Genomic Position")
-    ax4.set_ylim(-out_fibers.shape[2] - 0.5, 0.5)
-    ax4.set_xlim(0, inp.shape[1])
+    # We use 'Oranges' colormap to match your bulk output color
+    img = ax4.imshow(pred_matrix, aspect='auto',
+                     interpolation='nearest', origin='upper',
+                     extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
+
+    # Add a small colorbar for the heatmap
+    plt.colorbar(img, ax=ax4, fraction=0.02, pad=0.01, label='Imputed Heatmap')
+
+    ax4.set_ylabel("Predicted Assay Fibers")
+    ax4.set_xlabel("Genomic Position (bp)")
+    ax4.set_xlim(0, inp.shape[2])
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')

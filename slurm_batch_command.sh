@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-01-15_00_atac_fiber_conv_model
+#SBATCH --job-name=2026-02-12_00_all_input_fiber_conv
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -38,9 +38,9 @@ source /home/azr/lab/misc/menv/bin/activate
 # Run the training
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
-    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 \
-    --res_dir ./results --name_suffix atac_fiber_conv_model
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF798KYP_H3K27ac.bigWig \
+    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 --input_flags 11111 \
+    --res_dir ./results --name_suffix all_input_fiber_conv
 
 # Print job completion time
 echo "Job finished on $(date)"

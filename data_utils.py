@@ -21,8 +21,9 @@ class fiber_data_iterator(IterableDataset):
 
     def __init__(self, fiber_data_path, other_bw,
                  fibers_per_entry, context_length,
-                 iters_per_epoch, fasta_path, ccre_path,
-                 chr_sizes_file=None):
+                 iters_per_epoch, fasta_path,
+                 input_flags,
+                 ccre_path, chr_sizes_file=None):
 
         self.fiber_bam = pyft.Fiberbam(fiber_data_path)
         self.other_bw = pyBigWig.open(other_bw)
@@ -35,6 +36,22 @@ class fiber_data_iterator(IterableDataset):
         self.load_genomic_coords(chr_sizes_file)
 
         self.load_ccres(ccre_path)
+
+        self.flags = input_flags
+        # Map bit positions to functions
+        self.feature_map = {
+            1: self.get_m6a,
+            2: self.get_cpg,
+            4: self.get_msp,
+            8: self.get_nuc,
+            16: self.get_fire_msp,
+        }
+
+        # Pre-determine which functions to run once at startup
+        self.input_features = [
+            func for bit, func in self.feature_map.items()
+            if bit & self.flags
+        ]
 
     def load_fasta(self, fasta_path):
 
@@ -149,10 +166,92 @@ class fiber_data_iterator(IterableDataset):
 
         return ccre_chrom, int(random_start), int(random_end)
 
+    def get_m6a(self, fiber, start, end, Q_THRESHOLD=200):
+
+        m6a_data = np.zeros((self.context_length), dtype=np.float32)
+
+        # for ref_pos, aq in zip(fiber.m6a.reference_starts, fiber.m6a.ml):
+        #     if ref_pos is None: continue
+        #     if start <= ref_pos < end and aq >= Q_THRESHOLD:
+        #         m6a_data[ref_pos-start:ref_pos-start+len] = 1
+
+        # 1. Convert lists to numpy arrays
+        ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
+        qualities = np.array(fiber.m6a.ml, dtype=np.float32)
+
+        # 2. Create a boolean mask for everything that passes the filters
+        # - Within the genomic window
+        # - Above the quality threshold
+        # - Not None (numpy handles this well if converted correctly)
+        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
+
+        # 3. Extract the passing positions and calculate their relative offsets
+        valid_positions = (ref_starts[mask] - start).astype(np.int32)
+
+        # 4. Use "Fancy Indexing" to set all 1s at once
+        m6a_data[valid_positions] = 1
+
+        return m6a_data
+
+    def get_cpg(self, fiber, start, end, Q_THRESHOLD=200):
+
+        cpg_data = np.zeros((self.context_length), dtype=np.float32)
+
+        # 1. Convert lists to numpy arrays
+        ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
+        qualities = np.array(fiber.cpg.ml, dtype=np.float32)
+
+        # 2. Create a boolean mask for everything that passes the filters
+        # - Within the genomic window
+        # - Above the quality threshold
+        # - Not None (numpy handles this well if converted correctly)
+        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
+
+        # 3. Extract the passing positions and calculate their relative offsets
+        valid_positions = (ref_starts[mask] - start).astype(np.int32)
+
+        # 4. Use "Fancy Indexing" to set all 1s at once
+        cpg_data[valid_positions] = 1
+
+        return cpg_data
+
+    def get_msp(self, fiber, start, end, Q_THRESHOLD=0):
+
+        msp_data = np.zeros((self.context_length), dtype=np.float32)
+
+        for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
+            if ref_pos is None: continue
+            if start <= ref_pos < end and aq >= Q_THRESHOLD:
+                msp_data[ref_pos-start:ref_pos-start+len] = 1
+
+        return msp_data
+
+    def get_nuc(self, fiber, start, end, Q_THRESHOLD=0):
+
+        nuc_data = np.zeros((self.context_length), dtype=np.float32)
+
+        for ref_pos, len, aq in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths, fiber.nuc.qual):
+            if ref_pos is None: continue
+            if start <= ref_pos < end and aq >= Q_THRESHOLD:
+                nuc_data[ref_pos-start:ref_pos-start+len] = 1
+
+        return nuc_data
+
+    def get_fire_msp(self, fiber, start, end, Q_THRESHOLD=200):
+
+        fire_msp_data = np.zeros((self.context_length), dtype=np.float32)
+
+        for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
+            if ref_pos is None: continue
+            if start <= ref_pos < end and aq >= Q_THRESHOLD:
+                fire_msp_data[ref_pos-start:ref_pos-start+len] = 1
+
+        return fire_msp_data
+
     def get_fiber_data(self, chrom, start, end):
 
         AQ_THRESHOLD = 200
-        fibers = np.zeros((self.fibers_per_entry, self.context_length), dtype=np.float32)
+        fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
 
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bam.fetch(chrom, start, end)
@@ -160,27 +259,10 @@ class fiber_data_iterator(IterableDataset):
         for i, fiber in enumerate(possible_fibers):
             if i == self.fibers_per_entry: break
 
-            data = np.zeros((2048), dtype=np.float32)
+            single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
+            fibers_tensor[i] = single_fiber_data
 
-            for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
-                if ref_pos is None: continue
-                if start <= ref_pos < end and aq >= AQ_THRESHOLD:
-                    data[ref_pos-start:ref_pos-start+len] = 1
-
-            fibers[i] += data
-
-            # data_nuc = np.zeros((2048), dtype=np.float32)
-
-            # for ref_pos, len in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths):
-            #     if ref_pos is None: continue
-            #     if start <= ref_pos < end:
-            #         data_nuc[ref_pos-start:ref_pos-start+len] = -1
-
-            # fibers[i] += data_nuc
-
-        fibers_tensor = torch.from_numpy(np.array(fibers))
-
-        return fibers_tensor.T
+        return torch.from_numpy(fibers_tensor).permute(1,2,0)
 
     def get_other_bw_data(self, chrom, start, end):
 

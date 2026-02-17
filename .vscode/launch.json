@@ -23,6 +23,7 @@
                 "--fibers_per_entry", "200",
                 "--res_dir", "./results",
                 "--name_suffix", "debug",
+                "--input_flags", "11111"
             ]
         },
         {

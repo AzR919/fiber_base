@@ -3,6 +3,7 @@ File for random testing.
 Should not be in the final version
 """
 
+import wandb
 import pyft
 import pysam
 import torch
@@ -13,7 +14,6 @@ from args import get_args
 from models import Base_Model, Simple_Add_CNN_Model
 
 from utils import *
-
 
 def tester_2():
 
@@ -93,19 +93,42 @@ def tester_1():
 
 def tester_0():
 
+    run = wandb.init(
+        # Set the wandb entity where your project will be logged (generally your team name).
+        entity="liblab",
+        # Set the wandb project where this run will be logged.
+        project="Fiber",
+        name="test_run_2",
+        # Track hyperparameters and run metadata.
+        config={
+            "learning_rate": 0.02,
+            "architecture": "none",
+            "dataset": "none",
+            "epochs": 10,
+        },
+    )
+
     args = get_args()
 
-    in_t = torch.load("./ignore/input.pt", map_location=torch.device('cpu'))
-    out_t = torch.load("./ignore/output.pt", map_location=torch.device('cpu'))
-    tar_t = torch.load("./ignore/target.pt", map_location=torch.device('cpu'))
+    in_t = torch.rand(2,32,4)
+
+    # in_t = torch.load("./ignore/input.pt", map_location=torch.device('cpu'))
+    # out_t = torch.load("./ignore/output.pt", map_location=torch.device('cpu'))
+    # tar_t = torch.load("./ignore/target.pt", map_location=torch.device('cpu'))
 
     model = Simple_Add_CNN_Model(200)
 
+    run.watch(model)
+
     mod_out = model(in_t, None)
+
+    run.log({"random":mod_out})
+    run.finish()
 
     print("All_Done")
 
 if __name__=="__main__":
-    # tester_0()
-    tester_1()
+    tester_0()
+    # tester_1()
     # tester_2()
+    pass

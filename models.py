@@ -29,7 +29,7 @@ class Base_Model(nn.Module):
         x2 = self.conv_dna(dna.permute(0, 2, 1))            # (B, d/2, L)
         x = torch.cat([x1, x2], dim=1).permute(2, 0, 1)     # (L, B, d)
         x = self.transformer(x)                             # (L, B, d)
-        return self.regressor(x).squeeze(-1).permute(1, 0)  # (B, L)
+        return self.regressor(x).squeeze(-1).permute(1, 0), fibers  # (B, L)
 
 class Simple_Add_CNN_Model(nn.Module):
     """
@@ -82,13 +82,13 @@ class Per_Fiber_Conv_Model(nn.Module):
     Simple conv transformer model
 
     """
-    def __init__(self, d_fibers, d_model=64, kernel_size=15):
+    def __init__(self, num_input_features=1, d_model=64, kernel_size=15):
         super().__init__()
 
-        # 1. Input is (B, 1, L, d_fibers)
+        # 1. Input is (B, num_input_features, L, d_fibers)
         # We use a kernel of (K, 1) to process each fiber independently
         self.fiber_conv = nn.Sequential(
-            nn.Conv2d(1, d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
+            nn.Conv2d(num_input_features, d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
             nn.BatchNorm2d(d_model),
             nn.ReLU(),
             nn.Conv2d(d_model, 1, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
@@ -109,10 +109,10 @@ class Per_Fiber_Conv_Model(nn.Module):
         # fibers: (B, L, N), dna: (B, L, 4)
 
         # Add channel dimension for 2D Conv
-        x = fibers.unsqueeze(1)                             # (B, 1, L, N)
+        # x = fibers.unsqueeze(1)                             # (B, 1, L, N)
 
         # Apply fiber-wise convolutions
-        processed_fibers = self.fiber_conv(x)               # (B, 1, L, N)
+        processed_fibers = self.fiber_conv(fibers)               # (B, C, L, N)
 
         # Aggregate across fibers (N dimension)
         # This converts single-molecule features into a summary feature map
@@ -123,6 +123,13 @@ class Per_Fiber_Conv_Model(nn.Module):
 
         return out.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
 
+class Transformer_Model(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+
+
 #--------------------------------------------------------------------------------------------------
 # model selection based on cmd arg
 
@@ -132,7 +139,7 @@ def model_selector(model_arg, args):
 
     if model_name=="base": return Base_Model(args.fibers_per_entry)
     if model_name=="simple": return Simple_Add_CNN_Model(args.fibers_per_entry)
-    if model_name=="fiber_conv": return Per_Fiber_Conv_Model(args.fibers_per_entry)
+    if model_name=="fiber_conv": return Per_Fiber_Conv_Model(args.num_input_features, d_model=8)
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 

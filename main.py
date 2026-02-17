@@ -26,6 +26,7 @@ def main():
     data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
             fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
             iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
+            input_flags=args.input_flags,
             ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed")
 
     model = model_selector(args.model, args)
