@@ -37,20 +37,19 @@ class fiber_data_iterator(IterableDataset):
 
         self.load_ccres(ccre_path)
 
-        self.flags = input_flags
+        self.input_flags = input_flags
         # Map bit positions to functions
-        self.feature_map = {
-            1: self.get_m6a,
-            2: self.get_cpg,
-            4: self.get_msp,
-            8: self.get_nuc,
-            16: self.get_fire_msp,
-        }
+        feature_map = [
+            self.get_m6a,
+            self.get_cpg,
+            self.get_msp,
+            self.get_nuc,
+            self.get_fire_msp,
+        ]
 
         # Pre-determine which functions to run once at startup
         self.input_features = [
-            func for bit, func in self.feature_map.items()
-            if bit & self.flags
+            feature_map[i] for i in range(5) if self.input_flags[i]
         ]
 
     def load_fasta(self, fasta_path):

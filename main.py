@@ -31,7 +31,7 @@ def main():
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, data_iterator, epochs=args.epochs, batch_size=args.batch_size)
+    trainer = Trainer(model, data_iterator, epochs=args.epochs, batch_size=args.batch_size, run_name=args.name_suffix, config=args)
 
     trainer.train(save_dir=res_dir)
 

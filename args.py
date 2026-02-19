@@ -21,9 +21,9 @@ def get_args():
                            default=2048)
     data_group.add_argument("--fibers_per_entry", type=int,
                              default=32)
-    data_group.add_argument("--input_flags", type=str, default="1",
+    data_group.add_argument("--input_flags", type=int, nargs="+", default=[1,1,1,1,1],
                             help="binary indicators of what to use as input." \
-                            "1: m6a, 2: cpg, 3: msp, 4: nuc, 5: fire_msp")
+                            "0: m6a, 1: cpg, 2: msp, 3: nuc, 4: fire_msp")
     data_group.add_argument("--num_input_features", type=int, default=0,
                             help="computed at runtime")
 
@@ -57,8 +57,7 @@ def get_args():
     misc_group.add_argument('--seed', type=int, default=919)
 
     parsed_args = parser.parse_args()
-    parsed_args.input_flags = int(parsed_args.input_flags, 2)
-    parsed_args.num_input_features = parsed_args.input_flags.bit_count()
+    parsed_args.num_input_features = sum(parsed_args.input_flags)
 
     return parsed_args
 
