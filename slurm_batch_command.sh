@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-02-12_00_all_input_fiber_conv
+#SBATCH --job-name=2026-02-18_00_atac_seq_fire_msp_high_d_mid
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-3:00:00  # 0 days, 23 hours, 59 minutes
+#SBATCH --time=0-3:00:00  # 0 days, 3 hours, 0 minutes
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -38,9 +38,9 @@ source /home/azr/lab/misc/menv/bin/activate
 # Run the training
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF798KYP_H3K27ac.bigWig \
-    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 --input_flags 11111 \
-    --res_dir ./results --name_suffix all_input_fiber_conv
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
+    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 --input_flags 0 0 0 0 1 \
+    --res_dir ./results --name_suffix atac_seq_back_to_fire_msp_high_d_midd
 
 # Print job completion time
 echo "Job finished on $(date)"

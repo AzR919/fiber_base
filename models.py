@@ -91,19 +91,21 @@ class Per_Fiber_Conv_Model(nn.Module):
             nn.Conv2d(num_input_features, d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
             nn.BatchNorm2d(d_model),
             nn.ReLU(),
-            nn.Conv2d(d_model, 1, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
-            nn.BatchNorm2d(1),
-            nn.ReLU()
+            nn.Conv2d(d_model, 2*d_model, kernel_size=(kernel_size, 1), padding=(kernel_size//2, 0)),
+            nn.BatchNorm2d(2*d_model),
+            nn.ReLU() # TODO: GELU
         )
+        # TODO: 2 input branches. conditional autoencoder. Multiple instance learning
 
         # 2. After processing fibers, we aggregate (Mean/Sum) and refine
         # Now we are back to 1D
         self.bulk_predictor = nn.Sequential(
-            nn.Conv1d(1, d_model, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.Conv1d(2*d_model, d_model, kernel_size=kernel_size, padding=kernel_size//2),
             nn.ReLU(),
             nn.Conv1d(d_model, 1, kernel_size=1),
             nn.Softplus() # Ensures positive bulk signal
         )
+        # TODO: second branch
 
     def forward(self, fibers, dna):
         # fibers: (B, L, N), dna: (B, L, 4)
@@ -121,7 +123,8 @@ class Per_Fiber_Conv_Model(nn.Module):
         # Final refinement to predict bulk
         out = self.bulk_predictor(y)                        # (B, 1, L)
 
-        return out.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
+        # return out.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
+        return out.squeeze(1), processed_fibers.mean(1)  # (B, L), (B, L, N)
 
 class Transformer_Model(nn.Module):
 
