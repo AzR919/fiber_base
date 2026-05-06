@@ -41,7 +41,7 @@ def try_1():
         if read.is_secondary or read.is_supplementary:
             continue
         read_start, read_end = read.reference_start, read.reference_end
-        
+
         # Extract m6A positions (from MM/ML tags; see PacBio BAM spec)
         m6a_positions = []
         if 'MM' in read.tags and 'ML' in read.tags:
@@ -52,7 +52,7 @@ def try_1():
                 for i, offset in enumerate(offsets):
                     if ml[i] > 200:  # Threshold for high-confidence m6A (adjust based on papers, e.g., >90% prob)
                         m6a_positions.append(read_start + offset)
-        
+
         fibers.append((read.query_name, read_start, read_end, m6a_positions))
 
     samfile.close()
@@ -120,7 +120,7 @@ def try_2():
             if ref_pos is None: continue
             if start <= ref_pos <= end and ml >= ML_THRESHOLD:
                 m6a_ref.append(ref_pos)
-        
+
         if len(m6a_ref) == 0:
             continue
 
