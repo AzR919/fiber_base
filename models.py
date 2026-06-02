@@ -128,6 +128,48 @@ class Per_Fiber_Conv_Model(nn.Module):
         # return out.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
         return y.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
 
+class FiberConv1dBlock(nn.Module):
+    def __init__(self, num_input_features=1, d_model=64, kernel_size=15):
+        super().__init__()
+
+        # Input to Conv1d expects (Batch, Channels, Length)
+        # We use standard padding to preserve the Length (L) dimension
+        self.fiber_conv = nn.Sequential(
+            nn.Conv1d(num_input_features, d_model, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.BatchNorm1d(d_model),
+            nn.GELU(),
+            nn.Conv1d(d_model, 2*d_model, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.BatchNorm1d(2*d_model),
+            nn.GELU(),
+            # Last layer maps back to 1 channel per fiber
+            nn.Conv1d(2*d_model, 1, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.GELU()
+        )
+
+    def forward(self, x, dna):
+        """
+        x: Input tensor of shape (B, C, L, N)
+        """
+        B, C, L, N = x.shape
+
+        # 1. Permute to get dimensions ready for flattening: (B, N, C, L)
+        # 2. Reshape to combine Batch and Fiber count: (B * N, C, L)
+        x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
+
+        # 3. Pass through the 1D Convolutional pipeline
+        # Output shape: (B * N, 1, L)
+        out_flat = self.fiber_conv(x_flat)
+
+        # 4. Reconstruct original dimensions:
+        # Separate B and N again -> (B, N, 1, L)
+        # Permute back to the (B, C, L, N) format -> (B, 1, L, N)
+        processed_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
+
+        # y = torch.sum(processed_fibers, dim=-1)            # (B, L)
+        y = torch.mean(processed_fibers, dim=-1)            # (B, L)
+
+        return y, processed_fibers
+
 class FiberTransformerVAE(nn.Module):
     def __init__(self, n_channels=5, d_model=256, nhead=8, num_enc_layers=4, num_dec_layers=4, latent_seq_len=128):
         super().__init__()
@@ -201,7 +243,8 @@ def model_selector(model_arg, args):
 
     if model_name=="base": return Base_Model(args.fibers_per_entry)
     if model_name=="simple": return Simple_Add_CNN_Model(args.fibers_per_entry)
-    if model_name=="fiber_conv": return Per_Fiber_Conv_Model(args.num_input_features, d_model=8)
+    if model_name=="fiber_conv": return Per_Fiber_Conv_Model(args.num_input_features, d_model=args.d_model)
+    if model_name=="fiber_conv_1d": return FiberConv1dBlock(args.num_input_features, d_model=args.d_model)
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 
