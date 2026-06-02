@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-02-18_00_atac_seq_fire_msp_high_d_mid
+#SBATCH --job-name=2026-06-02_06_atac_fire_avg_new_plot
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -39,8 +39,8 @@ source /home/azr/lab/misc/menv/bin/activate
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
     --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
-    --batch_size 8 --epochs 100 --model fiber_conv --fibers_per_entry 200 --input_flags 0 0 0 0 1 \
-    --res_dir ./results --name_suffix atac_seq_back_to_fire_msp_high_d_midd
+    --batch_size 8 --epochs 25 --model fiber_conv_1d --fibers_per_entry 200 --input_flags 0 0 0 0 1 \
+    --res_dir ./results --name_suffix atac_fire_avg_new_plot
 
 # Print job completion time
 echo "Job finished on $(date)"
