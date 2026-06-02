@@ -31,6 +31,8 @@ def get_args():
     model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument("--model", type=str,
                              default="base")
+    model_group.add_argument("--d_model", type=int,
+                             default=32)
 
     # Train
     trainer_group = parser.add_argument_group("Model Architecture")
