@@ -129,7 +129,7 @@ class Per_Fiber_Conv_Model(nn.Module):
         return y.squeeze(1), processed_fibers.squeeze(1)  # (B, L), (B, L, N)
 
 class FiberConv1dBlock(nn.Module):
-    def __init__(self, num_input_features=1, d_model=64, kernel_size=15):
+    def __init__(self, num_input_features=1, decoder_type="avg", d_model=64, kernel_size=15):
         super().__init__()
 
         # Input to Conv1d expects (Batch, Channels, Length)
@@ -145,6 +145,8 @@ class FiberConv1dBlock(nn.Module):
             nn.Conv1d(2*d_model, 1, kernel_size=kernel_size, padding=kernel_size//2),
             nn.GELU()
         )
+
+        self.decoder_type = decoder_type
 
     def forward(self, x, dna):
         """
@@ -165,8 +167,12 @@ class FiberConv1dBlock(nn.Module):
         # Permute back to the (B, C, L, N) format -> (B, 1, L, N)
         processed_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
 
-        # y = torch.sum(processed_fibers, dim=-1)            # (B, L)
-        y = torch.mean(processed_fibers, dim=-1)            # (B, L)
+        if self.decoder_type == "sum":
+            y = torch.sum(processed_fibers, dim=-1)             # (B,L,N) -> (B, L)
+        elif self.decoder_type == "avg":
+            y = torch.mean(processed_fibers, dim=-1)            # (B,L,N) -> (B, L)
+        else:
+            raise NotImplementedError(f"decoder_type not implemented: {self.decoder_type}")
 
         return y, processed_fibers
 
@@ -244,7 +250,7 @@ def model_selector(model_arg, args):
     if model_name=="base": return Base_Model(args.fibers_per_entry)
     if model_name=="simple": return Simple_Add_CNN_Model(args.fibers_per_entry)
     if model_name=="fiber_conv": return Per_Fiber_Conv_Model(args.num_input_features, d_model=args.d_model)
-    if model_name=="fiber_conv_1d": return FiberConv1dBlock(args.num_input_features, d_model=args.d_model)
+    if model_name=="fiber_conv_1d": return FiberConv1dBlock(args.num_input_features, d_model=args.d_model, decoder_type=args.decoder_type)
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 

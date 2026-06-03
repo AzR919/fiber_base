@@ -33,6 +33,8 @@ def get_args():
                              default="base")
     model_group.add_argument("--d_model", type=int,
                              default=32)
+    model_group.add_argument("--decoder_type", type=str,
+                             default="avg")
 
     # Train
     trainer_group = parser.add_argument_group("Model Architecture")
