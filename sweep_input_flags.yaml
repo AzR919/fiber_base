@@ -1,0 +1,42 @@
+project: Fiber
+entity: liblab
+name: input_flags_sweep
+program: main.py
+method: grid
+
+metric:
+  name: train_loss
+  goal: minimize
+
+parameters:
+  # Individual binary choices for clean hyperparameter tracking panels
+  m6a:
+    values: [0, 1]
+  cpg:
+    values: [0, 1]
+  msp:
+    values: [0, 1]
+  nuc:
+    values: [0, 1]
+  fire_msp:
+    values: [0, 1]
+
+  # Regular Sweep Constants
+  batch_size:
+    value: 8
+  epochs:
+    value: 25
+  model:
+    value: "fiber_conv_1d"
+  fibers_per_entry:
+    value: 200
+  res_dir:
+    value: "./results"
+  decoder_type:
+    value: "avg"
+  name_suffix:
+    value: "sweep_avg"
+  fiber_data_path:
+    value: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram"
+  other_data_path:
+    value: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig"

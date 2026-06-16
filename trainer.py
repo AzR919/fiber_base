@@ -29,6 +29,9 @@ class Trainer:
         )
         self.criterion = nn.MSELoss()
 
+        if "sweep" in run_name.lower():
+            run_name += self.run_name_sup(config.input_flags)
+
         self.wandb_run = wandb.init(
             # Set the wandb entity where your project will be logged (generally your team name).
             entity="liblab",
@@ -43,6 +46,12 @@ class Trainer:
         wandb.define_metric("train_loss", step_metric="epoch")
 
         self.config = config
+
+        if sum(config.input_flags)==0:
+            print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
+            # Initialize and exit so W&B registers it as complete but doesn't burn GPU time
+            wandb.log({"train_loss": float('inf'), "epoch": 0}) # Give it a bad score so optimizer avoids it
+            sys.exit(0)
 
     def train_step(self, batch):
 
@@ -80,6 +89,19 @@ class Trainer:
             plot_sample_out_fibers_wandb(self.wandb_run, save_dir, batch[0], self.config.input_flags, self.config.num_input_features, output, processed_fibers, batch[2], batch[3], epoch)
 
         plot_loss(save_dir, losses, epoch+1)
+
+    def run_name_sup(self, input_flags):
+
+        feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
+
+        sup_str = ""
+
+        for name, flag in zip(feature_names, input_flags):
+
+            if not flag: continue
+            sup_str+= f"_{name}"
+
+        return sup_str
 
 #--------------------------------------------------------------------------------------------------
 # testing
