@@ -284,6 +284,12 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
     # Bottom Right: Predicted Fiber Heatmap
     pred_matrix = out_fibers[0].cpu().detach().numpy().T
 
+    # inp_matrix = inp[0].cpu().detach().numpy()
+    # np.savez(f"./ignore/inp_fibers_{extra}.npz", inp_matrix)
+    # np.savez(f"./ignore/pred_fibers_{extra}.npz", pred_matrix)
+    # np.savez(f"./ignore/output_{extra}.npz", out[0].cpu().detach().numpy())
+    # np.savez(f"./ignore/target_{extra}.npz", tar[0].cpu().detach().numpy())
+
     img = ax_heat.imshow(pred_matrix, aspect='auto', cmap='magma',
                          interpolation='nearest', origin='upper',
                          extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
