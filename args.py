@@ -2,6 +2,8 @@
 File for argparsing
 """
 
+import os
+import sys
 import argparse
 
 def get_args():
@@ -24,6 +26,11 @@ def get_args():
     data_group.add_argument("--input_flags", type=int, nargs="+", default=[1,1,1,1,1],
                             help="binary indicators of what to use as input." \
                             "0: m6a, 1: cpg, 2: msp, 3: nuc, 4: fire_msp")
+    data_group.add_argument("--m6a", type=int, default=1, choices=[0, 1])
+    data_group.add_argument("--cpg", type=int, default=1, choices=[0, 1])
+    data_group.add_argument("--msp", type=int, default=1, choices=[0, 1])
+    data_group.add_argument("--nuc", type=int, default=1, choices=[0, 1])
+    data_group.add_argument("--fire_msp", type=int, default=1, choices=[0, 1])
     data_group.add_argument("--num_input_features", type=int, default=0,
                             help="computed at runtime")
 
@@ -35,6 +42,10 @@ def get_args():
                              default=32)
     model_group.add_argument("--decoder_type", type=str,
                              default="avg")
+    model_group.add_argument("--kernel_size", type=int,
+                             default=15)
+    model_group.add_argument("--dilation", type=int,
+                             default=1)
 
     # Train
     trainer_group = parser.add_argument_group("Model Architecture")
@@ -61,6 +72,11 @@ def get_args():
     misc_group.add_argument('--seed', type=int, default=919)
 
     parsed_args = parser.parse_args()
+    # -------------------------------------------------------------------------
+    # Recovery Code: Unpack the string back into your 5-element list of ints
+    # -------------------------------------------------------------------------
+    if "sweep" in parsed_args.name_suffix.lower():
+        parsed_args.input_flags = [parsed_args.m6a, parsed_args.cpg, parsed_args.msp, parsed_args.nuc, parsed_args.fire_msp]
     parsed_args.num_input_features = sum(parsed_args.input_flags)
 
     return parsed_args
