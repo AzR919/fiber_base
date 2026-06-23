@@ -255,6 +255,145 @@ class FiberTransformerVAE(nn.Module):
         # Reshape back to (B, C, L, N)
         return logits.view(B, N, L, C).permute(0, 3, 2, 1)
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# =====================================================================
+# MODULE 1: INSTANCE ENCODER (Dilated CNN)
+# =====================================================================
+class InstanceEncoder(nn.Module):
+    def __init__(self, in_channels=5, hidden_channels=32, latent_channels=16):
+        super(InstanceEncoder, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels, hidden_channels, kernel_size=3, padding=1, dilation=1)
+        self.conv2 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=2, dilation=2)
+        self.conv3 = nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=4, dilation=4)
+        self.bottleneck = nn.Conv1d(hidden_channels, latent_channels, kernel_size=1)
+        self.layer_norm = nn.LayerNorm(latent_channels)
+        self.activation = nn.GELU()
+
+    def forward(self, x):
+        h = self.activation(self.conv1(x))
+        h = self.activation(self.conv2(h))
+        h = self.activation(self.conv3(h))
+        latent = self.bottleneck(h)
+        latent = latent.permute(0, 2, 1)
+        latent = self.layer_norm(latent)
+        return latent.permute(0, 2, 1)    # Output Shape: (Batch * N, latent_channels, d)
+
+
+# =====================================================================
+# MODULE 2: BAG AGGREGATOR (Set Transformer Components)
+# =====================================================================
+class InducedSetAttentionBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads, num_inducing_points=16):
+        super(InducedSetAttentionBlock, self).__init__()
+        self.num_inducing_points = num_inducing_points
+        self.inducing_points = nn.Parameter(torch.Tensor(1, num_inducing_points, embed_dim))
+        nn.init.xavier_uniform_(self.inducing_points)
+        self.mab1 = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+        self.mab2 = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+    def forward(self, X):
+        batch_size = X.size(0)
+        I = self.inducing_points.repeat(batch_size, 1, 1)
+        H, _ = self.mab1(I, X, X)
+        Out, _ = self.mab2(X, H, H)
+        return Out
+
+
+class SetTransformerAggregator(nn.Module):
+    def __init__(self, latent_channels, num_heads=4, num_inducing_points=16):
+        super(SetTransformerAggregator, self).__init__()
+        self.isab = InducedSetAttentionBlock(latent_channels, num_heads, num_inducing_points)
+
+    def forward(self, X, n_fibers):
+        B, N, C, d = X.shape
+        X = X.permute(0, 3, 1, 2).contiguous().view(B * d, N, C)
+        X_attn = self.isab(X)
+        consensus = X_attn.mean(dim=1)
+        consensus = consensus.view(B, d, C).permute(0, 2, 1)
+        return consensus
+
+
+# =====================================================================
+# MODULE 3: DECODERS (Bulk Target Decoder & Input Reconstruction Decoder)
+# =====================================================================
+class DeconvolutionTower(nn.Module):
+    def __init__(self, latent_channels, out_channels=1):
+        super(DeconvolutionTower, self).__init__()
+        """Maps latent space to the unobserved target assay channel."""
+        self.conv1 = nn.Conv1d(latent_channels, latent_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(latent_channels, out_channels, kernel_size=1)
+        self.activation = nn.GELU()
+
+    def forward(self, h):
+        out = self.activation(self.conv1(h))
+        out = self.conv2(out)
+        return out
+
+class ReconstructionDecoder(nn.Module):
+    def __init__(self, latent_channels, original_channels=5):
+        super(ReconstructionDecoder, self).__init__()
+        """
+        NEW MODULE: Maps latent space back to the original input channel shape (5 channels).
+        Forces the encoder to retain high-fidelity features of the input fiber.
+        """
+        self.conv1 = nn.Conv1d(latent_channels, latent_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(latent_channels, original_channels, kernel_size=1)
+        self.activation = nn.GELU()
+
+    def forward(self, h):
+        out = self.activation(self.conv1(h))
+        out = self.conv2(out) # Output shape: (Batch * N, original_channels, d)
+        return out
+
+
+# =====================================================================
+# MASTER PIPELINE ENVELOPE (With Joint Objective Support)
+# =====================================================================
+class FiberMILModel(nn.Module):
+    def __init__(self, in_channels=5, hidden_channels=32, latent_channels=16, num_inducing_points=16):
+        super(FiberMILModel, self).__init__()
+
+        self.encoder = InstanceEncoder(in_channels, hidden_channels, latent_channels)
+        self.aggregator = SetTransformerAggregator(latent_channels, num_heads=4, num_inducing_points=num_inducing_points)
+        self.bulk_decoder = DeconvolutionTower(latent_channels, out_channels=1)
+
+        # New Reconstruction Head
+        self.recon_decoder = ReconstructionDecoder(latent_channels, original_channels=in_channels)
+
+    def forward(self, X, mode="train"):
+        """
+        X shape: (Batch, N, in_channels, d)
+        """
+        B, N, C, d = X.shape
+
+        if mode == "train":
+            # 1. Encode instances independently
+            X_flat = X.view(B * N, C, d)
+            latent_flat = self.encoder(X_flat) # (Batch * N, latent_channels, d)
+
+            # 2. Compute Self-Supervised Reconstruction Matrix
+            reconstructed_fibers_flat = self.recon_decoder(latent_flat)
+            reconstructed_fibers = reconstructed_fibers_flat.view(B, N, C, d)
+
+            # 3. Pull consensus embedding via Set Transformer for Weak Supervision
+            latent_bag = latent_flat.view(B, N, -1, d)
+            consensus = self.aggregator(latent_bag, n_fibers=N)
+
+            # 4. Predict population bulk profile
+            bulk_prediction = self.bulk_decoder(consensus).squeeze(1) # (Batch, d)
+
+            # Return BOTH predictions so we can compute a combined loss matrix
+            return bulk_prediction, reconstructed_fibers
+
+        elif mode == "inference":
+            X_flat = X.view(B * N, C, d)
+            latent_single = self.encoder(X_flat)
+            fiber_predictions = self.bulk_decoder(latent_single)
+            return fiber_predictions.view(B, N, d)
+
 #--------------------------------------------------------------------------------------------------
 # model selection based on cmd arg
 
@@ -268,6 +407,7 @@ def model_selector(model_arg, args):
     if model_name=="fiber_conv_1d": return FiberConv1dBlock(args.num_input_features, d_model=args.d_model,
                                                             decoder_type=args.decoder_type, kernel_size=args.kernel_size,
                                                             dilation=args.dilation)
+    if model_name=="mil": return FiberMILModel(in_channels=args.num_input_features, hidden_channels=args.d_model)
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 
@@ -275,7 +415,7 @@ def model_selector(model_arg, args):
 #--------------------------------------------------------------------------------------------------
 # testing
 
-def tester():
+def tester_0():
 
     B, C_in, L, N = 16, 4, 2048, 200
     d_model = 128
@@ -292,6 +432,40 @@ def tester():
 
     pass
 
+def tester_1():
+
+    batch_size = 2
+    n_fibers_per_locus = 16
+    input_channels = 5
+    locus_length = 500
+
+    model = FiberMILModel(in_channels=input_channels)
+    model.train()
+
+    # Generate mock inputs
+    mock_input_fibers = torch.randn(batch_size, n_fibers_per_locus, input_channels, locus_length)
+    mock_true_bulk_target = torch.randn(batch_size, locus_length)
+
+    # Forward Pass
+    pred_bulk, pred_recon = model(mock_input_fibers, mode="train")
+
+    # Loss 1: Weakly Supervised Bulk Target Tracking Error
+    criterion_bulk = nn.MSELoss()
+    loss_bulk = criterion_bulk(pred_bulk, mock_true_bulk_target)
+
+    # Loss 2: Self-Supervised Autoencoder Fiber Reconstruction Error
+    criterion_recon = nn.MSELoss()
+    loss_recon = criterion_recon(pred_recon, mock_input_fibers)
+
+    # Joint Optimization Strategy: Balance both tasks using a hyperparameter weight (alpha)
+    alpha = 0.5  # Adjust based on how heavily you want to regularize the encoder
+    total_joint_loss = loss_bulk + (alpha * loss_recon)
+
+    print("--> Multi-Task Execution Successful!")
+    print(f"----> Bulk Prediction Loss:       {loss_bulk.item():.4f}")
+    print(f"----> Fiber Reconstruction Loss:  {loss_recon.item():.4f}")
+    print(f"----> Combined Total Joint Loss:  {total_joint_loss.item():.4f}")
+
 if __name__=="__main__":
 
-    tester()
+    tester_0()
