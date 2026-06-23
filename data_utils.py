@@ -293,6 +293,22 @@ class fiber_data_iterator(IterableDataset):
 # testing
 
 def tester():
+
+    kwargs = {
+        "fiber_data_path":"/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram",
+        "other_bw": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig",
+        "fibers_per_entry": 200,
+        "context_length": 20,
+        "iters_per_epoch": 1,
+        "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
+        "input_flags": [1,1,1,1,1],
+        "ccre_path": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed"
+    }
+
+    t_set = fiber_data_iterator(**kwargs)
+
+    sample = next(iter(t_set))
+
     pass
 
 if __name__=="__main__":
