@@ -86,7 +86,7 @@ class Trainer:
             losses.append(avg_loss)
 
             # plot_sample_out_fibers(save_dir, batch[0], output, processed_fibers, batch[2], batch[3], epoch)
-            plot_sample_out_fibers_wandb(self.wandb_run, save_dir, batch[0], self.config.input_flags, self.config.num_input_features, output, processed_fibers, batch[2], batch[3], epoch)
+            plot_sample_out_fibers_wandb(self.wandb_run, save_dir, batch[0], self.config.input_flags, self.config.num_input_features, output, processed_fibers, batch[2], batch[3], epoch, avg_loss)
 
         plot_loss(save_dir, losses, epoch+1)
 
