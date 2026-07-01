@@ -23,15 +23,21 @@ def main():
     save_str = create_save_str(args)
     res_dir = os.path.join(args.res_dir, save_str)
 
-    data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
+    train_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
             fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
             iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-            input_flags=args.input_flags,
-            ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed")
+            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
+            mode="train")
+
+    val_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
+            fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
+            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
+            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
+            mode="val10")
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, data_iterator, epochs=args.epochs, batch_size=args.batch_size, run_name=args.name_suffix, config=args)
+    trainer = Trainer(model, train_data_iterator, val_data_iterator, epochs=args.epochs, batch_size=args.batch_size, run_name=args.name_suffix, config=args)
 
     trainer.train(save_dir=res_dir)
 

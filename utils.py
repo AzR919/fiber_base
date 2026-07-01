@@ -189,7 +189,7 @@ def plot_sample_out_fibers(dir, inp, out, out_fibers, tar, locus, extra, plot_su
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, plot_sum=False):
+def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
     """
     Plots dynamic input channels (Left Column) and model outputs (Right Column) in a single unified figure.
     Makes single-bit channels (m6a, cpg) highly visible using distinct point-markers.
@@ -273,12 +273,16 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
     ax_bulk = fig.add_subplot(gs[0:1, 1])
     ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
 
+    tar_sig = tar[0].cpu().detach().numpy()
+    out_sig = out[0].cpu().detach().numpy()
+    instance_loss = np.mean((tar_sig - out_sig) ** 2)
+
     # Top Right: Bulk Assay comparison
     ax_bulk.plot(tar[0].cpu(), color='dimgray', lw=1.5, label='Target')
     ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
     ax_bulk.set_ylabel("Signal Intensity")
     ax_bulk.legend(loc='upper right', frameon=False)
-    ax_bulk.set_title(f"Imputation Results (Loss: {avg_loss:.6f})\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
+    ax_bulk.set_title(f"Imputation Results ({mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Batch avg Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
     ax_bulk.set_xticklabels([]) # Shared axis with heatmap
 
     # Bottom Right: Predicted Fiber Heatmap
@@ -303,7 +307,7 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
 
     # Log unified single image to Weights & Biases
     wandb_run.log({
-        "Model_Evaluation_Dashboard": wandb.Image(fig),
+        f"{mode}_Model_Evaluation_Dashboard": wandb.Image(fig),
         "epoch": extra
     })
     plt.close(fig)

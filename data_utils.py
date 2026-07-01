@@ -22,35 +22,45 @@ class fiber_data_iterator(IterableDataset):
     def __init__(self, fiber_data_path, other_bw,
                  fibers_per_entry, context_length,
                  iters_per_epoch, fasta_path,
-                 input_flags,
-                 ccre_path, chr_sizes_file=None):
+                 input_flags, ccre_path,
+                 chr_sizes_file=None, mode="train",
+                 seed=919):
 
-        self.fiber_bam = pyft.Fiberbam(fiber_data_path)
-        self.other_bw = pyBigWig.open(other_bw)
+        # Store paths instead of opening the file pointers globally
+        self.fiber_data_path = fiber_data_path
+        self.other_bw_path = other_bw
+        self.fasta_path = fasta_path
+
+        self.fiber_bam = None
+        self.other_bw = None
+        self.fasta = None
 
         self.fibers_per_entry = fibers_per_entry
         self.context_length = context_length
         self.iters_per_epoch = iters_per_epoch
+        self.seed = seed
+        self.epoch = 0  # Added tracking to allow fresh shuffling per training epoch
+        self.mode = mode
 
-        self.load_fasta(fasta_path)
-        self.load_genomic_coords(chr_sizes_file)
+        # Initialize base generators for parsing setup files (like cCREs)
+        self.rng = random.Random(seed)
+        self.np_rng = np.random.default_rng(seed)
 
-        self.load_ccres(ccre_path)
+        # Temporary initialization of BigWig just to extract metadata cleanly
+        temp_bw = pyBigWig.open(other_bw)
+        self.load_genomic_coords(temp_bw.chroms(), mode=mode)
+        temp_bw.close()
+
+        self.load_ccres(ccre_path, mode=mode)
 
         self.input_flags = input_flags
-        # Map bit positions to functions
-        feature_map = [
-            self.get_m6a,
-            self.get_cpg,
-            self.get_msp,
-            self.get_nuc,
-            self.get_fire_msp,
-        ]
 
-        # Pre-determine which functions to run once at startup
-        self.input_features = [
-            feature_map[i] for i in range(5) if self.input_flags[i]
-        ]
+        # We store the indices to map features inside the workers safely
+        self.active_feature_indices = [i for i in range(5) if self.input_flags[i]]
+
+    def set_epoch(self, epoch):
+        """Call this at the beginning of your training loop: train_dataset.set_epoch(epoch)"""
+        self.epoch = epoch
 
     def load_fasta(self, fasta_path):
 
@@ -59,6 +69,21 @@ class fiber_data_iterator(IterableDataset):
         if not os.path.exists(fasta_path + ".fai"):
             pysam.faidx(fasta_path)               # build index if needed
         self.fasta = pysam.FastaFile(fasta_path)
+
+    def dna_to_onehot(self, sequence):
+            # Create a mapping from nucleotide to index
+            mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N':4}
+
+            # Convert the sequence to indices
+            indices = torch.tensor([mapping[nuc.upper()] for nuc in sequence], dtype=torch.long)
+
+            # Create one-hot encoding
+            one_hot = torch.nn.functional.one_hot(indices, num_classes=5)
+
+            # Remove the fifth column which corresponds to 'N'
+            one_hot = one_hot[:, :4]
+
+            return one_hot.to(torch.float32)
 
     def onehot_for_locus(self, locus):
         """
@@ -96,35 +121,53 @@ class fiber_data_iterator(IterableDataset):
         seq = get_DNA_sequence(chrom, start, end)
         return dna_to_onehot(seq)
 
-    def load_genomic_coords(self, chr_sizes_file, mode="train"):
-        # main_chrs = ["chr" + str(x) for x in range(1, 23)] + ["chrX"]
-        main_chrs = ["chr21"]
-        # if mode == "train":
-        #     main_chrs.remove("chr21") # reserved for test
-        # self.chr_sizes = {}
-
-        # with open(chr_sizes_file, 'r') as f:
-        #     for line in f:
-        #         chr_name, chr_size = line.strip().split('\t')
-        #         if chr_name in main_chrs:
-        #             self.chr_sizes[chr_name] = int(chr_size)
-
-        # self.genomesize = sum(list(self.chr_sizes.values()))
-        possible_chr_sizes = self.other_bw.chroms()
+    def load_genomic_coords(self, possible_chr_sizes, mode="train"):
+        if mode == "train":
+            main_chrs = ["chr20"]
+        elif "val" in mode:
+            main_chrs = ["chr21"]
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
         self.chr_sizes = {k: possible_chr_sizes[k] for k in main_chrs if k in possible_chr_sizes}
 
-    def load_ccres(self, bed_path):
-        # Load BED file (columns: chrom, start, end, name, score, strand, type...)
+    def load_ccres(self, bed_path, mode="train"):
         df = pd.read_csv(bed_path, sep='\t', header=None, usecols=[0, 1, 2])
         df.columns = ['chrom', 'start', 'end']
-        # Filter for chromosomes present in your chr_sizes to avoid errors
-        self.ccre_list = df[df['chrom'].isin(self.chr_sizes.keys())].values
+        filtered_df = df[df['chrom'].isin(self.chr_sizes.keys())]
+
+        if mode == "val10":
+            filtered_df = filtered_df.sample(frac=0.10, random_state=self.np_rng)
+
+        self.ccre_list = filtered_df.values
+
+    def init_worker_resources(self):
+        """Safely instantiates file descriptors unique to the background worker thread."""
+        if self.fiber_bam is None:
+            self.fiber_bam = pyft.Fiberbam(self.fiber_data_path)
+        if self.other_bw is None:
+            self.other_bw = pyBigWig.open(self.other_bw_path)
+        if self.fasta is None:
+            if not os.path.exists(self.fasta_path):
+                raise FileNotFoundError(f"FASTA not found: {self.fasta_path}")
+            if not os.path.exists(self.fasta_path + ".fai"):
+                pysam.faidx(self.fasta_path)
+            self.fasta = pysam.FastaFile(self.fasta_path)
+
+        # Map methods to child instances safely
+        feature_map = [
+            self.get_m6a,
+            self.get_cpg,
+            self.get_msp,
+            self.get_nuc,
+            self.get_fire_msp,
+        ]
+        self.input_features = [feature_map[i] for i in self.active_feature_indices]
 
     def generate_loci(self):
 
-        random_chr = random.choice(list(self.chr_sizes.keys()))
+        random_chr = self.rng.choice(list(self.chr_sizes.keys()))
 
-        random_start = random.randint(0, self.chr_sizes[random_chr])
+        random_start = self.rng.randint(0, self.chr_sizes[random_chr])
         random_end = random_start + self.context_length
 
         return random_chr, random_start, random_end
@@ -138,14 +181,14 @@ class fiber_data_iterator(IterableDataset):
                                 e.g., 200 means a shift between -200 and +200 bp.
         """
         # 1. Pick a random cCRE
-        ccre_chrom, ccre_start, ccre_end = random.choice(self.ccre_list)
+        ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
 
         # 2. Calculate the "true" center of the cCRE
         true_center = (ccre_start + ccre_end) // 2
 
         # 3. Apply Jitter
         # This shifts the focus point slightly so the cCRE isn't always perfectly centered
-        jitter = random.randint(-jitter_range, jitter_range)
+        jitter = self.rng.randint(-jitter_range, jitter_range)
         focal_point = true_center + jitter
 
         # 4. Create the window around the focal point
@@ -251,38 +294,60 @@ class fiber_data_iterator(IterableDataset):
 
         AQ_THRESHOLD = 200
         fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
+        dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32)
 
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
         for i, fiber in enumerate(possible_fibers):
             if i == self.fibers_per_entry: break
+            if fiber.start > start: continue
 
             single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
             fibers_tensor[i] = single_fiber_data
 
-        return torch.from_numpy(fibers_tensor).permute(1,2,0)
+            dna_tensor.append(self.dna_to_onehot(fiber.seq[start-fiber.start:start-fiber.start+self.context_length]))
+            dna_tensor[i] = self.dna_to_onehot(fiber.seq[start-fiber.start:start-fiber.start+self.context_length])
+
+        dna_tensor = torch.from_numpy(np.array(dna_tensor))
+
+        return torch.from_numpy(fibers_tensor).permute(1,2,0), torch.from_numpy(dna_tensor).permute(2, 1, 0)
 
     def get_other_bw_data(self, chrom, start, end):
 
         return torch.asinh(torch.from_numpy(np.array(self.other_bw.values(chrom, start, end))).to(torch.float32))
 
     def __iter__(self):
+        # 1. Initialize file descriptors inside the worker loop
+        self.init_worker_resources()
+
+        # 2. Add self.epoch into the worker seed calculation to rotate sequences per epoch
+        worker_info = torch.utils.data.get_worker_info()
+
+        if "val" in self.mode:
+            seed_offset = 0
+        elif worker_info is None:
+            seed_offset = self.epoch * 1000
+        else:
+            seed_offset = worker_info.id + self.epoch * 1000
+
+        worker_seed = self.seed + seed_offset
+
+        self.rng = random.Random(worker_seed)
+        self.np_rng = np.random.default_rng(worker_seed)
 
         for _ in range(self.iters_per_epoch):
-
             found_possible_locus = False
 
             while not found_possible_locus:
-
                 random_locus = self.generate_ccre_loci()
 
-                fiber_tensor = self.get_fiber_data(*random_locus)
-                if fiber_tensor is None : continue
+                fiber_tensor, dna_tensor = self.get_fiber_data(*random_locus)
+                if fiber_tensor is None: continue
 
                 other_tensor = self.get_other_bw_data(*random_locus)
                 has_nan = torch.isnan(other_tensor).any().item()
-                if has_nan : continue
+                if has_nan: continue
 
                 dna = self.onehot_for_locus(random_locus)
                 found_possible_locus = True
