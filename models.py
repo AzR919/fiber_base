@@ -161,7 +161,7 @@ class FiberConv1dBlock(nn.Module):
             nn.GELU()
         )
 
-    def forward(self, x, dna):
+    def forward(self, x, *args, **kwargs):
         """
         x: Input tensor of shape (B, C, L, N)
         """

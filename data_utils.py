@@ -301,15 +301,15 @@ class fiber_data_iterator(IterableDataset):
 
         for i, fiber in enumerate(possible_fibers):
             if i == self.fibers_per_entry: break
-            if fiber.start > start: continue
+            # if fiber.start > start: continue
+            # if fiber.end < end: continue
+            dna_fiber = fiber.seq[start-fiber.start:start-fiber.start+self.context_length]
+            if len(dna_fiber) != self.context_length: continue
 
             single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
             fibers_tensor[i] = single_fiber_data
 
-            dna_tensor.append(self.dna_to_onehot(fiber.seq[start-fiber.start:start-fiber.start+self.context_length]))
-            dna_tensor[i] = self.dna_to_onehot(fiber.seq[start-fiber.start:start-fiber.start+self.context_length])
-
-        dna_tensor = torch.from_numpy(np.array(dna_tensor))
+            dna_tensor[i] = self.dna_to_onehot(dna_fiber)
 
         return torch.from_numpy(fibers_tensor).permute(1,2,0), torch.from_numpy(dna_tensor).permute(2, 1, 0)
 
@@ -352,7 +352,7 @@ class fiber_data_iterator(IterableDataset):
                 dna = self.onehot_for_locus(random_locus)
                 found_possible_locus = True
 
-            yield fiber_tensor, dna, other_tensor, random_locus
+            yield fiber_tensor, dna, dna_tensor, other_tensor, random_locus
 
 #--------------------------------------------------------------------------------------------------
 # testing
