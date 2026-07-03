@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-01_00_atac_no_fire_model_01_add_val_proper_seed_proper_loss
+#SBATCH --job-name=2026-07-02_03_atac_base_deep01
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -40,8 +40,8 @@ python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
     --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig \
     --batch_size 16 --epochs 25 --model fiber_conv_1d --fibers_per_entry 200 --input_flags 1 1 1 1 0 \
-    --res_dir ./results --decoder_type avg --d_model 128 --kernel_size 51 \
-    --name_suffix atac_no_fire_model_01_add_val_proper_seed_proper_loss
+    --res_dir ./results --decoder_type avg --kernel_size 15 \
+    --name_suffix atac_base_deep01
 
 # ENCFF798KYP_H3K27ac.bigWig
 # ENCFF287HAO_H3K4me3.bigWig

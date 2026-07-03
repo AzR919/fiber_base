@@ -133,29 +133,22 @@ class FiberConv1dBlock(nn.Module):
         super().__init__()
 
         # Input to Conv1d expects (Batch, Channels, Length)
-        # We use standard padding to preserve the Length (L) dimension
-        # self.fiber_conv = nn.Sequential(
-        #     nn.Conv1d(num_input_features, d_model, kernel_size=kernel_size, padding=kernel_size//2),
-        #     nn.BatchNorm1d(d_model),
-        #     nn.GELU(),
-        #     nn.Conv1d(d_model, 2*d_model, kernel_size=kernel_size, padding=kernel_size//2),
-        #     nn.BatchNorm1d(2*d_model),
-        #     nn.GELU(),
-        #     # Last layer maps back to 1 channel per fiber
-        #     nn.Conv1d(2*d_model, 1, kernel_size=kernel_size, padding=kernel_size//2),
-        #     nn.GELU()
-        # )
-
+        # Standard padding to preserve the Length (L) dimension
         self.fiber_conv = nn.Sequential(
             nn.Conv1d(num_input_features, d_model, kernel_size=kernel_size, padding=kernel_size//2, dilation=dilation),
-            nn.BatchNorm1d(d_model),
+            # GroupNorm with num_groups=1 functions identically to LayerNorm for 3D tensors: (B*N, Channels, Length)
+            nn.GroupNorm(1, d_model),
             nn.GELU(),
             # Last layer maps back to 1 channel per fiber
             nn.Conv1d(d_model, 1, kernel_size=kernel_size, padding=kernel_size//2, dilation=dilation),
             nn.GELU()
         )
 
-        self.decoder_type = decoder_type
+        implemented_decoders = ["avg", "sum"]
+        if decoder_type in implemented_decoders:
+            self.decoder_type = decoder_type
+        else:
+            raise NotImplementedError(f"decoder_type not implemented: {self.decoder_type}")
 
         self.final_layer = nn.Sequential(
             nn.GELU()
@@ -171,7 +164,7 @@ class FiberConv1dBlock(nn.Module):
         # 2. Reshape to combine Batch and Fiber count: (B * N, C, L)
         x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
 
-        # 3. Pass through the 1D Convolutional pipeline
+        # 3. Pass through the 1D Convolutional pipeline with isolated LayerNorm
         # Output shape: (B * N, 1, L)
         out_flat = self.fiber_conv(x_flat)
 
@@ -185,7 +178,7 @@ class FiberConv1dBlock(nn.Module):
         elif self.decoder_type == "avg":
             y = torch.mean(processed_fibers, dim=-1)            # (B,L,N) -> (B, L)
         else:
-            raise NotImplementedError(f"decoder_type not implemented: {self.decoder_type}")
+            raise NotImplementedError(f"decoder_type not implemented in the forward pass (but passed the check in init): {self.decoder_type}")
 
         y_final = self.final_layer(y)
 
@@ -255,6 +248,85 @@ class FiberTransformerVAE(nn.Module):
         # Reshape back to (B, C, L, N)
         return logits.view(B, N, L, C).permute(0, 3, 2, 1)
 
+class ResidualBlock1D(nn.Module):
+    """
+    A 1D Convolutional Residual Block with LayerNorm,
+    dynamic dilation/padding, and a 1x1 projection shortcut.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, dilation):
+        super().__init__()
+
+        padding = (dilation * (kernel_size - 1)) // 2
+
+        self.conv = nn.Conv1d(
+            in_channels, out_channels, kernel_size=kernel_size,
+            padding=padding, dilation=dilation
+        )
+        # LayerNorm expects the normalized shape at the trailing dimensions: (Channels, Length)
+        # We specify out_channels; it applies across the channel dimension per locus.
+        self.norm = nn.GroupNorm(1, out_channels) # GroupNorm with 1 group is equivalent to LayerNorm for 1D arrays
+        self.act = nn.GELU()
+
+        # 1x1 Conv shortcut to project channels if they don't match
+        if in_channels != out_channels:
+            self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1)
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        return self.act(self.shortcut(x) + self.norm(self.conv(x)))
+
+class FiberDeep01ResConv1dBlock(nn.Module):
+    def __init__(self, num_input_features=5, decoder_type="avg", kernel_size=15):
+        super().__init__()
+
+        # Define the channel architecture you requested
+        channels = [num_input_features, 32, 64, 64, 32, 1]
+        dilations = [1, 2, 4, 8, 16]
+
+        # Build the sequential deep pipeline using our residual blocks
+        layers = []
+        for i in range(5):
+            layers.append(
+                ResidualBlock1D(
+                    in_channels=channels[i],
+                    out_channels=channels[i+1],
+                    kernel_size=kernel_size,
+                    dilation=dilations[i]
+                )
+            )
+        self.fiber_conv = nn.Sequential(*layers)
+
+        implemented_decoders = ["avg", "sum"]
+        if decoder_type in implemented_decoders:
+            self.decoder_type = decoder_type
+        else:
+            raise NotImplementedError(f"decoder_type not implemented: {decoder_type}")
+
+        self.final_layer = nn.Sequential(nn.GELU())
+
+    def forward(self, x, *args, **kwargs):
+        B, C, L, N = x.shape
+
+        # Flatten batch and fiber dimensions: (B * N, C, L)
+        x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
+
+        # Process through the 5-layer residual bottleneck
+        out_flat = self.fiber_conv(x_flat)
+
+        # Reshape back to original dimensions: (B, L, N)
+        processed_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
+
+        if self.decoder_type == "sum":
+            y = torch.sum(processed_fibers, dim=-1)
+        elif self.decoder_type == "avg":
+            y = torch.mean(processed_fibers, dim=-1)
+        else:
+            raise NotImplementedError(f"decoder_type not implemented in the forward pass (but passed the check in init): {self.decoder_type}")
+
+        y_final = self.final_layer(y)
+        return y_final, processed_fibers
+
 #--------------------------------------------------------------------------------------------------
 # model selection based on cmd arg
 
@@ -268,6 +340,7 @@ def model_selector(model_arg, args):
     if model_name=="fiber_conv_1d": return FiberConv1dBlock(args.num_input_features, d_model=args.d_model,
                                                             decoder_type=args.decoder_type, kernel_size=args.kernel_size,
                                                             dilation=args.dilation)
+    if model_name=="deep01": return FiberDeep01ResConv1dBlock(args.num_input_features, args.decoder_type, args.kernel_size)
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 
