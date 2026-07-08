@@ -282,7 +282,7 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
     ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
     ax_bulk.set_ylabel("Signal Intensity")
     ax_bulk.legend(loc='upper right', frameon=False)
-    ax_bulk.set_title(f"Imputation Results ({mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Batch avg Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
+    ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Epoch Avg {mode} Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
     ax_bulk.set_xticklabels([]) # Shared axis with heatmap
 
     # Bottom Right: Predicted Fiber Heatmap
