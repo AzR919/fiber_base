@@ -19,6 +19,13 @@ def get_args():
                            default="/home/azr")
     data_group.add_argument("--other_data_path", type=str,
                            default="/home/azr")
+    data_group.add_argument("--fiber_data_path_b", type=str, default=None,
+                           help="Second Fiber-seq CRAM for mixed-cell experiments")
+    data_group.add_argument("--other_data_path_b", type=str, default=None,
+                           help="Second target BigWig for mixed-cell experiments")
+    data_group.add_argument("--mix_fraction", type=float, default=1.0,
+                           help="Weight for cell A in [0, 1]; target and fiber "
+                                "subsample use alpha*A + (1-alpha)*B")
     data_group.add_argument("--context_length", type=int,
                            default=2048)
     data_group.add_argument("--fibers_per_entry", type=int,
@@ -78,6 +85,15 @@ def get_args():
     if "sweep" in parsed_args.name_suffix.lower():
         parsed_args.input_flags = [parsed_args.m6a, parsed_args.cpg, parsed_args.msp, parsed_args.nuc, parsed_args.fire_msp]
     parsed_args.num_input_features = sum(parsed_args.input_flags)
+
+    if parsed_args.mix_fraction < 0.0 or parsed_args.mix_fraction > 1.0:
+        parser.error("--mix_fraction must be between 0 and 1")
+
+    mixed_paths = [parsed_args.fiber_data_path_b, parsed_args.other_data_path_b]
+    if any(p is not None for p in mixed_paths) and not all(p is not None for p in mixed_paths):
+        parser.error(
+            "Mixed-cell mode requires both --fiber_data_path_b and --other_data_path_b"
+        )
 
     return parsed_args
 

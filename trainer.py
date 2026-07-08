@@ -3,6 +3,7 @@ Main train loop
 
 """
 
+import sys
 import wandb
 import torch
 import torch.nn as nn
@@ -36,7 +37,7 @@ class Trainer:
 
         self.wandb_run = wandb.init(
             entity="liblab",
-            project="Fiber",
+            project="Fiber_mixed",
             name=run_name,
             config=config,
         )
@@ -49,6 +50,12 @@ class Trainer:
         wandb.define_metric("val_loss", step_metric="epoch")
 
         self.config = config
+
+        if self._is_mixed_cell(config):
+            print(
+                f"Mixed-cell mode: mix_fraction={config.mix_fraction:.3f} "
+                f"(cell A={config.fiber_data_path}, cell B={config.fiber_data_path_b})"
+            )
 
         if sum(config.input_flags) == 0:
             print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
@@ -140,14 +147,14 @@ class Trainer:
             plot_sample_out_fibers_wandb(
                 self.wandb_run, save_dir, batch[0], self.config.input_flags,
                 self.config.num_input_features, t_output, t_processed_fibers,
-                batch[3], batch[4], epoch, avg_train_loss, mode="Train"
+                batch[3], batch[4], epoch, avg_train_loss, batch[5], batch[6], mode="Train"
             )
 
             if avg_val_loss is not None:
                 plot_sample_out_fibers_wandb(
                     self.wandb_run, save_dir, v_batch[0], self.config.input_flags,
                     self.config.num_input_features, v_output, v_processed_fibers,
-                    v_batch[3], v_batch[4], epoch, avg_val_loss, mode="Val"
+                    v_batch[3], v_batch[4], epoch, avg_val_loss, batch[5], batch[6], mode="Val"
                 )
 
         plot_loss(save_dir, train_losses, epoch+1)
@@ -159,6 +166,13 @@ class Trainer:
             if not flag: continue
             sup_str += f"_{name}"
         return sup_str
+
+    @staticmethod
+    def _is_mixed_cell(config):
+        return (
+            getattr(config, "fiber_data_path_b", None) is not None
+            and getattr(config, "other_data_path_b", None) is not None
+        )
 
 #--------------------------------------------------------------------------------------------------
 # testing

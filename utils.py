@@ -189,7 +189,7 @@ def plot_sample_out_fibers(dir, inp, out, out_fibers, tar, locus, extra, plot_su
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
+def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", tar_a=None, tar_b=None, plot_sum=False):
     """
     Plots dynamic input channels (Left Column) and model outputs (Right Column) in a single unified figure.
     Makes single-bit channels (m6a, cpg) highly visible using distinct point-markers.
@@ -279,6 +279,8 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
 
     # Top Right: Bulk Assay comparison
     ax_bulk.plot(tar[0].cpu(), color='dimgray', lw=1.5, label='Target')
+    ax_bulk.plot(tar_a[0].cpu(), color='brown', lw=1.5, label='Assay_A')
+    ax_bulk.plot(tar_b[0].cpu(), color='brown', lw=1.5, label='Assay_B')
     ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
     ax_bulk.set_ylabel("Signal Intensity")
     ax_bulk.legend(loc='upper right', frameon=False)

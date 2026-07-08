@@ -290,32 +290,56 @@ class fiber_data_iterator(IterableDataset):
 
         return fire_msp_data
 
-    def get_fiber_data(self, chrom, start, end):
+    def _extract_single_fiber(self, fiber, start, end):
+        dna_fiber = fiber.seq[start - fiber.start:start - fiber.start + self.context_length]
+        if len(dna_fiber) != self.context_length:
+            return None
 
-        AQ_THRESHOLD = 200
-        fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
-        dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32)
+        single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
+        dna_onehot = self.dna_to_onehot(dna_fiber)
+        return single_fiber_data, dna_onehot
 
+    def _fetch_fibers_from_bam(self, fiber_bam, chrom, start, end):
+        collected = []
         with suppress_stdout_stderr():
-            possible_fibers = self.fiber_bam.fetch(chrom, start, end)
+            possible_fibers = fiber_bam.fetch(chrom, start, end)
 
-        for i, fiber in enumerate(possible_fibers):
-            if i == self.fibers_per_entry: break
-            # if fiber.start > start: continue
-            # if fiber.end < end: continue
-            dna_fiber = fiber.seq[start-fiber.start:start-fiber.start+self.context_length]
-            if len(dna_fiber) != self.context_length: continue
+        for fiber in possible_fibers:
+            extracted = self._extract_single_fiber(fiber, start, end)
+            if extracted is not None:
+                collected.append(extracted)
 
-            single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
+        return collected
+
+    def _pack_fiber_batch(self, fiber_samples):
+        fibers_tensor = np.zeros(
+            (self.fibers_per_entry, len(self.input_features), self.context_length),
+            dtype=np.float32,
+        )
+        dna_tensor = np.zeros(
+            (self.fibers_per_entry, self.context_length, 4),
+            dtype=np.float32,
+        )
+
+        for i, (single_fiber_data, dna_onehot) in enumerate(fiber_samples):
             fibers_tensor[i] = single_fiber_data
+            dna_tensor[i] = dna_onehot
 
-            dna_tensor[i] = self.dna_to_onehot(dna_fiber)
+        return (
+            torch.from_numpy(fibers_tensor).permute(1, 2, 0),
+            torch.from_numpy(dna_tensor).permute(2, 1, 0),
+        )
 
-        return torch.from_numpy(fibers_tensor).permute(1,2,0), torch.from_numpy(dna_tensor).permute(2, 1, 0)
+    def get_fiber_data(self, chrom, start, end):
+        fiber_samples = self._fetch_fibers_from_bam(self.fiber_bam, chrom, start, end)
+        if len(fiber_samples) < self.fibers_per_entry:
+            return None, None
+
+        return self._pack_fiber_batch(fiber_samples[:self.fibers_per_entry])
 
     def get_other_bw_data(self, chrom, start, end):
 
-        return torch.asinh(torch.from_numpy(np.array(self.other_bw.values(chrom, start, end))).to(torch.float32))
+        return None, None, torch.asinh(torch.from_numpy(np.array(self.other_bw.values(chrom, start, end))).to(torch.float32))
 
     def __iter__(self):
         # 1. Initialize file descriptors inside the worker loop
@@ -345,14 +369,143 @@ class fiber_data_iterator(IterableDataset):
                 fiber_tensor, dna_tensor = self.get_fiber_data(*random_locus)
                 if fiber_tensor is None: continue
 
-                other_tensor = self.get_other_bw_data(*random_locus)
+                tensor_a, tensor_b, other_tensor = self.get_other_bw_data(*random_locus)
                 has_nan = torch.isnan(other_tensor).any().item()
                 if has_nan: continue
 
                 dna = self.onehot_for_locus(random_locus)
                 found_possible_locus = True
 
-            yield fiber_tensor, dna, dna_tensor, other_tensor, random_locus
+            yield fiber_tensor, dna, dna_tensor, other_tensor, random_locus, tensor_a, tensor_b
+
+
+class mixed_cell_fiber_data_iterator(fiber_data_iterator):
+    """
+    Mixed-cell iterator: blends two Fiber-seq inputs and two BigWig targets.
+
+    For mix_fraction alpha in [0, 1]:
+      - target = alpha * bw_a + (1 - alpha) * bw_b
+      - input  = random subsample of fibers_per_entry with
+                 round(alpha * N) from cell A and the rest from cell B
+    """
+
+    def __init__(
+        self,
+        fiber_data_path_a,
+        fiber_data_path_b,
+        other_bw_a,
+        other_bw_b,
+        mix_fraction,
+        fibers_per_entry,
+        context_length,
+        iters_per_epoch,
+        fasta_path,
+        input_flags,
+        ccre_path,
+        chr_sizes_file=None,
+        mode="train",
+        seed=919,
+    ):
+        if not 0.0 <= mix_fraction <= 1.0:
+            raise ValueError(f"mix_fraction must be in [0, 1], got {mix_fraction}")
+
+        self.fiber_data_path_b = fiber_data_path_b
+        self.other_bw_path_b = other_bw_b
+        self.mix_fraction = mix_fraction
+
+        super().__init__(
+            fiber_data_path_a,
+            other_bw_a,
+            fibers_per_entry=fibers_per_entry,
+            context_length=context_length,
+            iters_per_epoch=iters_per_epoch,
+            fasta_path=fasta_path,
+            input_flags=input_flags,
+            ccre_path=ccre_path,
+            chr_sizes_file=chr_sizes_file,
+            mode=mode,
+            seed=seed,
+        )
+
+        self.fiber_bam_b = None
+        self.other_bw_b = None
+
+    def _fibers_per_cell(self):
+        n_a = int(round(self.mix_fraction * self.fibers_per_entry))
+        n_b = self.fibers_per_entry - n_a
+        return n_a, n_b
+
+    def init_worker_resources(self):
+        super().init_worker_resources()
+        if self.fiber_bam_b is None:
+            self.fiber_bam_b = pyft.Fiberbam(self.fiber_data_path_b)
+        if self.other_bw_b is None:
+            self.other_bw_b = pyBigWig.open(self.other_bw_path_b)
+
+    def get_fiber_data(self, chrom, start, end):
+        n_a, n_b = self._fibers_per_cell()
+
+        fibers_a = self._fetch_fibers_from_bam(self.fiber_bam, chrom, start, end)
+        fibers_b = self._fetch_fibers_from_bam(self.fiber_bam_b, chrom, start, end)
+
+        if len(fibers_a) < n_a or len(fibers_b) < n_b:
+            return None, None
+
+        sampled = self.rng.sample(fibers_a, n_a) + self.rng.sample(fibers_b, n_b)
+        self.rng.shuffle(sampled)
+        return self._pack_fiber_batch(sampled)
+
+    def arc_sined(self, np_arr):
+        return torch.asinh(torch.from_numpy(np_arr).to(torch.float32))
+
+    def get_other_bw_data(self, chrom, start, end):
+        vals_a = np.array(self.other_bw.values(chrom, start, end), dtype=np.float32)
+        vals_b = np.array(self.other_bw_b.values(chrom, start, end), dtype=np.float32)
+        blended = self.mix_fraction * vals_a + (1.0 - self.mix_fraction) * vals_b
+        return self.arc_sined(vals_a), self.arc_sined(vals_b), self.arc_sined(blended)
+
+def make_fiber_data_iterator(
+    fiber_data_path,
+    other_data_path,
+    fibers_per_entry,
+    context_length,
+    iters_per_epoch,
+    fasta_path,
+    input_flags,
+    ccre_path,
+    mode="train",
+    seed=919,
+    fiber_data_path_b=None,
+    other_data_path_b=None,
+    mix_fraction=1.0,
+):
+    common_kwargs = dict(
+        fibers_per_entry=fibers_per_entry,
+        context_length=context_length,
+        iters_per_epoch=iters_per_epoch,
+        fasta_path=fasta_path,
+        input_flags=input_flags,
+        ccre_path=ccre_path,
+        mode=mode,
+        seed=seed,
+    )
+
+    if fiber_data_path_b is not None or other_data_path_b is not None:
+        if fiber_data_path_b is None or other_data_path_b is None:
+            raise ValueError(
+                "Mixed-cell mode requires both --fiber_data_path_b and --other_data_path_b"
+            )
+        return mixed_cell_fiber_data_iterator(
+            fiber_data_path,
+            fiber_data_path_b,
+            other_data_path,
+            other_data_path_b,
+            mix_fraction=mix_fraction,
+            **common_kwargs,
+        )
+
+    return fiber_data_iterator(fiber_data_path, other_data_path, **common_kwargs)
+
 
 #--------------------------------------------------------------------------------------------------
 # testing
@@ -361,18 +514,31 @@ def tester():
 
     kwargs = {
         "fiber_data_path":"/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram",
-        "other_bw": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig",
         "fibers_per_entry": 200,
         "context_length": 20,
-        "iters_per_epoch": 1,
+        "iters_per_epoch": 1000,
         "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
         "input_flags": [1,1,1,1,1],
         "ccre_path": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed"
     }
+    other_bw = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig"
 
-    t_set = fiber_data_iterator(**kwargs)
+    t_set = fiber_data_iterator(other_bw=other_bw, **kwargs)
 
     sample = next(iter(t_set))
+
+    fiber_path_b = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram"
+    bw_path_b = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/ENCFF071GML_H3K4me3_signal.bigWig"
+    mix_frac = 0.5
+
+    t_set_m = make_fiber_data_iterator(other_data_path=other_bw, other_data_path_b=bw_path_b, fiber_data_path_b=fiber_path_b, mix_fraction=mix_frac, **kwargs)
+
+    sample_m = next(iter(t_set_m))
+    i=0
+    for _ in t_set_m:
+        print(i)
+        i+=1
+        pass
 
     pass
 

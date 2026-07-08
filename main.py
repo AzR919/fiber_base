@@ -7,10 +7,30 @@ import os
 import sys
 
 from args import get_args
-from data_utils import fiber_data_iterator
+from data_utils import make_fiber_data_iterator
 from trainer import Trainer
 from models import model_selector
 from utils import *
+
+FASTA_PATH = "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
+CCRE_PATH = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed"
+
+def build_data_iterator(args, mode):
+    return make_fiber_data_iterator(
+        args.fiber_data_path,
+        args.other_data_path,
+        fibers_per_entry=args.fibers_per_entry,
+        context_length=args.context_length,
+        iters_per_epoch=args.iters_per_epoch,
+        fasta_path=FASTA_PATH,
+        input_flags=args.input_flags,
+        ccre_path=CCRE_PATH,
+        mode=mode,
+        seed=args.seed,
+        fiber_data_path_b=args.fiber_data_path_b,
+        other_data_path_b=args.other_data_path_b,
+        mix_fraction=args.mix_fraction,
+    )
 
 #--------------------------------------------------------------------------------------------------
 # Main
@@ -23,17 +43,8 @@ def main():
     save_str = create_save_str(args)
     res_dir = os.path.join(args.res_dir, save_str)
 
-    train_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
-            fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
-            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
-            mode="train")
-
-    val_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
-            fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
-            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
-            mode="val10")
+    train_data_iterator = build_data_iterator(args, mode="train")
+    val_data_iterator = build_data_iterator(args, mode="val10")
 
     model = model_selector(args.model, args)
 

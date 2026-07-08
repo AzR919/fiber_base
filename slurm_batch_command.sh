@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-07_04_h3k4me3_base_deep01_bigger_kernel_w_fire
+#SBATCH --job-name=2026-07-08_01_h3k4me3_mixed_cell
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -35,17 +35,31 @@ echo "Working directory is $(pwd)"
 # Activate virtual environment
 source /home/azr/lab/misc/menv/bin/activate
 
-# Run the training
+# Mixed-cell run: 70% cell A / 30% cell B for fibers and H3K4me3 target
 python main.py \
     --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF287HAO_H3K4me3.bigWig \
-    --batch_size 16 --epochs 25 --model deep01 --fibers_per_entry 200 --input_flags 1 1 1 1 1 \
-    --res_dir ./results --decoder_type avg --kernel_size 21 \
-    --name_suffix h3k4me3_base_deep01_bigger_kernel_w_fire
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF012DMX_H3K4me3_signal.bigWig \
+    --fiber_data_path_b /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram \
+    --other_data_path_b /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/ENCFF071GML_H3K4me3_signal.bigWig \
+    --mix_fraction 0.5 \
+    --batch_size 16 \
+    --epochs 25 \
+    --model deep01 \
+    --fibers_per_entry 200 \
+    --input_flags 1 1 1 1 1 \
+    --res_dir ./results \
+    --decoder_type avg \
+    --kernel_size 15 \
+    --name_suffix h3k4me3_mixed_cell
 
+# /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
 # ENCFF798KYP_H3K27ac.bigWig
-# ENCFF287HAO_H3K4me3.bigWig
-# ENCFF603BJO_ATAC_seq.bigWig
+# ENCFF012DMX_H3K4me3_signal.bigWig
+# ENCFF667MDI_ATAC_seq_signal.bigWig
+
+# /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram
+# ENCFF071GML_H3K4me3_signal.bigWig
+# ENCFF357GNC_ATAC_seq_signal.bigWig
 
 # Print job completion time
 echo "Job finished on $(date)"
