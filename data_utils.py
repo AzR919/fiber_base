@@ -299,6 +299,7 @@ class fiber_data_iterator(IterableDataset):
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bam.fetch(chrom, start, end)
 
+        i = 0
         for i, fiber in enumerate(possible_fibers):
             if i == self.fibers_per_entry: break
             # if fiber.start > start: continue
@@ -311,7 +312,7 @@ class fiber_data_iterator(IterableDataset):
 
             dna_tensor[i] = self.dna_to_onehot(dna_fiber)
 
-        return torch.from_numpy(fibers_tensor).permute(1,2,0), torch.from_numpy(dna_tensor).permute(2, 1, 0)
+        return torch.from_numpy(fibers_tensor).permute(1,2,0), torch.from_numpy(dna_tensor).permute(2, 1, 0), i
 
     def get_other_bw_data(self, chrom, start, end):
 
@@ -342,8 +343,8 @@ class fiber_data_iterator(IterableDataset):
             while not found_possible_locus:
                 random_locus = self.generate_ccre_loci()
 
-                fiber_tensor, dna_tensor = self.get_fiber_data(*random_locus)
-                if fiber_tensor is None: continue
+                fiber_tensor, dna_tensor, n_fibers = self.get_fiber_data(*random_locus)
+                if fiber_tensor is None or n_fibers==0: continue
 
                 other_tensor = self.get_other_bw_data(*random_locus)
                 has_nan = torch.isnan(other_tensor).any().item()
@@ -352,7 +353,7 @@ class fiber_data_iterator(IterableDataset):
                 dna = self.onehot_for_locus(random_locus)
                 found_possible_locus = True
 
-            yield fiber_tensor, dna, dna_tensor, other_tensor, random_locus
+            yield fiber_tensor, dna, dna_tensor, other_tensor, n_fibers, random_locus
 
 #--------------------------------------------------------------------------------------------------
 # testing

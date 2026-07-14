@@ -58,9 +58,9 @@ class Trainer:
 
     def train_step(self, batch):
         self.model.train()
-        m6as, dna, dna_tensor, target = [b.to(self.device) for b in batch[:4]]
+        m6as, dna, dna_tensor, target, n_fibers = [b.to(self.device) for b in batch[:5]]
         self.optimizer.zero_grad()
-        output, processed_fibers = self.model(m6as, dna=dna, dna_tensor=dna_tensor)
+        output, processed_fibers = self.model(m6as, dna=dna, dna_tensor=dna_tensor, n_fibers=n_fibers)
         loss = self.criterion(output, target)
 
         if torch.isnan(output).any().item() or torch.isnan(loss):
@@ -76,9 +76,9 @@ class Trainer:
     # 3. Dedicated validation logic isolated from optimizer calls
     def val_step(self, batch):
         self.model.eval()
-        m6as, dna, dna_tensor, target = [b.to(self.device) for b in batch[:4]]
+        m6as, dna, dna_tensor, target, n_fibers = [b.to(self.device) for b in batch[:5]]
         with torch.no_grad():
-            output, processed_fibers = self.model(m6as, dna=dna, dna_tensor=dna_tensor)
+            output, processed_fibers = self.model(m6as, dna=dna, dna_tensor=dna_tensor, n_fibers=n_fibers)
             loss = self.criterion(output, target)
         return loss.item(), output, processed_fibers
 
@@ -140,17 +140,19 @@ class Trainer:
             plot_sample_out_fibers_wandb(
                 self.wandb_run, save_dir, batch[0], self.config.input_flags,
                 self.config.num_input_features, t_output, t_processed_fibers,
-                batch[3], batch[4], epoch, avg_train_loss, mode="Train"
+                batch[3], batch[5], epoch, avg_train_loss, mode="Train"
             )
 
             if avg_val_loss is not None:
                 plot_sample_out_fibers_wandb(
                     self.wandb_run, save_dir, v_batch[0], self.config.input_flags,
                     self.config.num_input_features, v_output, v_processed_fibers,
-                    v_batch[3], v_batch[4], epoch, avg_val_loss, mode="Val"
+                    v_batch[3], v_batch[5], epoch, avg_val_loss, mode="Val"
                 )
 
         plot_loss(save_dir, train_losses, epoch+1)
+
+        self.model.save_model(save_dir, epoch+1)
 
     def run_name_sup(self, input_flags):
         feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
