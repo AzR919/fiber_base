@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-08_13_k5_h3k4me3_w_fire
+#SBATCH --job-name=2026-07-14_00_gm_h3k4me3_avg_n_fibers
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -37,24 +37,24 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-    --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/ENCFF911JVK_H3K4me3.bigWig \
+    --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
+    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF287HAO_H3K4me3.bigWig \
     --batch_size 16 --epochs 25 --model deep01 --fibers_per_entry 200 --input_flags 1 1 1 1 1 \
-    --res_dir ./results --decoder_type avg --kernel_size 15 \
-    --name_suffix k5_h3k4me3_w_fire
+    --res_dir ./results --decoder_type avg_n --kernel_size 15 \
+    --name_suffix gm_h3k4me3_avg_n_fibers
 
 # /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
-# ENCFF798KYP_H3K27ac.bigWig
-# ENCFF287HAO_H3K4me3.bigWig
-# ENCFF012DMX_H3K4me3_signal.bigWig
-# ENCFF603BJO_ATAC_seq.bigWig
-# ENCFF667MDI_ATAC_seq_signal.bigWig
+# GM12878/ENCFF798KYP_H3K27ac.bigWig
+# GM12878/ENCFF287HAO_H3K4me3.bigWig
+# GM12878/ENCFF012DMX_H3K4me3_signal.bigWig
+# GM12878/ENCFF603BJO_ATAC_seq.bigWig
+# GM12878/ENCFF667MDI_ATAC_seq_signal.bigWig
 
 # /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram
-# ENCFF911JVK_H3K4me3.bigWig
-# ENCFF071GML_H3K4me3_signal.bigWig
-# ENCFF102ARJ_ATAC_seq.bigWig
-# ENCFF357GNC_ATAC_seq_signal.bigWig
+# K562/ENCFF911JVK_H3K4me3.bigWig
+# K562/ENCFF071GML_H3K4me3_signal.bigWig
+# K562/ENCFF102ARJ_ATAC_seq.bigWig
+# K562/ENCFF357GNC_ATAC_seq_signal.bigWig
 
 # Print job completion time
 echo "Job finished on $(date)"

@@ -312,6 +312,238 @@ def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_fea
     })
     plt.close(fig)
 
+def plot_sample_out_fibers_plt(dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
+    """
+    Plots dynamic input channels (Left Column) and model outputs (Right Column) in a single unified figure.
+    Makes single-bit channels (m6a, cpg) highly visible using distinct point-markers.
+    """
+    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
+    num_fibers = inp.shape[-1]
+
+    # 1. Setup the figure layout
+    grid_rows = max(2, num_input_features)
+    # Calculate height based on number of inputs to keep it proportional
+    fig_height = max(10, 2.5 * grid_rows)
+    fig = plt.figure(figsize=(20, fig_height))
+
+    # GridSpec: num_input_features rows, 2 columns (Left = Inputs, Right = Outputs)
+    gs = gridspec.GridSpec(grid_rows, 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.3)
+
+    feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
+    colors = ["black", "purple", "blue", "green", "red"]
+
+    # =================================================================
+    # LEFT COLUMN: DYNAMIC INPUT DIAGNOSTICS
+    # =================================================================
+    k = 0
+    input_axes = []
+
+    for j in range(len(input_flags)):
+        if not input_flags[j]:
+            continue
+
+        # Assign a subplot in the left column (column index 0)
+        ax = fig.add_subplot(gs[k, 0])
+        input_axes.append(ax)
+
+        # Identify if this channel is a single-bit sparse marker (m6a or cpg)
+        is_single_bit = feature_names[j] in ["m6a", "cpg"]
+
+        for i in range(num_fibers):
+            # inp shape: [B, C, L, N] -> pulling batch index 0
+            fiber_feat = inp[0, k, :, i].cpu().detach()
+
+            if is_single_bit:
+                # Find exactly where the bits are 1
+                indices = torch.where(fiber_feat > 0.5)[0].numpy()
+                if len(indices) > 0:
+                    # Plot thick vertical ticks '|' to make single bits look sharp and visible
+                    ax.scatter(indices, np.full_like(indices, -i),
+                               marker='|', color=colors[j], s=25, alpha=0.7, linewidths=0.9)
+            else:
+                # Continuous chunk processing (msp, nuc, fire_msp)
+                masked = (fiber_feat > 0.5).float()
+                diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
+                starts = torch.where(diff == 1)[0]
+                ends = torch.where(diff == -1)[0]
+
+                for s, e in zip(starts, ends):
+                    if e > s:
+                        ax.axhspan(-i - 0.35, -i + 0.35,
+                                   xmin=(s/len(fiber_feat)).item(), xmax=(e/len(fiber_feat)).item(),
+                                   color=colors[j], alpha=0.5, lw=0)
+
+        ax.set_ylabel(feature_names[j], fontsize=12, fontweight='bold')
+        ax.set_ylim(-num_fibers - 0.5, 0.5)
+        ax.set_xlim(0, inp.shape[2])
+
+        # Hide x-axis ticks for all but the bottom input plot
+        if k < num_input_features - 1:
+            ax.set_xticklabels([])
+
+        k += 1
+
+    if input_axes:
+        input_axes[0].set_title(f"Input Features\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
+        input_axes[-1].set_xlabel("Genomic Position (bp)")
+
+    # =================================================================
+    # RIGHT COLUMN: MODEL OUTPUTS (Spanning multiple rows)
+    # =================================================================
+    # Splitting the right column: top row for bulk, remaining rows for heatmap
+    split_row = max(1, num_input_features // 4)
+
+    ax_bulk = fig.add_subplot(gs[0:1, 1])
+    ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
+
+    tar_sig = tar[0].cpu().detach().numpy()
+    out_sig = out[0].cpu().detach().numpy()
+    instance_loss = np.mean((tar_sig - out_sig) ** 2)
+
+    # Top Right: Bulk Assay comparison
+    ax_bulk.plot(tar[0].cpu(), color='dimgray', lw=1.5, label='Target')
+    ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
+    ax_bulk.set_ylabel("Signal Intensity")
+    ax_bulk.legend(loc='upper right', frameon=False)
+    ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
+    # ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Epoch Avg {mode} Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
+    ax_bulk.set_xticklabels([]) # Shared axis with heatmap
+
+    # Bottom Right: Predicted Fiber Heatmap
+    pred_matrix = out_fibers[0].cpu().detach().numpy().T
+
+    img = ax_heat.imshow(pred_matrix, aspect='auto', cmap='magma',
+                         interpolation='nearest', origin='upper',
+                         extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
+
+    plt.colorbar(img, ax=ax_heat, orientation='horizontal', pad=0.10, fraction=0.04, label='Accessibility Probability')
+    ax_heat.set_ylabel("Fibers (Imputed)")
+    ax_heat.set_xlabel("Genomic Position (bp)")
+
+    # Adjust layout spacing safely
+    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
+
+    # Log unified single image to Weights & Biases
+    plt.savefig(dir)
+    plt.close(fig)
+
+def plot_single_fibers_plt(dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
+    """
+    Plots the top 5 single fibers individually.
+    Left Side: 5 sequential sections (one per fiber). Each section breaks down the active
+               epigenetic channels sequentially (m6a, cpg, msp, nuc, fire_msp).
+    Right Side: 5 matching line plots showing the exact predicted continuous accessibility profile for that fiber.
+    """
+    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
+    num_fibers_to_plot = min(5, inp.shape[-1])  # Target exactly 5 fibers
+    sequence_length = inp.shape[2]
+
+    # Setup 5 distinct vertical sections.
+    # Left column gets the sub-features; Right column gets the single continuous line plot.
+    fig = plt.figure(figsize=(24, 4.0 * num_fibers_to_plot))
+    outer_gs = gridspec.GridSpec(num_fibers_to_plot, 2, figure=fig, width_ratios=[1, 1], hspace=0.4, wspace=0.2)
+
+    feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
+    colors = ["black", "purple", "blue", "green", "red"]
+
+    # Identify active features based on flags
+    active_features = [(j, feature_names[j], colors[j]) for j in range(len(input_flags)) if input_flags[j]]
+    num_active_features = len(active_features)
+
+    # Loop through each of the 5 fibers
+    for fiber_idx in range(num_fibers_to_plot):
+
+        # =================================================================
+        # LEFT SIDE: INNER SUB-GRID FOR SINGLE FIBER CHANNELS
+        # =================================================================
+        # Create an inner grid spec inside the left cell of this fiber's row
+        inner_gs = gridspec.GridSpecFromSubplotSpec(
+            num_active_features, 1,
+            subplot_spec=outer_gs[fiber_idx, 0],
+            hspace=0.08
+        )
+
+        for k, (orig_j, feat_name, color) in enumerate(active_features):
+            ax_feat = fig.add_subplot(inner_gs[k, 0])
+
+            # Extract feature layout for this specific fiber [Batch=0, Feature=k, Positions, Fiber=fiber_idx]
+            fiber_feat = inp[0, k, :, fiber_idx+4].cpu().detach()
+            is_single_bit = feat_name in ["m6a", "cpg"]
+
+            if is_single_bit:
+                # Plot single-molecule high-contrast bits
+                indices = torch.where(fiber_feat > 0.5)[0].numpy()
+                if len(indices) > 0:
+                    ax_feat.scatter(indices, np.ones_like(indices),
+                                    marker='|', color=color, s=45, alpha=0.8, linewidths=1.2)
+            else:
+                # Plot continuous blocks (msp, nuc, fire_msp) as horizontal spans
+                masked = (fiber_feat > 0.5).float()
+                diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
+                starts = torch.where(diff == 1)[0]
+                ends = torch.where(diff == -1)[0]
+
+                for s, e in zip(starts, ends):
+                    if e > s:
+                        ax_feat.axvspan(s.item(), e.item(), color=color, alpha=0.5, lw=0)
+
+            # Aesthetics for the inner feature row
+            ax_feat.set_xlim(0, sequence_length)
+            ax_feat.set_ylim(0.5, 1.5)
+            ax_feat.set_yticks([])
+            ax_feat.set_ylabel(feat_name, fontsize=9, fontweight='bold', rotation=0, labelpad=25, va='center')
+
+            # Hide ticks except for the bottom-most track of the final fiber section
+            if k < num_active_features - 1 or fiber_idx < num_fibers_to_plot - 1:
+                ax_feat.set_xticklabels([])
+
+            # Put a main title on the very first sub-plot cell
+            if fiber_idx == 0 and k == 0:
+                ax_feat.set_title(f"Fiber Input Sub-Features\n{chr_name}:{start}-{end}", fontsize=13, fontweight='bold')
+
+            # Add a vertical visual grouping anchor label to show which overall fiber block we are in
+            if k == 0:
+                ax_feat.text(-0.02, 1.0, f"Fiber {fiber_idx + 1}", transform=ax_feat.transAxes,
+                             fontsize=12, fontweight='bold', ha='right', va='center', color='dimgray')
+
+        # =================================================================
+        # RIGHT SIDE: MODEL OUTPUT AS A CONTINUOUS LINE PLOT
+        # =================================================================
+        ax_line = fig.add_subplot(outer_gs[fiber_idx, 1])
+
+        # Extract the continuous probability prediction array for this fiber
+        # out_fibers shape assumed: [Batch, Length, Fibers]
+        pred_fiber_signal = out_fibers[0, :, fiber_idx+4].cpu().detach().numpy()
+
+        # Plot continuous probability signal line
+        ax_line.plot(pred_fiber_signal, color='darkorange', lw=1.5, alpha=0.9, label=f'Pred Fiber {fiber_idx + 1}')
+
+        ax_line.set_xlim(0, sequence_length)
+        ax_line.set_ylim(-0.05, 10.0)  # Probabilities sit strictly between 0 and 1
+        ax_line.set_ylabel("Accessibility Score", fontsize=10, fontweight='bold')
+
+        # Clean up x-axis labels on upper plots to keep layout dense and readable
+        if fiber_idx < num_fibers_to_plot - 1:
+            ax_line.set_xticklabels([])
+        else:
+            ax_line.set_xlabel("Genomic Position (bp)", fontsize=11)
+
+        if fiber_idx == 0:
+            ax_line.set_title(f"Imputed Continuous Fiber Signals ({mode} Profile)", fontsize=13, fontweight='bold')
+
+        ax_line.legend(loc='upper right', frameon=False, fontsize=9)
+        ax_line.grid(axis='y', linestyle='--', alpha=0.3)
+
+    # Label bottom axis of the features track column
+    fig.axes[num_active_features * num_fibers_to_plot - 1].set_xlabel("Genomic Position (bp)", fontsize=11)
+
+    # Adjust layout spacing safely
+    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95)
+
+    # Save out the high resolution diagnostics plot file
+    plt.savefig(dir, dpi=150)
+    plt.close(fig)
+
 # def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, plot_sum=False):
 #     """
 #     Consolidated plotting:

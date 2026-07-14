@@ -11,9 +11,65 @@ import pyBigWig
 
 from args import get_args
 
-from models import Base_Model, Simple_Add_CNN_Model
-
+from data_utils import *
+from models import *
 from utils import *
+
+
+def tester_4():
+
+    plot_save_dir = "./ignore/pres"
+
+    chrom, start = "chr20", 2651965
+    end = start + 2048
+    model_path = "./results/26-07-14_T00-34-17_gm_h3k4me3_avg_n_fibers/Model_epoch_25.pt"
+    fiber_data_path = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram"
+    other_bw_path = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF287HAO_H3K4me3.bigWig"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    plot_save_name = "GM_h3k4_2"
+
+    model, config = FiberDeep01ResConv1dBlock.load_model(
+        filepath=model_path,
+        map_location=device
+    )
+
+    model.to(device)
+    model.eval()
+
+    print(config)
+
+    kwargs = {
+        "fiber_data_path":fiber_data_path,
+        "other_bw": other_bw_path,
+        "fibers_per_entry": 200,
+        "context_length": 2048,
+        "iters_per_epoch": 1024,
+        "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
+        "input_flags": [1,1,1,1,1],
+        "ccre_path": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed"
+    }
+
+    t_set = fiber_data_iterator(**kwargs)
+    t_set.init_worker_resources()
+
+    fiber_tensor, dna_tensor, n_fibers = t_set.get_fiber_data(chrom, start, end)
+    g_output = t_set.get_other_bw_data(chrom, start, end)
+
+    print(fiber_tensor.shape, n_fibers)
+
+    m_input = fiber_tensor.unsqueeze(0)
+    m_n_fibers = torch.tensor(n_fibers)
+    m_output, processed_fibers = model(m_input, n_fibers=m_n_fibers)
+
+    print(m_output.shape, processed_fibers.shape)
+
+    plot_sample_out_fibers_plt(f"{plot_save_dir}/{plot_save_name}", m_input, kwargs["input_flags"], 5,
+                               m_output, processed_fibers, [g_output], [[chrom], [start], [end]], "oof", avg_loss="NaN", mode="Eval")
+
+    plot_single_fibers_plt(f"{plot_save_dir}/{plot_save_name}_single", m_input, kwargs["input_flags"], 5,
+                           m_output, processed_fibers, [g_output], [[chrom], [start], [end]], "oof", avg_loss="NaN", mode="Eval")
+
+    print("all done")
 
 def tester_3():
 
@@ -151,5 +207,6 @@ if __name__=="__main__":
     # tester_0()
     # tester_1()
     # tester_2()
-    tester_3()
+    # tester_3()
+    tester_4()
     pass
