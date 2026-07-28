@@ -3,6 +3,7 @@ File for random testing.
 Should not be in the final version
 """
 
+import os
 import wandb
 import pyft
 import pysam
@@ -15,61 +16,148 @@ from data_utils import *
 from models import *
 from utils import *
 
+import os
+import torch
+import numpy as np
 
 def tester_4():
-
-    plot_save_dir = "./ignore/pres"
-
-    chrom, start = "chr20", 2651965
-    end = start + 2048
-    model_path = "./results/26-07-14_T00-34-17_gm_h3k4me3_avg_n_fibers/Model_epoch_25.pt"
-    fiber_data_path = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram"
-    other_bw_path = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF287HAO_H3K4me3.bigWig"
+    # Base configuration directories
+    plot_save_base_dir = "./ignore/pres"
+    data_root = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER"
+    fasta_path = "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    plot_save_name = "GM_h3k4_2"
 
-    model, config = FiberDeep01ResConv1dBlock.load_model(
-        filepath=model_path,
-        map_location=device
-    )
-
-    model.to(device)
-    model.eval()
-
-    print(config)
-
-    kwargs = {
-        "fiber_data_path":fiber_data_path,
-        "other_bw": other_bw_path,
-        "fibers_per_entry": 200,
-        "context_length": 2048,
-        "iters_per_epoch": 1024,
-        "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-        "input_flags": [1,1,1,1,1],
-        "ccre_path": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed"
+    # Define metadata relationships for Cell Types and Assays
+    cell_metadata = {
+        "GM": {
+            "full_name": "GM12878",
+            "cram": f"{data_root}/GM12878/GM12878-fire-v0.1-filtered.cram",
+            "ccre": f"{data_root}/GM12878/gm12878_ccres.bed",
+            "assays": {
+                "atac": {
+                    "bw": f"{data_root}/GM12878/ENCFF603BJO_ATAC_seq.bigWig",
+                    "model_dir": "./results/26-07-13_T13-08-19_gm_atac_avg_n_fibers/"
+                },
+                "h3k4me3": {
+                    "bw": f"{data_root}/GM12878/ENCFF287HAO_H3K4me3.bigWig",
+                    "model_dir": "./results/26-07-14_T00-34-17_gm_h3k4me3_avg_n_fibers/"
+                }
+            }
+        },
+        "K5": {
+            "full_name": "K562",
+            "cram": f"{data_root}/K562/K562-fire-v0.1-filtered.cram",
+            # Explicitly using GM ccres for K562 as requested
+            "ccre": f"{data_root}/GM12878/gm12878_ccres.bed",
+            "assays": {
+                "atac": {
+                    "bw": f"{data_root}/K562/ENCFF102ARJ_ATAC_seq.bigWig",
+                    "model_dir": "./results/26-07-13_T13-42-37_k5_atac_avg_n_fibers/"
+                },
+                "h3k4me3": {
+                    "bw": f"{data_root}/K562/ENCFF911JVK_H3K4me3.bigWig",
+                    "model_dir": "./results/26-07-13_T21-19-51_k5_h3k4me3_avg_n_fibers/"
+                }
+            }
+        }
     }
 
-    t_set = fiber_data_iterator(**kwargs)
-    t_set.init_worker_resources()
+    cell_types = ["GM", "K5"]
+    assays = ["atac", "h3k4me3"]
 
-    fiber_tensor, dna_tensor, n_fibers = t_set.get_fiber_data(chrom, start, end)
-    g_output = t_set.get_other_bw_data(chrom, start, end)
+    # Scale up search matrix scope to screen 100 seeds
+    seeds = list(range(1, 101))
 
-    print(fiber_tensor.shape, n_fibers)
+    # =================================================================
+    # OUTER LOOP: SCREEN THROUGH 100 SEEDS FOR STRONG TARGET REGIONS
+    # =================================================================
+    for seed in seeds:
+        # =================================================================
+        # INNER LOOPS: CELL LINES & TARGET MOLECULAR ASSAYS
+        # =================================================================
+        for cell in cell_types:
+            for assay in assays:
+                # Extract file architecture parameters
+                cell_info = cell_metadata[cell]
+                assay_info = cell_info["assays"][assay]
+                model_path = os.path.join(assay_info["model_dir"], "Model_epoch_25.pt")
 
-    m_input = fiber_tensor.unsqueeze(0)
-    m_n_fibers = torch.tensor(n_fibers)
-    m_output, processed_fibers = model(m_input, n_fibers=m_n_fibers)
+                if not os.path.exists(model_path):
+                    continue
 
-    print(m_output.shape, processed_fibers.shape)
+                # 1. Instantiate the dataset worker using the current seed to locate a candidate locus
+                kwargs = {
+                    "fiber_data_path": cell_info["cram"],
+                    "other_bw": assay_info["bw"],
+                    "fibers_per_entry": 200,
+                    "context_length": 2048,
+                    "iters_per_epoch": 1024,
+                    "fasta_path": fasta_path,
+                    "input_flags": [1, 1, 1, 1, 1],
+                    "ccre_path": cell_info["ccre"],
+                    "seed": seed
+                }
 
-    plot_sample_out_fibers_plt(f"{plot_save_dir}/{plot_save_name}", m_input, kwargs["input_flags"], 5,
-                               m_output, processed_fibers, [g_output], [[chrom], [start], [end]], "oof", avg_loss="NaN", mode="Eval")
+                t_set = fiber_data_iterator(**kwargs)
+                t_set.init_worker_resources()
 
-    plot_single_fibers_plt(f"{plot_save_dir}/{plot_save_name}_single", m_input, kwargs["input_flags"], 5,
-                           m_output, processed_fibers, [g_output], [[chrom], [start], [end]], "oof", avg_loss="NaN", mode="Eval")
+                # Get the candidate genomic coordinates
+                chrom, start, end = t_set.generate_ccre_loci(jitter_range=0)
 
-    print("all done")
+                # Fetch target BigWig array data first to test activity strength
+                g_output = t_set.get_other_bw_data(chrom, start, end)
+
+                # Convert to numpy/tensor safely to find max value
+                if isinstance(g_output, list):
+                    bw_max = max([torch.max(go).item() if isinstance(go, torch.Tensor) else np.max(go) for go in g_output])
+                else:
+                    bw_max = torch.max(g_output).item() if isinstance(g_output, torch.Tensor) else np.max(g_output)
+
+                # CRITICAL CUTOFF FILTER: Skip inference and plots if it doesn't cross threshold activity peak
+                if bw_max <= 1.5:
+                    continue
+
+                # 2. Threshold crossed! Load the model using your exact required code block
+                model, config = FiberDeep01ResConv1dBlock.load_model(
+                    filepath=model_path,
+                    map_location=device
+                )
+                model.to(device)
+                model.eval()
+
+                print(f" Found active region! Seed {seed} | {cell}-{assay} | Max BW Signal: {bw_max:.2f} at {chrom}:{start}-{end}")
+
+                # Create the specific output directory for this cell type and assay (e.g., ./ignore/pres/GM12878/atac)
+                out_dir = os.path.join(plot_save_base_dir, cell_info["full_name"], assay)
+                os.makedirs(out_dir, exist_ok=True)
+
+                # Fetch matching structural fiber tensors now that the region is validated
+                fiber_tensor, dna_tensor, n_fibers = t_set.get_fiber_data(chrom, start, end)
+
+                m_input = fiber_tensor.unsqueeze(0)
+                m_n_fibers = torch.tensor(n_fibers)
+
+                # Model Inference Execution Phase
+                with torch.no_grad():
+                    m_output, processed_fibers = model(m_input, n_fibers=m_n_fibers)
+
+                # Set plot filename to just the seed number
+                plot_filename = f"seed_{seed}"
+
+                # Generate and save diagnostic target plots inside the cell/assay directory
+                plot_sample_out_fibers_plt(
+                    f"{out_dir}/{plot_filename}", m_input, kwargs["input_flags"], 5,
+                    m_output, processed_fibers, [g_output], [[chrom], [start], [end]],
+                    "oof", avg_loss="NaN", mode="Eval"
+                )
+
+                plot_single_fibers_plt(
+                    f"{out_dir}/{plot_filename}_single", m_input, kwargs["input_flags"], 5,
+                    m_output, processed_fibers, [g_output], [[chrom], [start], [end]],
+                    "oof", avg_loss="NaN", mode="Eval"
+                )
+
+    print("\nLocus screening complete. High-signal plots saved to their respective directories.")
 
 def tester_3():
 
