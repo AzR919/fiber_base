@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-29_00_test_new_code
+#SBATCH --job-name=2026-07-29_01_atac_gm_recon
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -40,20 +40,7 @@ python main.py \
   --data_config configs/data/data00.yaml \
   --model_config configs/models/model00.yaml \
   --train_config configs/training/train00.yaml \
-  --name_prefix test_run
-
-# /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
-# GM12878/ENCFF798KYP_H3K27ac.bigWig
-# GM12878/ENCFF287HAO_H3K4me3.bigWig
-# GM12878/ENCFF012DMX_H3K4me3_signal.bigWig
-# GM12878/ENCFF603BJO_ATAC_seq.bigWig
-# GM12878/ENCFF667MDI_ATAC_seq_signal.bigWig
-
-# /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/K562/K562-fire-v0.1-filtered.cram
-# K562/ENCFF911JVK_H3K4me3.bigWig
-# K562/ENCFF071GML_H3K4me3_signal.bigWig
-# K562/ENCFF102ARJ_ATAC_seq.bigWig
-# K562/ENCFF357GNC_ATAC_seq_signal.bigWig
+  --name_prefix bulk_name_test
 
 # Print job completion time
 echo "Job finished on $(date)"
