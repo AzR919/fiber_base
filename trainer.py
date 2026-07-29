@@ -164,10 +164,12 @@ class Trainer:
                     last_t_fibers,
                     last_t_batch["target_bulk"],
                     last_t_batch["locus"],
+                    last_t_batch["cell_type"],
                     avg_loss=avg_train_loss,
                     mode="Train"
                 )
                 log_dict["Train_Dashboard"] = wandb.Image(fig_t)
+                plt.close(fig_t)
 
             # Generate & Log Val Dashboard Plot
             if last_v_batch is not None:
@@ -178,10 +180,12 @@ class Trainer:
                     last_v_fibers,
                     last_v_batch["target_bulk"],
                     last_v_batch["locus"],
+                    last_v_batch["cell_type"],
                     avg_loss=avg_val_loss,
                     mode="Val"
                 )
                 log_dict["Val_Dashboard"] = wandb.Image(fig_v)
+                plt.close(fig_v)
 
             self.wandb_run.log(log_dict)
 
@@ -197,6 +201,9 @@ class Trainer:
                 sup_str += f"_{name}"
         return sup_str
 
+
+#--------------------------------------------------------------------------------------------------
+# Testing
 
 def tester():
     pass

@@ -260,13 +260,14 @@ def filter_informative_fibers(inp, input_flags, min_m6a_sum=20, max_fibers=20):
 #--------------------------------------------------------------------------------------------------
 # Top-Level Visualization Dashboards (Return Figure Objects)
 
-def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, avg_loss=None, mode="Train"):
+def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, cell_type, avg_loss=None, mode="Train"):
     """
     Constructs a unified evaluation figure displaying inputs (left) and predicted outputs (right).
     Returns Matplotlib Figure object for saving or W&B logging.
     """
     chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
     chr_info = f"{chr_name}:{start}-{end}"
+    cell_info = cell_type[0]
     num_input_features = sum(input_flags)
 
     grid_rows = max(2, num_input_features)
@@ -277,7 +278,7 @@ def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, avg
     # Left Column: Inputs
     input_axes = render_input_channels(fig, gs, inp, input_flags)
     if input_axes:
-        input_axes[0].set_title(f"Input Features\n{chr_info}", fontsize=13, fontweight='bold')
+        input_axes[0].set_title(f"Input Features, {cell_info}\n{chr_info}", fontsize=13, fontweight='bold')
 
     # Right Column: Bulk + Heatmap
     ax_bulk = fig.add_subplot(gs[0:1, 1])
