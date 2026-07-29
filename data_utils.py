@@ -345,7 +345,7 @@ class fiber_data_iterator(IterableDataset):
 
 
 #--------------------------------------------------------------------------------------------------
-# Testing Harness & Metadata Structure Specification
+# Testing
 
 def tester():
     data_root = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER"

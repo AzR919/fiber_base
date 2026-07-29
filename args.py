@@ -162,7 +162,7 @@ def get_args():
     return parsed_args
 
 #--------------------------------------------------------------------------------------------------
-# Testing Harness
+# Testing
 
 def tester():
     args = get_args()
