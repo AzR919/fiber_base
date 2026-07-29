@@ -261,10 +261,23 @@ class fiber_data_iterator(IterableDataset):
 
         msp_data = np.zeros((self.context_length), dtype=np.float32)
 
-        for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
-            if ref_pos is None: continue
-            if start <= ref_pos < end and aq >= Q_THRESHOLD:
-                msp_data[ref_pos-start:ref_pos-start+len] = 1
+        for ref_pos, length, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
+            if ref_pos is None or length is None:
+                continue
+
+            ref_end = ref_pos + length
+
+            # Check if the MSP interval overlaps the window [start, end)
+            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
+                # Calculate positions relative to the window start
+                rel_start = ref_pos - start
+                rel_end = ref_end - start
+
+                # Clip indices to fit within [0, context_length)
+                win_start = max(0, rel_start)
+                win_end = min(self.context_length, rel_end)
+
+                msp_data[win_start:win_end] = 1
 
         return msp_data
 
@@ -272,10 +285,23 @@ class fiber_data_iterator(IterableDataset):
 
         nuc_data = np.zeros((self.context_length), dtype=np.float32)
 
-        for ref_pos, len, aq in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths, fiber.nuc.qual):
-            if ref_pos is None: continue
-            if start <= ref_pos < end and aq >= Q_THRESHOLD:
-                nuc_data[ref_pos-start:ref_pos-start+len] = 1
+        for ref_pos, length, aq in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths, fiber.nuc.qual):
+            if ref_pos is None or length is None:
+                continue
+
+            ref_end = ref_pos + length
+
+            # Check if the NUC interval overlaps the window [start, end)
+            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
+                # Calculate positions relative to the window start
+                rel_start = ref_pos - start
+                rel_end = ref_end - start
+
+                # Clip indices to fit within [0, context_length)
+                win_start = max(0, rel_start)
+                win_end = min(self.context_length, rel_end)
+
+                nuc_data[win_start:win_end] = 1
 
         return nuc_data
 
@@ -283,10 +309,23 @@ class fiber_data_iterator(IterableDataset):
 
         fire_msp_data = np.zeros((self.context_length), dtype=np.float32)
 
-        for ref_pos, len, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
-            if ref_pos is None: continue
-            if start <= ref_pos < end and aq >= Q_THRESHOLD:
-                fire_msp_data[ref_pos-start:ref_pos-start+len] = 1
+        for ref_pos, length, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
+            if ref_pos is None or length is None:
+                continue
+
+            ref_end = ref_pos + length
+
+            # Check if the MSP interval overlaps the window [start, end)
+            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
+                # Calculate positions relative to the window start
+                rel_start = ref_pos - start
+                rel_end = ref_end - start
+
+                # Clip indices to fit within [0, context_length)
+                win_start = max(0, rel_start)
+                win_end = min(self.context_length, rel_end)
+
+                fire_msp_data[win_start:win_end] = 1
 
         return fire_msp_data
 
@@ -344,7 +383,7 @@ class fiber_data_iterator(IterableDataset):
                 random_locus = self.generate_ccre_loci()
 
                 fiber_tensor, dna_tensor, n_fibers = self.get_fiber_data(*random_locus)
-                if fiber_tensor is None or n_fibers==0: continue
+                if n_fibers==0 : continue
 
                 other_tensor = self.get_other_bw_data(*random_locus)
                 has_nan = torch.isnan(other_tensor).any().item()
@@ -361,10 +400,10 @@ class fiber_data_iterator(IterableDataset):
 def tester():
 
     kwargs = {
-        "fiber_data_path":"/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram",
+        "fiber_data_path":"/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram",
         "other_bw": "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF603BJO_ATAC_seq.bigWig",
         "fibers_per_entry": 200,
-        "context_length": 20,
+        "context_length": 120,
         "iters_per_epoch": 1,
         "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
         "input_flags": [1,1,1,1,1],
