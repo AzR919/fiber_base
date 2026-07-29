@@ -33,7 +33,7 @@ def get_args():
 
     # Config Files (Metadata)
     config_group = parser.add_argument_group("Metadata Config Files")
-    config_group.add_argument("--data_config", type=str, default=None,
+    config_group.add_argument("--data_config", type=str, default=None, required=True,
                              help="Path to JSON or YAML file containing dataset metadata and configuration")
     config_group.add_argument("--model_config", type=str, default=None,
                              help="Path to JSON or YAML file containing model configuration")
@@ -89,6 +89,8 @@ def get_args():
     io_group = parser.add_argument_group("Model I/O")
     io_group.add_argument("--res_dir", type=str, default="./results",
                           help="Directory to save trained models and final results")
+    io_group.add_argument("--name_prefix", type=str, default="",
+                              help="prefix to append to auto-generated model name")
     io_group.add_argument("--name_suffix", type=str, default="",
                           help="Suffix to append to auto-generated model name")
 

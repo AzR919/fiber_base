@@ -332,7 +332,7 @@ class fiber_data_iterator(IterableDataset):
             out_dict = {
                 "fiber_features": fiber_tensor,
                 "target_bulk": other_tensor,
-                "num_fibers": n_fibers,
+                "n_fibers": n_fibers,
                 "locus": random_locus,
                 "cell_type": cell_type_name
             }
