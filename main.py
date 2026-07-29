@@ -5,6 +5,8 @@ Main file
 import os
 import sys
 
+import yaml
+
 from args import get_args
 from data_utils import fiber_data_iterator
 from trainer import Trainer
@@ -22,21 +24,27 @@ def main():
     save_str = create_save_str(args)
     res_dir = os.path.join(args.res_dir, save_str)
 
-    train_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
-            fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
-            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
-            mode="train")
+    with open(args.data_config, "r") as f:
+        data_config = yaml.safe_load(f)
 
-    val_data_iterator = fiber_data_iterator(args.fiber_data_path, args.other_data_path,
-            fibers_per_entry=args.fibers_per_entry, context_length=args.context_length,
-            iters_per_epoch=args.iters_per_epoch, fasta_path="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-            input_flags=args.input_flags, ccre_path="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/gm12878_ccres.bed",
-            mode="val10")
+    kwargs = {
+        "metadata": data_config["metadata"],
+        "fibers_per_entry": args.fibers_per_entry,
+        "context_length": args.context_length,
+        "iters_per_epoch": args.iters_per_epoch,
+        "input_flags": args.input_flags,
+        "seed": args.seed,
+        "return_dna": args.return_dna
+    }
+
+    train_data_iterator = fiber_data_iterator(mode="train", **kwargs)
+    val_data_iterator = fiber_data_iterator(mode="val", **kwargs)
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, train_data_iterator, val_data_iterator, epochs=args.epochs, batch_size=args.batch_size, run_name=args.name_suffix, config=args)
+    trainer = Trainer(model, train_data_iterator, val_data_iterator,
+                      epochs=args.epochs, batch_size=args.batch_size,
+                      run_name=get_config_names_str(args), config=args)
 
     trainer.train(save_dir=res_dir)
 
