@@ -193,7 +193,7 @@ class Trainer:
 
         # Final loss summary curve & model save
         plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
-        self.model.save_model(save_dir, self.epochs)
+        self.model.save_model(save_dir, self.epochs, external_config=self.config)
 
     def _build_run_name_suffix(self, input_flags):
         feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]

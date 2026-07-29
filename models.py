@@ -28,8 +28,10 @@ class BaseModel(nn.Module):
 
         save_path = os.path.join(dir_name, f"Model_epoch_{epoch}.pt")
 
-        # Gather configuration details
-        model_config = dict(external_config) if external_config is not None else {}
+        if external_config is not None:
+            model_config = vars(external_config).copy() if hasattr(external_config, "__dict__") else dict(external_config).copy()
+        else:
+            model_config = {}
 
         # Merge model initialization arguments
         model_config.update(self.init_args)
@@ -39,14 +41,24 @@ class BaseModel(nn.Module):
             "state_dict": self.state_dict()
         }
 
+        # Explicitly put input_flags at top-level
+        if external_config is not None and hasattr(external_config, "input_flags"):
+            checkpoint_bundle["input_flags"] = external_config.input_flags
+        elif "input_flags" in model_config:
+            checkpoint_bundle["input_flags"] = model_config["input_flags"]
+
         torch.save(checkpoint_bundle, save_path)
         print(f"Model blueprint and weights successfully bundled into: {save_path}")
 
     @classmethod
     def load_model(cls, filepath, map_location=None):
         """
-        Loads a bundled file, extracts the configuration parameters to instantiate
-        the exact structural layout, and then loads the model weights.
+        Loads a bundled file, extracts input_flags & configuration parameters to
+        instantiate the exact structural layout, and loads the weights.
+
+        Returns:
+            model (nn.Module): The reconstituted PyTorch model.
+            checkpoint_metadata (dict): Metadata dictionary containing 'input_flags' and full 'config'.
         """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No bundled checkpoint found at path: {filepath}")
@@ -59,12 +71,21 @@ class BaseModel(nn.Module):
         config = checkpoint["model_config"]
         state_dict = checkpoint["state_dict"]
 
-        # Build model instance using stored init arguments matching constructor
+        # Extract input_flags safely from top-level or config dict
+        input_flags = checkpoint.get("input_flags", config.get("input_flags", None))
+        if input_flags is None:
+            raise ValueError(f"Checkpoint at {filepath} does not contain 'input_flags'. Cannot verify input features.")
+
+        # Ensure in_channels in config matches sum(input_flags)
+        assert config["in_channels"] == sum(input_flags), f"Input flag mismatch, {config["in_channels"]} != {sum(input_flags)}"
+
+        # Filter init arguments matching model class constructor
         init_kwargs = {k: v for k, v in config.items() if k in getattr(cls, "_init_keys", [])}
         model = cls(**init_kwargs)
 
         model.load_state_dict(state_dict)
         print(f"Model successfully reconstituted from: {filepath}")
+        print(f"Loaded Model Input Flags: {input_flags} (Active Channels: {sum(input_flags)})")
 
         return model, config
 
