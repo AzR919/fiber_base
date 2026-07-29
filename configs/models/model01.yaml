@@ -1,4 +1,5 @@
-# test config, acts as the base template
+# older version replication.
+# GM12878 atac-seq
 
 model: "deep01"
 decoder_type: "avg_n"

@@ -1,8 +1,8 @@
 # test config, acts as the base template
 
-epochs: 50
-iters_per_epoch: 1000
-batch_size: 16
+epochs: 2
+iters_per_epoch: 10
+batch_size: 2
 lr: 0.0001
 
 # Output & Miscellaneous

@@ -37,10 +37,10 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data01.yaml \
-  --model_config configs/models/model01.yaml \
-  --train_config configs/training/train010.yaml \
-  --name_prefix repo
+  --data_config configs/data/data00.yaml \
+  --model_config configs/models/model00.yaml \
+  --train_config configs/training/train00.yaml \
+  --name_prefix test_run
 
 # /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
 # GM12878/ENCFF798KYP_H3K27ac.bigWig

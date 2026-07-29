@@ -1,7 +1,8 @@
-# test config, acts as the base template
+# older version replication.
+# GM12878 atac-seq
 
-epochs: 2
-iters_per_epoch: 1000
+epochs: 25
+iters_per_epoch: 1024
 batch_size: 16
 lr: 0.0001
 

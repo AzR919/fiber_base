@@ -1,0 +1,5 @@
+# test config, acts as the base template
+
+model: "base01"
+decoder_type: "avg_n"
+kernel_size: 15

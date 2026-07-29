@@ -1,9 +1,8 @@
-# older version replication.
-# GM12878 atac-seq
+# test config, acts as the base template
 
-context_length: 2048
-fibers_per_entry: 200
-return_dna: false
+context_length: 256
+fibers_per_entry: 50
+return_dna: true
 input_flags: [1, 1, 1, 1, 1]
 
 metadata:
@@ -17,3 +16,6 @@ metadata:
     GM12878:
       - "GM12878-fire-v0.1-filtered.cram"
       - "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+    K562:
+      - "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
+      - "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
