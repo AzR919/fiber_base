@@ -118,7 +118,7 @@ def tester_4():
                     continue
 
                 # 2. Threshold crossed! Load the model using your exact required code block
-                model, config = FiberDeep01ResConv1dBlock.load_model(
+                model, config = Deep01ResConv1dBlock.load_model(
                     filepath=model_path,
                     map_location=device
                 )

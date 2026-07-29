@@ -43,6 +43,13 @@ python main.py \
     --res_dir ./results --decoder_type avg_n --kernel_size 15 \
     --name_suffix gm_h3k4me3_avg_n_fibers
 
+python train.py \
+  --data_config configs/data_config.yaml \
+  --model_config configs/model_config.yaml \
+  --train_config configs/train_config.yaml \
+  --batch_size 128 \
+  --lr 0.001
+
 # /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
 # GM12878/ENCFF798KYP_H3K27ac.bigWig
 # GM12878/ENCFF287HAO_H3K4me3.bigWig
