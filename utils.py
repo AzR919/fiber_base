@@ -1,496 +1,324 @@
 """
-Common utility functions
-
+Common utility functions for experiment tracking, seeding, training, and visualization.
 """
 
 import os
 import sys
-import datetime
-
-import wandb
-import torch
 import random
+import datetime
+import contextlib
 import numpy as np
+
+import torch
+import torch.nn as nn
+
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 
-from contextlib import contextmanager
+from torchinfo import summary as torchinfo_summary
 
 #--------------------------------------------------------------------------------------------------
-# Helpers
+# Reproducibility & Environment Setup
 
-def create_save_str(args):
-
-    now = datetime.datetime.now()
-    now = now.strftime("%y-%m-%d_T%H-%M-%S")
-
-    save_str = f"{now}_{args.name_suffix}"
-
-    return save_str
-
-def set_seed(seed):
-
-    # Set seed for Python's random module
+def set_seed(seed: int = 919):
+    """
+    Sets seeds for Python, NumPy, and PyTorch across CPU and GPU.
+    Enforces deterministic CUDA operations for exact reproducibility.
+    """
     random.seed(seed)
-
-    # Set seed for NumPy
     np.random.seed(seed)
-
-    # Set seed for PyTorch (CPU and GPU)
     torch.manual_seed(seed)
 
-    # If using CUDA, set seed for all GPUs
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
+    # if torch.cuda.is_available():
+    #     torch.cuda.manual_seed(seed)
+    #     torch.cuda.manual_seed_all(seed)
+    #     torch.backends.cudnn.deterministic = True
+    #     torch.backends.cudnn.benchmark = False
 
-def plot_sample(dir, inp, out, tar, locus, extra, plot_sum=False):
 
-    chr, start, end = locus[0][0], locus[1][0], locus[2][0]
-
-    os.makedirs(dir, exist_ok=True)
-    save_path = os.path.join(dir, f"Epoch_{extra}.png")
-
-    if plot_sum:
-        # ================== 3. Plot ==================
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 8), sharex=True,
-                                    gridspec_kw={'height_ratios': [1, 1, 4]})
-    else:
-        fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
-                                    gridspec_kw={'height_ratios': [1, 4]})
-
-    # Top: DNase-seq
-    ax1.plot(tar[0].cpu(), color='black', alpha=0.7, label='Target')
-    ax1.plot(out[0].cpu().detach(), color='orange', alpha=0.7, label='Model Output')
-    ax1.set_ylabel("Signal")
-    ax1.set_title(f"Model Prediction {chr}:{start}-{end}")
-    ax1.legend()
-
-    if plot_sum:
-        # Mid: sum m6as
-        pseudo_bulk_m6a = torch.sum(inp, dim=-1, keepdim=True)
-        ax2.plot(pseudo_bulk_m6a[0].cpu(), color='steelblue', alpha=0.7, label='Target')
-        ax2.set_ylabel("Total")
-        ax2.set_title("sum m6as")
-        ax2.legend()
-
-    for i in range(inp.shape[2]):
-        # MSP chunks: stretches of consecutive positions where fiber > 0.5
-        # Find runs of consecutive 1s
-        fiber = inp[0, :, i].cpu()
-        masked = (fiber > 0.5).float()
-        diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-        starts = torch.where(diff == 1)[0]
-        ends = torch.where(diff == -1)[0]
-
-        for s, e in zip(starts, ends):
-            if e > s:  # Valid stretch
-                # Shade the MSP region (accessible chunk)
-                ax3.axhspan(-i - 0.3, -i + 0.3, xmin=(s/len(fiber)).item(), xmax=(e/len(fiber)).item(),
-                            color='blue', alpha=0.3, zorder=1)
-
-        # Similar plot for nucleosome regions
-        masked = (fiber < -0.5).float()
-        diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-        starts = torch.where(diff == 1)[0]
-        ends = torch.where(diff == -1)[0]
-
-        for s, e in zip(starts, ends):
-            if e > s:  # Valid stretch
-                # Shade the MSP region (accessible chunk)
-                ax3.axhspan(-i - 0.3, -i + 0.3, xmin=(s/len(fiber)).item(), xmax=(e/len(fiber)).item(),
-                            color='green', alpha=0.3, zorder=1)
-
-    ax3.set_ylim(-inp.shape[2] - 0.5, 0.5)
-    ax3.set_ylabel("Input Fibers")
-    ax3.set_xlabel("Genomic Position")
-    ax3.set_xlim(0, inp.shape[1])
-
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-
-    plt.close()
-
-def plot_sample_out_fibers(dir, inp, out, out_fibers, tar, locus, extra, plot_sum=False):
+def seed_worker(worker_id):
     """
-    out_fibers: Predicted assay per fiber (B, L, N)
+    Worker init function for PyTorch DataLoader to ensure deterministic multi-processing sampling.
+    Pass as: DataLoader(..., worker_init_fn=seed_worker)
     """
-    chr, start, end = locus[0][0], locus[1][0], locus[2][0]
-    os.makedirs(dir, exist_ok=True)
-    save_path = os.path.join(dir, f"Epoch_{extra}.png")
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
-    # Adjusted height ratios to include the new per-fiber prediction plot
-    # ratios: Target, (Pseudo-bulk), Input Fibers, Output Fibers
-    if plot_sum:
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12), sharex=True,
-                                            gridspec_kw={'height_ratios': [1, 1, 4, 4]})
-    else:
-        fig, (ax1, ax3, ax4) = plt.subplots(3, 1, figsize=(12, 10), sharex=True,
-                                            gridspec_kw={'height_ratios': [1, 4, 4]})
 
-    # 1. Top: Bulk Assay (Target vs Model Bulk Output)
-    ax1.plot(tar[0].cpu(), color='black', alpha=0.7, label='Target Bulk')
-    ax1.plot(out[0].cpu().detach(), color='orange', alpha=0.7, label='Model Bulk Output')
-    ax1.set_ylabel("Signal")
-    ax1.set_title(f"Model Prediction {chr}:{start}-{end}")
-    ax1.legend()
+#--------------------------------------------------------------------------------------------------
+# File Utilities & Experiment Tracking
 
-    if plot_sum:
-        # 2. Mid: Simple sum of m6as (Input Signal Density)
-        pseudo_bulk_m6a = torch.sum(inp, dim=-1)
-        ax2.plot(pseudo_bulk_m6a[0].cpu(), color='steelblue', alpha=0.7)
-        ax2.set_ylabel("Sum m6A")
-
-    # Helper function to plot binary "runs" to avoid duplicating code
-    def plot_stretches(ax, data_matrix, row_idx, threshold, color, invert=False):
-        fiber = data_matrix[0, :, row_idx].cpu().detach()
-        if invert:
-            masked = (fiber < -threshold).float()
-        else:
-            masked = (fiber > threshold).float()
-
-        diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-        starts = torch.where(diff == 1)[0]
-        ends = torch.where(diff == -1)[0]
-
-        for s, e in zip(starts, ends):
-            if e > s:
-                ax.axhspan(-row_idx - 0.3, -row_idx + 0.3,
-                           xmin=(s/len(fiber)).item(), xmax=(e/len(fiber)).item(),
-                           color=color, alpha=0.3, zorder=1)
-
-    # 3. Input Fibers Plot
-    for i in range(inp.shape[-1]):
-        plot_stretches(ax3, inp[2], i, 0.5, 'blue')     # msp
-        plot_stretches(ax3, inp[3], i, 0.5, 'green')    # nuc
-        plot_stretches(ax3, inp[4], i, 0.5, 'red')      # fire_msp
-
-    ax3.set_ylabel("Input Fibers")
-    ax3.set_ylim(-inp.shape[-1] - 0.5, 0.5)
-
-    # 4. Output Predicted Fibers (Heatmap)
-    # out_fibers is (B, L, N). We take the first batch and transpose to (N, L)
-    # Transpose so that each row is a fiber
-    pred_matrix = out_fibers[0].cpu().detach().numpy().T
-
-    # We use 'Oranges' colormap to match your bulk output color
-    img = ax4.imshow(pred_matrix, aspect='auto',
-                     interpolation='nearest', origin='upper',
-                     extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
-
-    # Add a small colorbar for the heatmap
-    plt.colorbar(img, ax=ax4, fraction=0.02, pad=0.01, label='Imputed Heatmap')
-
-    ax4.set_ylabel("Predicted Assay Fibers")
-    ax4.set_xlabel("Genomic Position (bp)")
-    ax4.set_xlim(0, inp.shape[2])
-
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-
-def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
+def get_config_names_str(args) -> str:
     """
-    Plots dynamic input channels (Left Column) and model outputs (Right Column) in a single unified figure.
-    Makes single-bit channels (m6a, cpg) highly visible using distinct point-markers.
+    Extracts filenames (without paths or extensions) from provided config arguments
+    and joins them with underscores.
     """
-    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
-    num_fibers = inp.shape[-1]
+    config_keys = ["data_config", "model_config", "train_config"]
+    config_names = [args.name_prefix]
 
-    # 1. Setup the figure layout
-    grid_rows = max(2, num_input_features)
-    # Calculate height based on number of inputs to keep it proportional
-    fig_height = max(10, 2.5 * grid_rows)
-    fig = plt.figure(figsize=(20, fig_height))
+    for key in config_keys:
+        cfg_path = getattr(args, key, None)
+        if cfg_path:
+            # Extract filename without extension (e.g., 'path/to/data_config.yaml' -> 'data_config')
+            base_name = os.path.splitext(os.path.basename(cfg_path))[0]
+            config_names.append(base_name)
 
-    # GridSpec: num_input_features rows, 2 columns (Left = Inputs, Right = Outputs)
-    gs = gridspec.GridSpec(grid_rows, 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.3)
+    config_names.append(args.name_suffix)
 
-    feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
-    colors = ["black", "purple", "blue", "green", "red"]
+    # Join extracted config names (e.g., "data_config_model_config_train_config")
+    return "_".join(config_names)
 
-    # =================================================================
-    # LEFT COLUMN: DYNAMIC INPUT DIAGNOSTICS
-    # =================================================================
-    k = 0
-    input_axes = []
 
-    for j in range(len(input_flags)):
-        if not input_flags[j]:
-            continue
+def create_save_str(args) -> str:
+    """Generates a structured, unique run identifier including timestamp and concatenated config names."""
+    now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
+    configs_str = get_config_names_str(args)
 
-        # Assign a subplot in the left column (column index 0)
-        ax = fig.add_subplot(gs[k, 0])
-        input_axes.append(ax)
+    # Build component list, filtering out empty strings
+    components = [now]
+    if configs_str:
+        components.append(configs_str)
 
-        # Identify if this channel is a single-bit sparse marker (m6a or cpg)
-        is_single_bit = feature_names[j] in ["m6a", "cpg"]
+    return "_".join(components)
 
-        for i in range(num_fibers):
-            # inp shape: [B, C, L, N] -> pulling batch index 0
-            fiber_feat = inp[0, k, :, i].cpu().detach()
 
-            if is_single_bit:
-                # Find exactly where the bits are 1
-                indices = torch.where(fiber_feat > 0.5)[0].numpy()
-                if len(indices) > 0:
-                    # Plot thick vertical ticks '|' to make single bits look sharp and visible
-                    ax.scatter(indices, np.full_like(indices, -i),
-                               marker='|', color=colors[j], s=25, alpha=0.7, linewidths=0.9)
-            else:
-                # Continuous chunk processing (msp, nuc, fire_msp)
-                masked = (fiber_feat > 0.5).float()
-                diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-                starts = torch.where(diff == 1)[0]
-                ends = torch.where(diff == -1)[0]
+class AverageMeter:
+    """Computes and stores the running average and current value of metrics during training."""
+    def __init__(self):
+        self.reset()
 
-                for s, e in zip(starts, ends):
-                    if e > s:
-                        ax.axhspan(-i - 0.35, -i + 0.35,
-                                   xmin=(s/len(fiber_feat)).item(), xmax=(e/len(fiber_feat)).item(),
-                                   color=colors[j], alpha=0.5, lw=0)
+    def reset(self):
+        self.val = 0.0
+        self.avg = 0.0
+        self.sum = 0.0
+        self.count = 0
 
-        ax.set_ylabel(feature_names[j], fontsize=12, fontweight='bold')
-        ax.set_ylim(-num_fibers - 0.5, 0.5)
-        ax.set_xlim(0, inp.shape[2])
+    def update(self, val, n=1):
+        self.val = float(val)
+        self.sum += float(val) * n
+        self.count += n
+        self.avg = self.sum / self.count
 
-        # Hide x-axis ticks for all but the bottom input plot
-        if k < num_input_features - 1:
-            ax.set_xticklabels([])
 
-        k += 1
+def count_parameters(model: nn.Module) -> int:
+    """Returns total count of trainable parameters in a PyTorch model."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    if input_axes:
-        input_axes[0].set_title(f"Input Features\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
-        input_axes[-1].set_xlabel("Genomic Position (bp)")
 
-    # =================================================================
-    # RIGHT COLUMN: MODEL OUTPUTS (Spanning multiple rows)
-    # =================================================================
-    # Splitting the right column: top row for bulk, remaining rows for heatmap
-    split_row = max(1, num_input_features // 4)
-
-    ax_bulk = fig.add_subplot(gs[0:1, 1])
-    ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
-
-    tar_sig = tar[0].cpu().detach().numpy()
-    out_sig = out[0].cpu().detach().numpy()
-    instance_loss = np.mean((tar_sig - out_sig) ** 2)
-
-    # Top Right: Bulk Assay comparison
-    ax_bulk.plot(tar[0].cpu(), color='dimgray', lw=1.5, label='Target')
-    ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
-    ax_bulk.set_ylabel("Signal Intensity")
-    ax_bulk.legend(loc='upper right', frameon=False)
-    ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Epoch Avg {mode} Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
-    ax_bulk.set_xticklabels([]) # Shared axis with heatmap
-
-    # Bottom Right: Predicted Fiber Heatmap
-    pred_matrix = out_fibers[0].cpu().detach().numpy().T
-
-    # inp_matrix = inp[0].cpu().detach().numpy()
-    # np.savez(f"./ignore/inp_fibers_{extra}.npz", inp_matrix)
-    # np.savez(f"./ignore/pred_fibers_{extra}.npz", pred_matrix)
-    # np.savez(f"./ignore/output_{extra}.npz", out[0].cpu().detach().numpy())
-    # np.savez(f"./ignore/target_{extra}.npz", tar[0].cpu().detach().numpy())
-
-    img = ax_heat.imshow(pred_matrix, aspect='auto', cmap='magma',
-                         interpolation='nearest', origin='upper',
-                         extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
-
-    plt.colorbar(img, ax=ax_heat, orientation='horizontal', pad=0.10, fraction=0.04, label='Accessibility Probability')
-    ax_heat.set_ylabel("Fibers (Imputed)")
-    ax_heat.set_xlabel("Genomic Position (bp)")
-
-    # Adjust layout spacing safely
-    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
-
-    # Log unified single image to Weights & Biases
-    wandb_run.log({
-        f"{mode}_Model_Evaluation_Dashboard": wandb.Image(fig),
-        "epoch": extra
-    })
-    plt.close(fig)
-
-def plot_sample_out_fibers_plt(dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
+def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)):
     """
-    Plots dynamic input channels (Left Column) and model outputs (Right Column) in a single unified figure.
-    Makes single-bit channels (m6a, cpg) highly visible using distinct point-markers.
+    Pretty-prints model architecture summary using torchinfo if available,
+    otherwise falls back to parameter count and string representation.
     """
-    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
-    num_fibers = inp.shape[-1]
+    print("\n" + "=" * 60)
+    print(f" MODEL SUMMARY: {model.__class__.__name__}")
+    print("=" * 60)
+    print(f" Total Trainable Parameters: {count_parameters(model):,}\n")
 
-    # 1. Setup the figure layout
-    grid_rows = max(2, num_input_features)
-    # Calculate height based on number of inputs to keep it proportional
-    fig_height = max(10, 2.5 * grid_rows)
-    fig = plt.figure(figsize=(20, fig_height))
-
-    # GridSpec: num_input_features rows, 2 columns (Left = Inputs, Right = Outputs)
-    gs = gridspec.GridSpec(grid_rows, 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.3)
-
-    feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
-    colors = ["black", "purple", "blue", "green", "red"]
-
-    # =================================================================
-    # LEFT COLUMN: DYNAMIC INPUT DIAGNOSTICS
-    # =================================================================
-    k = 0
-    input_axes = []
-
-    for j in range(len(input_flags)):
-        if not input_flags[j]:
-            continue
-
-        # Assign a subplot in the left column (column index 0)
-        ax = fig.add_subplot(gs[k, 0])
-        input_axes.append(ax)
-
-        # Identify if this channel is a single-bit sparse marker (m6a or cpg)
-        is_single_bit = feature_names[j] in ["m6a", "cpg"]
-
-        for i in range(num_fibers):
-            # inp shape: [B, C, L, N] -> pulling batch index 0
-            fiber_feat = inp[0, k, :, i].cpu().detach()
-
-            if is_single_bit:
-                # Find exactly where the bits are 1
-                indices = torch.where(fiber_feat > 0.5)[0].numpy()
-                if len(indices) > 0:
-                    # Plot thick vertical ticks '|' to make single bits look sharp and visible
-                    ax.scatter(indices, np.full_like(indices, -i),
-                               marker='|', color=colors[j], s=25, alpha=0.7, linewidths=0.9)
-            else:
-                # Continuous chunk processing (msp, nuc, fire_msp)
-                masked = (fiber_feat > 0.5).float()
-                diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-                starts = torch.where(diff == 1)[0]
-                ends = torch.where(diff == -1)[0]
-
-                for s, e in zip(starts, ends):
-                    if e > s:
-                        ax.axhspan(-i - 0.35, -i + 0.35,
-                                   xmin=(s/len(fiber_feat)).item(), xmax=(e/len(fiber_feat)).item(),
-                                   color=colors[j], alpha=0.5, lw=0)
-
-        ax.set_ylabel(feature_names[j], fontsize=12, fontweight='bold')
-        ax.set_ylim(-num_fibers - 0.5, 0.5)
-        ax.set_xlim(0, inp.shape[2])
-
-        # Hide x-axis ticks for all but the bottom input plot
-        if k < num_input_features - 1:
-            ax.set_xticklabels([])
-
-        k += 1
-
-    if input_axes:
-        input_axes[0].set_title(f"Input Features\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
-        input_axes[-1].set_xlabel("Genomic Position (bp)")
-
-    # =================================================================
-    # RIGHT COLUMN: MODEL OUTPUTS (Spanning multiple rows)
-    # =================================================================
-    # Splitting the right column: top row for bulk, remaining rows for heatmap
-    split_row = max(1, num_input_features // 4)
-
-    ax_bulk = fig.add_subplot(gs[0:1, 1])
-    ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
-
-    tar_sig = tar[0].cpu().detach().numpy()
-    out_sig = out[0].cpu().detach().numpy()
-    instance_loss = np.mean((tar_sig - out_sig) ** 2)
-
-    # Top Right: Bulk Assay comparison
-    ax_bulk.plot(tar[0].cpu(), color='dimgray', lw=1.5, label='Target')
-    ax_bulk.plot(out[0].cpu().detach(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
-    ax_bulk.set_ylabel("Signal Intensity")
-    ax_bulk.legend(loc='upper right', frameon=False)
-    ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end}", fontsize=14, fontweight='bold')
-    # ax_bulk.set_title(f"Imputation Results (Plotted {mode} Loss: {instance_loss:.6f})\n{chr_name}:{start}-{end} (Epoch Avg {mode} Loss: {avg_loss:.6f})", fontsize=14, fontweight='bold')
-    ax_bulk.set_xticklabels([]) # Shared axis with heatmap
-
-    # Bottom Right: Predicted Fiber Heatmap
-    pred_matrix = out_fibers[0].cpu().detach().numpy().T
-
-    img = ax_heat.imshow(pred_matrix, aspect='auto', cmap='magma',
-                         interpolation='nearest', origin='upper',
-                         extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
-
-    plt.colorbar(img, ax=ax_heat, orientation='horizontal', pad=0.10, fraction=0.04, label='Accessibility Probability')
-    ax_heat.set_ylabel("Fibers (Imputed)")
-    ax_heat.set_xlabel("Genomic Position (bp)")
-
-    # Adjust layout spacing safely
-    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
-
-    # Log unified single image to Weights & Biases
-    plt.savefig(dir)
-    plt.close(fig)
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import matplotlib.colors as mcolors
-
-def plot_single_fibers_plt(dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, avg_loss, mode="Train", plot_sum=False):
-    """
-    Ultra-compact plotting of the first 20 informative single fibers (skipping any with sum(m6a) < 20).
-    Left Side: 20 rows of ultra-thin, discrete feature ribbons stacked directly next to each other.
-    Right Side: 20 matching continuous accessibility intensity ribbons scaled smoothly from 0 to the global max.
-    """
-    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
-    total_available_fibers = inp.shape[-1]
-    sequence_length = inp.shape[2]
-
-    feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
-    colors = ["black", "purple", "blue", "green", "red"]
-
-    # Identify active features based on flags
-    active_features = [(j, feature_names[j], colors[j]) for j in range(len(input_flags)) if input_flags[j]]
-    num_active_features = len(active_features)
-
-    # 1. Filter out uninformative or quiet fibers
     try:
-        m6a_channel_idx = [j for j, name in enumerate(feature_names) if name == "m6a"][0]
-        active_m6a_idx = [k for k, (orig_j, _, _) in enumerate(active_features) if orig_j == m6a_channel_idx][0]
-    except IndexError:
-        active_m6a_idx = 0
+        summary_str = torchinfo_summary(
+            model,
+            input_size=input_size,
+            col_names=["input_size", "output_size", "num_params", "kernel_size"],
+            row_settings=["var_names"],
+            verbose=0
+        )
+        print(summary_str)
+    except Exception as e:
+        print(f"Notice: torchinfo summary could not run on sample input shape {input_size}. ({e})")
+        print(model)
+    print("=" * 60 + "\n")
 
-    valid_fiber_indices = []
-    for f_idx in range(total_available_fibers):
-        m6a_sum = torch.sum(inp[0, active_m6a_idx, :, f_idx] > 0.5).item()
-        if m6a_sum >= 20:
-            valid_fiber_indices.append(f_idx)
-        if len(valid_fiber_indices) == 20:
+
+@contextlib.contextmanager
+def suppress_stdout_stderr():
+    """A context manager that redirects stdout and stderr at the OS level."""
+    devnull = os.open(os.devnull, os.O_RDWR)
+    save_stdout = os.dup(1)
+    save_stderr = os.dup(2)
+
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(save_stdout, 1)
+        os.dup2(save_stderr, 2)
+        os.close(save_stdout)
+        os.close(save_stderr)
+        os.close(devnull)
+
+
+#--------------------------------------------------------------------------------------------------
+# Modular Plotting Components
+
+FEATURE_NAMES = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
+FEATURE_COLORS = ["black", "purple", "blue", "green", "red"]
+
+def render_input_channels(fig, gs_column, inp, input_flags):
+    """Sub-renderer for discrete and continuous dynamic input channels (Left Column)."""
+    num_fibers = inp.shape[-1]
+    active_indices = [j for j, flag in enumerate(input_flags) if flag]
+    num_active = len(active_indices)
+
+    k = 0
+    input_axes = []
+    for j in active_indices:
+        ax = fig.add_subplot(gs_column[k, 0])
+        input_axes.append(ax)
+        is_single_bit = FEATURE_NAMES[j] in ["m6a", "cpg"]
+
+        for i in range(num_fibers):
+            fiber_feat = inp[0, k, :, i].cpu().detach()
+
+            if is_single_bit:
+                indices = torch.where(fiber_feat > 0.5)[0].numpy()
+                if len(indices) > 0:
+                    ax.scatter(indices, np.full_like(indices, -i),
+                               marker='|', color=FEATURE_COLORS[j], s=25, alpha=0.7, linewidths=0.9)
+            else:
+                masked = (fiber_feat > 0.5).float()
+                diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
+                starts = torch.where(diff == 1)[0]
+                ends = torch.where(diff == -1)[0]
+
+                for s, e in zip(starts, ends):
+                    if e > s:
+                        ax.axhspan(-i - 0.35, -i + 0.35,
+                                   xmin=(s / len(fiber_feat)).item(), xmax=(e / len(fiber_feat)).item(),
+                                   color=FEATURE_COLORS[j], alpha=0.5, lw=0)
+
+        ax.set_ylabel(FEATURE_NAMES[j], fontsize=11, fontweight='bold')
+        ax.set_ylim(-num_fibers - 0.5, 0.5)
+        ax.set_xlim(0, inp.shape[2])
+
+        if k < num_active - 1:
+            ax.set_xticklabels([])
+        k += 1
+
+    if input_axes:
+        input_axes[-1].set_xlabel("Genomic Position (bp)")
+
+    return input_axes
+
+
+def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, avg_loss=None):
+    """Sub-renderer for target vs predicted bulk signal comparison."""
+    ax.plot(target.cpu().numpy(), color='dimgray', lw=1.5, label='Target')
+    ax.plot(pred_bulk.cpu().detach().numpy(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
+    ax.set_ylabel("Signal Intensity")
+    ax.legend(loc='upper right', frameon=False)
+
+    title = f"Imputation Results ({mode} Loss: {instance_loss:.6f})\n{chr_info}"
+    if avg_loss is not None:
+        title += f" (Epoch Avg {mode} Loss: {avg_loss:.6f})"
+    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.set_xticklabels([])
+
+
+def render_fiber_heatmap(ax, out_fibers):
+    """Sub-renderer for predicted fiber accessibility heatmap."""
+    pred_matrix = out_fibers[0].cpu().detach().numpy().T
+    img = ax.imshow(pred_matrix, aspect='auto', cmap='magma',
+                         interpolation='nearest', origin='upper',
+                         extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
+
+    plt.colorbar(img, ax=ax, orientation='horizontal', pad=0.10, fraction=0.04, label='Accessibility Probability')
+    ax.set_ylabel("Fibers (Imputed)")
+    ax.set_xlabel("Genomic Position (bp)")
+    return img
+
+
+def filter_informative_fibers(inp, input_flags, min_m6a_sum=20, max_fibers=20):
+    """Filters out uninformative fibers based on m6a signal presence."""
+    total_fibers = inp.shape[-1]
+    active_features = [j for j, flag in enumerate(input_flags) if flag]
+
+    m6a_channel_idx = 0
+    for k, orig_j in enumerate(active_features):
+        if FEATURE_NAMES[orig_j] == "m6a":
+            m6a_channel_idx = k
             break
 
-    num_fibers_to_plot = len(valid_fiber_indices)
+    valid_fiber_indices = []
+    for f_idx in range(total_fibers):
+        m6a_sum = torch.sum(inp[0, m6a_channel_idx, :, f_idx] > 0.5).item()
+        if m6a_sum >= min_m6a_sum:
+            valid_fiber_indices.append(f_idx)
+        if len(valid_fiber_indices) == max_fibers:
+            break
+
+    return valid_fiber_indices
+
+
+#--------------------------------------------------------------------------------------------------
+# Top-Level Visualization Dashboards (Return Figure Objects)
+
+def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, avg_loss=None, mode="Train"):
+    """
+    Constructs a unified evaluation figure displaying inputs (left) and predicted outputs (right).
+    Returns Matplotlib Figure object for saving or W&B logging.
+    """
+    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
+    chr_info = f"{chr_name}:{start}-{end}"
+    num_input_features = sum(input_flags)
+
+    grid_rows = max(2, num_input_features)
+    fig_height = max(10, 2.5 * grid_rows)
+    fig = plt.figure(figsize=(20, fig_height))
+    gs = gridspec.GridSpec(grid_rows, 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.3)
+
+    # Left Column: Inputs
+    input_axes = render_input_channels(fig, gs, inp, input_flags)
+    if input_axes:
+        input_axes[0].set_title(f"Input Features\n{chr_info}", fontsize=13, fontweight='bold')
+
+    # Right Column: Bulk + Heatmap
+    ax_bulk = fig.add_subplot(gs[0:1, 1])
+    ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
+
+    tar_sig = tar[0].cpu().detach().numpy()
+    out_sig = out[0].cpu().detach().numpy()
+    instance_loss = float(np.mean((tar_sig - out_sig) ** 2))
+
+    render_bulk_comparison(ax_bulk, tar[0], out[0], chr_info, instance_loss, mode, avg_loss)
+    render_fiber_heatmap(ax_heat, out_fibers)
+
+    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
+    return fig
+
+
+def plot_single_fibers_dashboard(inp, input_flags, out_fibers, locus, mode="Train"):
+    """
+    Constructs an ultra-compact ribbon layout comparing input channels vs continuous predicted accessibility.
+    Returns Matplotlib Figure object or None if no informative fibers are found.
+    """
+    chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
+    sequence_length = inp.shape[2]
+
+    active_features = [(j, FEATURE_NAMES[j], FEATURE_COLORS[j]) for j, flag in enumerate(input_flags) if flag]
+    num_active_features = len(active_features)
+
+    valid_indices = filter_informative_fibers(inp, input_flags, min_m6a_sum=20, max_fibers=20)
+    num_fibers_to_plot = len(valid_indices)
+
     if num_fibers_to_plot == 0:
         print("Warning: No fibers passed the sum(m6a) >= 20 filter step. Skipping plot generation.")
-        return
+        return None
 
-    # 2. Determine the dynamic maximum value across ALL chosen fibers for the RHS scale
-    global_max_val = 0.0
-    for fiber_idx in valid_fiber_indices:
-        fiber_max = out_fibers[0, :, fiber_idx].max().item()
-        if fiber_max > global_max_val:
-            global_max_val = fiber_max
+    global_max_val = max(1.0, float(max(out_fibers[0, :, f_idx].max().item() for f_idx in valid_indices)))
 
-    # Ensure vmax is at least 1.0 to avoid division errors or collapsing color scales if values are flat 0
-    global_vmax = max(1.0, global_max_val)
-
-    # Create canvas: We give each fiber a tiny vertical footprint (0.75 inches per fiber group)
     fig = plt.figure(figsize=(24, 0.75 * num_fibers_to_plot))
-
-    # GridSpec: 20 rows (one per fiber). Left column = Input ribbons, Right column = Output ribbons
     outer_gs = gridspec.GridSpec(num_fibers_to_plot, 2, figure=fig, width_ratios=[1, 1], hspace=0.4, wspace=0.12)
 
-    # Loop through our qualified subset
-    for display_idx, fiber_idx in enumerate(valid_fiber_indices):
-
-        # =================================================================
-        # LEFT SIDE: DISCRETE INPUT FEATURE RIBBONS
-        # =================================================================
+    for display_idx, fiber_idx in enumerate(valid_indices):
+        # Left side: Input feature ribbons
         inner_gs = gridspec.GridSpecFromSubplotSpec(
             num_active_features, 1,
             subplot_spec=outer_gs[display_idx, 0],
@@ -499,50 +327,33 @@ def plot_single_fibers_plt(dir, inp, input_flags, num_input_features, out, out_f
 
         for k, (orig_j, feat_name, color) in enumerate(active_features):
             ax_feat = fig.add_subplot(inner_gs[k, 0])
-
-            # Extract and shape binary input array into a 2D ribbon profile (1 pixel high x Length)
             fiber_feat = inp[0, k, :, fiber_idx].cpu().detach().numpy()
             ribbon_data = np.atleast_2d(fiber_feat > 0.5).astype(float)
-
-            # Create a clean binary colormap: 0 is white/transparent, 1 is the explicit feature color
             cmap_discrete = mcolors.ListedColormap(['white', color])
 
             ax_feat.imshow(ribbon_data, aspect='auto', cmap=cmap_discrete, interpolation='nearest', vmin=0, vmax=1)
-
-            # Formatting parameters for tight space restriction
             ax_feat.set_xlim(0, sequence_length - 1)
             ax_feat.set_xticks([])
             ax_feat.set_yticks([])
-
-            # Place the tiny text label strictly on the side
             ax_feat.set_ylabel(feat_name, fontsize=7, rotation=0, labelpad=15, va='center', fontweight='bold')
 
-            # Clean headers
             if display_idx == 0 and k == 0:
                 ax_feat.set_title(f"Input Feature Ribbons\n{chr_name}:{start}-{end}", fontsize=12, fontweight='bold', pad=15)
 
-        # Give the bottom-most track of the last fiber group an X-axis ruler marker
-        if display_idx == num_fibers_to_plot - 1:
-            ax_feat.set_xticks(np.linspace(0, sequence_length - 1, 5, dtype=int))
-            ax_feat.set_xlabel("Genomic Position (bp)", fontsize=10)
+            if display_idx == num_fibers_to_plot - 1 and k == num_active_features - 1:
+                ax_feat.set_xticks(np.linspace(0, sequence_length - 1, 5, dtype=int))
+                ax_feat.set_xlabel("Genomic Position (bp)", fontsize=10)
 
-        # =================================================================
-        # RIGHT SIDE: CONTINUOUS ACCESSIBILITY INTENSITY RIBBONS
-        # =================================================================
+        # Right side: Continuous accessibility ribbon
         ax_out = fig.add_subplot(outer_gs[display_idx, 1])
-
-        # Pull output probability distribution array and form a 1-row matrix block
         pred_signal = out_fibers[0, :, fiber_idx].cpu().detach().numpy()
         output_ribbon = np.atleast_2d(pred_signal)
 
-        # Render continuous ribbon track using the global maximum value
         img = ax_out.imshow(output_ribbon, aspect='auto', cmap='magma',
-                            interpolation='nearest', vmin=0.0, vmax=global_vmax)
+                            interpolation='nearest', vmin=0.0, vmax=global_max_val)
 
         ax_out.set_xlim(0, sequence_length - 1)
         ax_out.set_yticks([])
-
-        # New Feature: Vertical Fiber Name labeling on RHS to clear real estate room on the left
         ax_out.set_ylabel(f"Fib {fiber_idx}", fontsize=9, fontweight='bold', rotation=270, labelpad=18)
         ax_out.yaxis.set_label_position("right")
 
@@ -553,165 +364,52 @@ def plot_single_fibers_plt(dir, inp, input_flags, num_input_features, out, out_f
             ax_out.set_xlabel("Genomic Position (bp)", fontsize=10)
 
         if display_idx == 0:
-            ax_out.set_title(f"Imputed Continuous Ribbons ({mode} Profile - Scaled 0-{global_vmax:.2f})", fontsize=12, fontweight='bold', pad=15)
+            ax_out.set_title(f"Imputed Continuous Ribbons ({mode} Profile - Scaled 0-{global_max_val:.2f})", fontsize=12, fontweight='bold', pad=15)
 
-    # 3. Add a single colorbar pinned down below to map the 0 to dynamic max spectrum
     cbar_ax = fig.add_axes([0.55, 0.02, 0.35, 0.015])
     cbar = plt.colorbar(img, cax=cbar_ax, orientation='horizontal')
-    cbar.set_label(f'Accessibility Value (0 - {global_vmax:.2f} Dynamic Max Spectrum)', fontsize=9, fontweight='bold')
-    cbar.ax.tick_params(labelsize=8)
+    cbar.set_label(f'Accessibility Value (0 - {global_max_val:.2f} Dynamic Max Spectrum)', fontsize=9, fontweight='bold')
 
-    # Flush layout boundaries safely
     plt.subplots_adjust(top=0.90, bottom=0.08, left=0.08, right=0.93)
+    return fig
 
-    # Save highly compact matrix architecture file
-    plt.savefig(dir, dpi=180, bbox_inches='tight')
+
+def plot_loss(dir_path, losses, epoch):
+    """Saves a plot of epoch-wise training loss."""
+    os.makedirs(dir_path, exist_ok=True)
+    save_path = os.path.join(dir_path, f"Epoch_{epoch}_loss.png")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(losses, marker='o', color='tab:blue', lw=2)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training Loss Curve")
+    ax.grid(True, linestyle='--', alpha=0.5)
+
+    fig.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
-# def plot_sample_out_fibers_wandb(wandb_run, dir, inp, input_flags, num_input_features, out, out_fibers, tar, locus, extra, plot_sum=False):
-#     """
-#     Consolidated plotting:
-#     1. Diagnostic Input plot (5 panels for m6a, cpg, msp, nuc, fire_msp)
-#     2. Results Output plot (Bulk comparison + Imputed Heatmap)
-#     """
-#     chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
-#     num_fibers = inp.shape[-1]
-
-#     # =================================================================
-#     # FIGURE 1: DIAGNOSTIC INPUTS
-#     # =================================================================
-#     feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
-#     colors = ["black", "black", "blue", "green", "red"]
-
-#     fig_in, axes_in = plt.subplots(num_input_features, 1, figsize=(12, 3*num_input_features), sharex=True)
-
-#     k = 0
-#     for j in range(len(input_flags)):
-#         if not input_flags[j]: continue
-#         ax = axes_in[k] if num_input_features > 1 else axes_in
-#         # Iterate through fibers for this specific feature channel
-#         for i in range(num_fibers):
-#             # inp shape is assumed (Channels, L, N) based on your permute(1,2,0)
-#             fiber_feat = inp[0, k, :, i].cpu().detach()
-
-#             # Find consecutive stretches of "active" signal
-#             masked = (fiber_feat > 0.5).float()
-#             diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
-#             starts = torch.where(diff == 1)[0]
-#             ends = torch.where(diff == -1)[0]
-
-#             for s, e in zip(starts, ends):
-#                 if e > s:
-#                     ax.axhspan(-i - 0.35, -i + 0.35,
-#                                xmin=(s/len(fiber_feat)).item(), xmax=(e/len(fiber_feat)).item(),
-#                                color=colors[j], alpha=0.5, lw=0)
-
-#         ax.set_ylabel(feature_names[j])
-#         ax.set_ylim(-num_fibers - 0.5, 0.5)
-#         # ax.set_yticks([]) # Hide y-ticks for cleaner look
-#         k += 1
-
-#     if num_input_features > 1:
-#         axes_in[0].set_title(f"Input Diagnostic: {chr_name}:{start}-{end}")
-#     else:
-#         axes_in.set_title(f"Input Diagnostic: {chr_name}:{start}-{end}")
-#     plt.tight_layout()
-
-#     # Log the first figure
-#     wandb_run.log({f"Input_Features": wandb.Image(fig_in), "epoch":extra})
-#     plt.close(fig_in)
-
-#     # =================================================================
-#     # FIGURE 2: MODEL OUTPUTS
-#     # =================================================================
-#     fig_out, (ax_bulk, ax_heat) = plt.subplots(2, 1, figsize=(12, 10), sharex=True,
-#                                                gridspec_kw={'height_ratios': [1, 3]})
-
-#     # Top: Bulk Assay comparison
-#     ax_bulk.plot(tar[0].cpu(), color='black', lw=1.5, label='Target')
-#     ax_bulk.plot(out[0].cpu().detach(), color='orange', lw=1.5, label='Predicted Bulk', alpha=0.8)
-#     ax_bulk.set_ylabel("Signal Intensity")
-#     ax_bulk.legend(loc='upper right')
-#     ax_bulk.set_title(f"Imputation Results: {chr_name}:{start}-{end}")
-
-#     # Bottom: Predicted Fiber Heatmap
-#     # out_fibers is (B, L, N) -> Transpose to (N, L)
-#     pred_matrix = out_fibers[0].cpu().detach().numpy().T
-
-#     img = ax_heat.imshow(pred_matrix, aspect='auto', cmap='magma',
-#                          interpolation='nearest', origin='upper',
-#                          extent=[0, pred_matrix.shape[1], -pred_matrix.shape[0], 0])
-
-#     plt.colorbar(img, ax=ax_heat, orientation='horizontal', pad=0.12, label='Accessibility Probability')
-#     ax_heat.set_ylabel("Fibers (Imputed)")
-#     ax_heat.set_xlabel("Genomic Position (bp)")
-
-#     plt.tight_layout()
-
-#     # Log the second figure and commit the logs for this epoch
-#     wandb_run.log({
-#         f"Outputs": wandb.Image(fig_out),
-#         "epoch": extra
-#     })
-#     plt.close(fig_out)
-
-def plot_loss(dir, losses, extra):
-
-    os.makedirs(dir, exist_ok=True)
-    save_path = os.path.join(dir, f"Epoch_{extra}_loss.png")
-
-    plt.plot(losses)
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Loss plot")
-
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-
-    plt.close()
 
 #--------------------------------------------------------------------------------------------------
-# output redirection on system level
-
-@contextmanager
-def suppress_stdout_stderr():
-    """A context manager that redirects stdout and stderr at the OS level."""
-    # Open devnull
-    devnull = os.open(os.devnull, os.O_RDWR)
-
-    # Save the actual stdout/stderr file descriptors to restore them later
-    save_stdout = os.dup(1)
-    save_stderr = os.dup(2)
-
-    try:
-        # Flush Python's buffers first
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Duplicate devnull onto stdout (1) and stderr (2)
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-
-        yield
-    finally:
-        # Flush again before restoring
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Restore the original file descriptors
-        os.dup2(save_stdout, 1)
-        os.dup2(save_stderr, 2)
-
-        # Close the temporary file descriptors
-        os.close(save_stdout)
-        os.close(save_stderr)
-        os.close(devnull)
-
-#--------------------------------------------------------------------------------------------------
-# testing
+# Testing
 
 def tester():
-    pass
+    set_seed(919)
+    print("Testing utils module...")
 
-if __name__=="__main__":
+    # Test Meter
+    meter = AverageMeter()
+    meter.update(2.5, n=2)
+    meter.update(5.0, n=1)
+    print(f"AverageMeter average: {meter.avg:.2f} (Expected: 3.33)")
 
+    # Test Dummy Model for Pretty Print Summary
+    dummy_model = nn.Sequential(
+        nn.Conv1d(5, 32, kernel_size=15, padding=7),
+        nn.GELU(),
+        nn.Conv1d(32, 1, kernel_size=1)
+    )
+    print_model_summary(dummy_model, input_size=(16, 5, 2048, 200))
+
+if __name__ == "__main__":
     tester()
