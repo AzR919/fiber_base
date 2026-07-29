@@ -165,6 +165,7 @@ class Trainer:
                     last_t_batch["target_bulk"],
                     last_t_batch["locus"],
                     last_t_batch["cell_type"],
+                    self.config.bulk_name,
                     avg_loss=avg_train_loss,
                     mode="Train"
                 )
@@ -181,6 +182,7 @@ class Trainer:
                     last_v_batch["target_bulk"],
                     last_v_batch["locus"],
                     last_v_batch["cell_type"],
+                    self.config.bulk_name,
                     avg_loss=avg_val_loss,
                     mode="Val"
                 )
@@ -190,7 +192,7 @@ class Trainer:
             self.wandb_run.log(log_dict)
 
         # Final loss summary curve & model save
-        plot_loss(save_dir, train_losses, self.epochs)
+        plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
         self.model.save_model(save_dir, self.epochs)
 
     def _build_run_name_suffix(self, input_flags):

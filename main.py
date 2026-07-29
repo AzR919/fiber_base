@@ -24,11 +24,8 @@ def main():
     save_str = create_save_str(args)
     res_dir = os.path.join(args.res_dir, save_str)
 
-    with open(args.data_config, "r") as f:
-        data_config = yaml.safe_load(f)
-
     kwargs = {
-        "metadata": data_config["metadata"],
+        "metadata": args.metadata,
         "fibers_per_entry": args.fibers_per_entry,
         "context_length": args.context_length,
         "iters_per_epoch": args.iters_per_epoch,

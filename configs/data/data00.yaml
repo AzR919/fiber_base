@@ -4,6 +4,7 @@ context_length: 256
 fibers_per_entry: 50
 return_dna: true
 input_flags: [1, 1, 1, 1, 1]
+bulk_name: "ATAC_seq_fcc"
 
 metadata:
   fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"

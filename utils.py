@@ -208,10 +208,10 @@ def render_input_channels(fig, gs_column, inp, input_flags):
     return input_axes
 
 
-def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, avg_loss=None):
+def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None):
     """Sub-renderer for target vs predicted bulk signal comparison."""
-    ax.plot(target.cpu().numpy(), color='dimgray', lw=1.5, label='Target')
-    ax.plot(pred_bulk.cpu().detach().numpy(), color='darkorange', lw=1.5, label='Predicted Bulk', alpha=0.8)
+    ax.plot(target.cpu().numpy(), color='dimgray', lw=1.5, label=bulk_name)
+    ax.plot(pred_bulk.cpu().detach().numpy(), color='darkorange', lw=1.5, label='Predicted', alpha=0.8)
     ax.set_ylabel("Signal Intensity")
     ax.legend(loc='upper right', frameon=False)
 
@@ -260,7 +260,7 @@ def filter_informative_fibers(inp, input_flags, min_m6a_sum=20, max_fibers=20):
 #--------------------------------------------------------------------------------------------------
 # Top-Level Visualization Dashboards (Return Figure Objects)
 
-def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, cell_type, avg_loss=None, mode="Train"):
+def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, cell_type, bulk_name, avg_loss=None, mode="Train"):
     """
     Constructs a unified evaluation figure displaying inputs (left) and predicted outputs (right).
     Returns Matplotlib Figure object for saving or W&B logging.
@@ -288,7 +288,7 @@ def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, cel
     out_sig = out[0].cpu().detach().numpy()
     instance_loss = float(np.mean((tar_sig - out_sig) ** 2))
 
-    render_bulk_comparison(ax_bulk, tar[0], out[0], chr_info, instance_loss, mode, avg_loss)
+    render_bulk_comparison(ax_bulk, tar[0], out[0], chr_info, instance_loss, mode, bulk_name, avg_loss)
     render_fiber_heatmap(ax_heat, out_fibers)
 
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
@@ -375,7 +375,7 @@ def plot_single_fibers_dashboard(inp, input_flags, out_fibers, locus, mode="Trai
     return fig
 
 
-def plot_loss(dir_path, losses, epoch):
+def plot_loss(dir_path, losses, epoch, bulk_name):
     """Saves a plot of epoch-wise training loss."""
     os.makedirs(dir_path, exist_ok=True)
     save_path = os.path.join(dir_path, f"Epoch_{epoch}_loss.png")
@@ -384,7 +384,7 @@ def plot_loss(dir_path, losses, epoch):
     ax.plot(losses, marker='o', color='tab:blue', lw=2)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title("Training Loss Curve")
+    ax.set_title(f"Training Loss Curve for {bulk_name}")
     ax.grid(True, linestyle='--', alpha=0.5)
 
     fig.savefig(save_path, dpi=300, bbox_inches='tight')

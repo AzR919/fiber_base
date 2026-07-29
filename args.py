@@ -50,6 +50,7 @@ def get_args():
     data_group.add_argument("--val_chrs", type=str, nargs="+", default=["chr21"])
     data_group.add_argument("--fiber_base_path", type=str, default="")
     data_group.add_argument("--bulk_base_path", type=str, default="")
+    data_group.add_argument("--bulk_name", type=str, default="Not_set")
 
     # Dataset Parameters
     data_group.add_argument("--context_length", type=int, default=4096)
@@ -106,8 +107,11 @@ def get_args():
     # Step 2: Track explicit CLI flags so config files don't overwrite user CLI commands
     cli_args_set = set()
     for arg in sys.argv[1:]:
-        if arg.startswith("--"):
-            cli_args_set.add(arg.lstrip("-").split("=")[0])
+        if arg.startswith("-"):
+            # Strip leading '-' or '--', then take whatever comes before '=' (if any)
+            clean_arg = arg.lstrip("-").split("=")[0]
+            if clean_arg:
+                cli_args_set.add(clean_arg)
 
     # Default metadata structure
     parsed_args.metadata = {
