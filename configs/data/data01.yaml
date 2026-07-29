@@ -1,6 +1,6 @@
 # test config, acts as the base template
 
-context_length: 4096
+context_length: 2048
 fibers_per_entry: 200
 return_dna: false
 input_flags: [1, 1, 1, 1, 1]

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-14_00_gm_h3k4me3_avg_n_fibers
+#SBATCH --job-name=2026-07-29_00_test_new_code
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -16,7 +16,7 @@
 set -euo pipefail  # Exit on any error, undefined variables, and pipe failures
 
 # Move to the directory where your script should run
-SCRIPT_DIR='/home/azr/lab/base/fiber_base/'
+SCRIPT_DIR="/home/azr/projects/def-maxwl/azr/code/fiber_base"
 cd "$SCRIPT_DIR"
 
 # Print some information about the job
@@ -37,18 +37,10 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-    --fiber_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram \
-    --other_data_path /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/ENCFF287HAO_H3K4me3.bigWig \
-    --batch_size 16 --epochs 25 --model deep01 --fibers_per_entry 200 --input_flags 1 1 1 1 1 \
-    --res_dir ./results --decoder_type avg_n --kernel_size 15 \
-    --name_suffix gm_h3k4me3_avg_n_fibers
-
-python train.py \
-  --data_config configs/data_config.yaml \
-  --model_config configs/model_config.yaml \
-  --train_config configs/train_config.yaml \
-  --batch_size 128 \
-  --lr 0.001
+  --data_config configs/data/data01.yaml \
+  --model_config configs/models/model01.yaml \
+  --train_config configs/training/train010.yaml \
+  --name_prefix repo
 
 # /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/GM12878/GM12878-fire-v0.1-filtered.cram
 # GM12878/ENCFF798KYP_H3K27ac.bigWig
