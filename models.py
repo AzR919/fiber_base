@@ -77,7 +77,7 @@ class BaseModel(nn.Module):
             raise ValueError(f"Checkpoint at {filepath} does not contain 'input_flags'. Cannot verify input features.")
 
         # Ensure in_channels in config matches sum(input_flags)
-        assert config["in_channels"] == sum(input_flags), f"Input flag mismatch, {config["in_channels"]} != {sum(input_flags)}"
+        assert config["in_channels"] == sum(input_flags), f"Input flag mismatch, {config['in_channels']} != {sum(input_flags)}"
 
         # Filter init arguments matching model class constructor
         init_kwargs = {k: v for k, v in config.items() if k in getattr(cls, "_init_keys", [])}

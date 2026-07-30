@@ -19,6 +19,7 @@
                 "--data_config", "configs/data/data00.yaml",
                 "--model_config", "configs/models/model00.yaml",
                 "--train_config", "configs/training/train00.yaml",
+                "--eval_config", "configs/evals/eval00.yaml",
                 "--name_prefix", "debug_run",
                 "-D"
             ]

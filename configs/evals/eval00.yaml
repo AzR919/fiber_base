@@ -1,0 +1,24 @@
+# test config, acts as the base template
+
+context_length: 256
+fibers_per_entry: 50
+bulk_name: "ATAC_seq_fcc"
+seed: 919
+
+metadata:
+  fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
+  ccre_path: "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed"
+  train_chrs: ["chr20"]
+  val_chrs: ["chr21"]
+  fiber_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell"
+  bulk_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/atac_multi_cell"
+  cell_types:
+    GM12878:
+      - "GM12878-fire-v0.1-filtered.cram"
+      - "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+    K562:
+      - "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
+      - "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
+  cell_ratios:
+    GM12878: 0.5
+    K562: 0.5

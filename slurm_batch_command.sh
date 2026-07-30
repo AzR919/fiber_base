@@ -40,7 +40,8 @@ python main.py \
   --data_config configs/data/data00.yaml \
   --model_config configs/models/model00.yaml \
   --train_config configs/training/train00.yaml \
-  --name_prefix bulk_name_test
+  --eval_config configs/evals/eval00.yaml \
+  --name_prefix eval_test
 
 # Print job completion time
 echo "Job finished on $(date)"

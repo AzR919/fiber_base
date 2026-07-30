@@ -9,6 +9,7 @@ import yaml
 
 from args import get_args
 from data_utils import fiber_data_iterator
+from eval_dataset import MixedCellFiberDataset
 from trainer import Trainer
 from models import model_selector
 from utils import *
@@ -36,10 +37,18 @@ def main():
 
     train_data_iterator = fiber_data_iterator(mode="train", **kwargs)
     val_data_iterator = fiber_data_iterator(mode="val", **kwargs)
+    test_iterator = None
+
+    if args.eval_config is not None:
+        kwargs["metadata"] = args.eval_config["metadata"]
+        kwargs["fibers_per_entry"] = args.eval_config["fibers_per_entry"]
+        kwargs["context_length"] = args.eval_config["context_length"]
+        kwargs["seed"] = args.eval_config["seed"]
+        test_iterator = MixedCellFiberDataset(**kwargs)
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, train_data_iterator, val_data_iterator,
+    trainer = Trainer(model, train_data_iterator, val_data_iterator, test_iterator,
                       epochs=args.epochs, batch_size=args.batch_size,
                       run_name=get_config_names_str(args), config=args)
 

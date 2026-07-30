@@ -9,16 +9,18 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from evaluator import Evaluator
 from utils import *
 
 class Trainer:
-    def __init__(self, model, train_dataset, val_dataset=None, epochs=10,
-                 batch_size=32, lr=1e-4, patience=5,
+    def __init__(self, model, train_dataset, val_dataset=None, test_dataset=None,
+                 epochs=10, batch_size=32, lr=1e-4, patience=5,
                  run_name="debug", config=None):
 
         self.model = model
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
+        self.test_dataset = test_dataset
         self.epochs = epochs
         self.batch_size = batch_size
         self.config = config
@@ -53,6 +55,8 @@ class Trainer:
         wandb.define_metric("epoch")
         wandb.define_metric("train_loss", step_metric="epoch")
         wandb.define_metric("val_loss", step_metric="epoch")
+        if test_dataset is not None:
+            wandb.define_metric("test_loss")
 
     def _unpack_batch(self, batch):
         """Extracts batch dictionary elements and moves tensors to target device."""
@@ -194,6 +198,70 @@ class Trainer:
         # Final loss summary curve & model save
         plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
         self.model.save_model(save_dir, self.epochs, external_config=self.config)
+
+
+        if self.test_dataset is not None:
+            # -------------------------------------------------------------------------
+            # Post-Training Evaluation & WandB Logging
+            # -------------------------------------------------------------------------
+            print("\n" + "=" * 60)
+            print(" Running Final Model Evaluation & Deconvolution Dashboard...")
+            print("=" * 60)
+
+            test_loader = DataLoader(
+                        self.test_dataset,
+                        batch_size=self.batch_size,
+                        worker_init_fn=seed_worker
+                    )
+
+            evaluator = Evaluator(self.model, device=self.device)
+
+            # 1. Run full evaluation across the test/validation set
+            # Assuming evaluator.evaluate() returns a dict with 'locus_records' and aggregate metrics
+            eval_results = evaluator.evaluate(test_loader)
+
+            # Option A: Log aggregate evaluation metrics to wandb summary
+            if "metrics" in eval_results:
+                for metric_name, val in eval_results["metrics"].items():
+                    wandb.run.summary[f"Final_Eval/{metric_name}"] = val
+
+            # 2. Select locus records to visualize (e.g., top N samples or first N samples)
+            locus_records = eval_results.get("locus_records", [])
+            num_plots_to_log = min(5, len(locus_records))  # Log up to 5 locus figures to WandB
+
+            wandb_image_list = []
+
+            for idx in range(num_plots_to_log):
+                record = locus_records[idx]
+
+                # 3. Generate the 2-column deconvolution plot
+                fig = plot_evaluator_record(
+                    record=record,
+                    input_flags=self.config.input_flags,
+                    bulk_name=self.config.bulk_name,
+                    mode="Test"
+                )
+
+                # 4. Extract locus info for clean WandB image captioning
+                chr_name = record["locus"][0][0]
+                start = record["locus"][1][0]
+                end = record["locus"][2][0]
+                caption = f"Locus {idx+1}: {chr_name}:{start}-{end} [{self.config.bulk_name}]"
+
+                # 5. Convert Matplotlib figure to wandb.Image
+                wandb_image_list.append(
+                    wandb.Image(fig, caption=caption)
+                )
+
+                # Always close local figures to prevent memory leaks in Matplotlib
+                plt.close(fig)
+
+            # 6. Log all dashboard figures under a dedicated gallery panel in WandB
+            wandb.log({
+                "Evaluation/Deconvolution_Dashboards": wandb_image_list
+            })
+
+            print(f" Successfully logged {len(wandb_image_list)} evaluation dashboards to WandB!")
 
     def _build_run_name_suffix(self, input_flags):
         feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
