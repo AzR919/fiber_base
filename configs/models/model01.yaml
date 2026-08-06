@@ -2,5 +2,6 @@
 # GM12878 atac-seq
 
 model: "deep01"
+input_flags: [1, 1, 1, 1, 1]
 decoder_type: "avg_n"
 kernel_size: 15

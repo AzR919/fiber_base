@@ -1,5 +1,6 @@
 # test config, acts as the base template
 
 model: "base01"
+input_flags: [1, 1, 1, 1, 1]
 decoder_type: "avg_n"
 kernel_size: 15
