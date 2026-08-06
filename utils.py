@@ -5,6 +5,7 @@ Common utility functions for experiment tracking, seeding, training, and visuali
 import os
 import sys
 import random
+import shutil
 import datetime
 import contextlib
 import numpy as np
@@ -20,6 +21,17 @@ from torchinfo import summary as torchinfo_summary
 
 #--------------------------------------------------------------------------------------------------
 # Reproducibility & Environment Setup
+
+def save_slurm_script(res_dir, slurm_script_path):
+    """
+    Copies the active Slurm batch submission script into the output result directory.
+    """
+    try:
+        destination = os.path.join(res_dir, "submitted_sbatch_script.sh")
+        shutil.copy(slurm_script_path, destination)
+        print(f"[Slurm Tracker] Successfully copied submission script to: {destination}")
+    except:
+        pass
 
 def set_seed(seed: int = 919):
     """
@@ -42,7 +54,7 @@ def seed_worker(worker_id):
     Worker init function for PyTorch DataLoader to ensure deterministic multi-processing sampling.
     Pass as: DataLoader(..., worker_init_fn=seed_worker)
     """
-    worker_seed = torch.initial_seed() % 2**32
+    worker_seed = torch.initial_seed() % 2**32 + worker_id
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 

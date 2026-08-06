@@ -59,19 +59,6 @@ def get_args():
     data_group.add_argument("--fibers_per_entry", type=int, default=200)
     data_group.add_argument("--return_dna", action="store_true",
                             help="If set, returns both genomic_dna and fiber_dna tensors in batch dict")
-    data_group.add_argument("--input_flags", type=int, nargs="+", default=[1, 1, 1, 1, 1],
-                            help="Binary indicators list [m6a, cpg, msp, nuc, fire_msp]")
-
-    # Individual input feature flags for hyperparameter sweeps
-    data_group.add_argument("--use_individual_input_flags", action="store_true",
-                            help="If set, overrides --input_flags with values from --m6a, --cpg, etc.")
-    data_group.add_argument("--m6a", type=int, default=1, choices=[0, 1])
-    data_group.add_argument("--cpg", type=int, default=1, choices=[0, 1])
-    data_group.add_argument("--msp", type=int, default=1, choices=[0, 1])
-    data_group.add_argument("--nuc", type=int, default=1, choices=[0, 1])
-    data_group.add_argument("--fire_msp", type=int, default=1, choices=[0, 1])
-    data_group.add_argument("--num_input_features", type=int, default=0,
-                            help="Computed at runtime based on active flags")
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")
@@ -80,6 +67,19 @@ def get_args():
     model_group.add_argument("--decoder_type", type=str, default="avg_n")
     model_group.add_argument("--kernel_size", type=int, default=15)
     model_group.add_argument("--dilation", type=int, default=1)
+    model_group.add_argument("--input_flags", type=int, nargs="+", default=[1, 1, 1, 1, 1],
+                                help="Binary indicators list [m6a, cpg, msp, nuc, fire_msp]")
+
+    # Individual input feature flags for hyperparameter sweeps
+    model_group.add_argument("--use_individual_input_flags", action="store_true",
+                            help="If set, overrides --input_flags with values from --m6a, --cpg, etc.")
+    model_group.add_argument("--m6a", type=int, default=1, choices=[0, 1])
+    model_group.add_argument("--cpg", type=int, default=1, choices=[0, 1])
+    model_group.add_argument("--msp", type=int, default=1, choices=[0, 1])
+    model_group.add_argument("--nuc", type=int, default=1, choices=[0, 1])
+    model_group.add_argument("--fire_msp", type=int, default=1, choices=[0, 1])
+    model_group.add_argument("--num_input_features", type=int, default=0,
+                            help="Computed at runtime based on active flags")
 
     # Train
     trainer_group = parser.add_argument_group("Training Configuration")
@@ -100,8 +100,10 @@ def get_args():
     # Misc
     misc_group = parser.add_argument_group("Miscellaneous Arguments")
     misc_group.add_argument("--debug", "-D", action='store_true',
-                            help='Enable debug mode with extra logging')
-    misc_group.add_argument('--seed', type=int, default=919)
+                            help="Enable debug mode with extra logging")
+    misc_group.add_argument("--seed", type=int, default=919)
+    misc_group.add_argument("--script_path", type=str, default="./slurm_batch_command.sh",
+                              help="slurm batch script to save with the model")
 
     # Step 1: Parse arguments passed via CLI
     parsed_args = parser.parse_args()

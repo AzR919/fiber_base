@@ -43,10 +43,8 @@ class MixedCellFiberDataset(fiber_data_iterator):
             return_dna=return_dna
         )
 
-        if self.num_cell_types < 2:
-            raise ValueError(f"MixedCellFiberDataset requires at least 2 cell types in metadata, found {self.num_cell_types}.")
-
-        self.cell_ratios = self._setup_mixing_ratios(metadata["cell_ratios"])
+        meta_cell_ratios = {cell_type:metadata["cell_types"][cell_type]["ratio"] for cell_type in metadata["cell_types"].keys()}
+        self.cell_ratios = self._setup_mixing_ratios(meta_cell_ratios)
         self.fiber_counts_per_cell = self._calculate_fiber_counts()
 
     # -------------------------------------------------------------------------
@@ -238,14 +236,15 @@ def tester():
             "K562": (
                 "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram",
                 "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
-            )
+            ),
+        "cell_ratios": [0.5,0.5]
         }
     }
 
     kwargs = {
         "metadata": metadata,
-        "fibers_per_entry": 200,
-        "context_length": 4096,
+        "fibers_per_entry": 10,
+        "context_length": 20,
         "iters_per_epoch": 5,
         "input_flags": [1, 1, 1, 1, 1],
         "mode": "val",

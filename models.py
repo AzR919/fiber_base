@@ -41,12 +41,6 @@ class BaseModel(nn.Module):
             "state_dict": self.state_dict()
         }
 
-        # Explicitly put input_flags at top-level
-        if external_config is not None and hasattr(external_config, "input_flags"):
-            checkpoint_bundle["input_flags"] = external_config.input_flags
-        elif "input_flags" in model_config:
-            checkpoint_bundle["input_flags"] = model_config["input_flags"]
-
         torch.save(checkpoint_bundle, save_path)
         print(f"Model blueprint and weights successfully bundled into: {save_path}")
 
@@ -125,21 +119,21 @@ class ResidualBlock1D(nn.Module):
 class Base01DebugModel(BaseModel):
     _init_keys = ["num_input_features", "decoder_type", "kernel_size"]
 
-    def __init__(self, num_input_features=5, decoder_type="avg_n", kernel_size=15):
+    def __init__(self, input_flags, decoder_type="avg_n", kernel_size=15):
         super().__init__()
 
         # Store init args for automatic saving/loading in BaseModel
         self.init_args = {
-            "num_input_features": num_input_features,
+            "input_flags": input_flags,
             "decoder_type": decoder_type,
             "kernel_size": kernel_size,
         }
 
-        self.num_input_features = num_input_features
+        self.num_input_features = sum(input_flags)
         self.decoder_type = decoder_type
         self.kernel_size = kernel_size
 
-        channels = [num_input_features, 2, 1]
+        channels = [self.num_input_features, 2, 1]
         dilations = [1, 2]
 
         layers = []
@@ -187,21 +181,21 @@ class Base01DebugModel(BaseModel):
 class Deep01ResConv1dBlock(BaseModel):
     _init_keys = ["num_input_features", "decoder_type", "kernel_size"]
 
-    def __init__(self, num_input_features=5, decoder_type="avg_n", kernel_size=15):
+    def __init__(self, input_flags, decoder_type="avg_n", kernel_size=15):
         super().__init__()
 
         # Store init args for automatic saving/loading in BaseModel
         self.init_args = {
-            "num_input_features": num_input_features,
+            "input_flags": input_flags,
             "decoder_type": decoder_type,
             "kernel_size": kernel_size,
         }
 
-        self.num_input_features = num_input_features
+        self.num_input_features = sum(input_flags)
         self.decoder_type = decoder_type
         self.kernel_size = kernel_size
 
-        channels = [num_input_features, 32, 64, 64, 32, 1]
+        channels = [self.num_input_features, 32, 64, 64, 32, 1]
         dilations = [1, 2, 4, 8, 16]
 
         layers = []
@@ -255,16 +249,16 @@ def model_selector(model_arg, args):
 
     if model_name=="base01":
         return Base01DebugModel(
-                    num_input_features=args.num_input_features,
+                    input_flags=args.input_flags,
                     decoder_type=args.decoder_type,
                     kernel_size=args.kernel_size
                 )
     elif model_name=="deep01":
         return Deep01ResConv1dBlock(
-            num_input_features=args.num_input_features,
-            decoder_type=args.decoder_type,
-            kernel_size=args.kernel_size
-        )
+                    input_flags=args.input_flags,
+                    decoder_type=args.decoder_type,
+                    kernel_size=args.kernel_size
+                )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 

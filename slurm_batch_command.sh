@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-07-29_01_atac_gm_recon
+#SBATCH --job-name=2026-08-05_00_test
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err

@@ -35,7 +35,8 @@ class fiber_data_iterator(IterableDataset):
         bulk_base = metadata.get("bulk_base_path", "")
 
         for cell_name in self.cell_type_names:
-            cram_file, bw_file = metadata["cell_types"][cell_name]
+            cram_file = metadata["cell_types"][cell_name]["fibers"]
+            bw_file = metadata["cell_types"][cell_name]["bulk"]
             self.fiber_data_paths.append(os.path.join(fiber_base, cram_file))
             self.other_bw_paths.append(os.path.join(bulk_base, bw_file))
 

@@ -24,6 +24,8 @@ def main():
 
     save_str = create_save_str(args)
     res_dir = os.path.join(args.res_dir, save_str)
+    os.makedirs(res_dir, exist_ok=True)
+    save_slurm_script(res_dir, args.script_path)
 
     kwargs = {
         "metadata": args.metadata,
