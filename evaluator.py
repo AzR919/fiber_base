@@ -107,9 +107,9 @@ class Evaluator:
             return torch.zeros((processed_fibers.shape[0], processed_fibers.shape[1]), device=self.device)
 
         if decoder_type == "sum":
-            return torch.sum(ct_fibers, dim=-1)
+            return self.model.final_layer(torch.sum(ct_fibers, dim=-1))
         elif decoder_type in ["avg", "avg_n"]:
-            return torch.mean(ct_fibers, dim=-1)
+            return self.model.final_layer(torch.mean(ct_fibers, dim=-1))
         else:
             raise NotImplementedError(f"Decoder type '{decoder_type}' not supported for deconvolution.")
 
