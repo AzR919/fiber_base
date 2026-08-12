@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-05_00_test
+#SBATCH --job-name=2026-08-11_00_test
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -41,7 +41,7 @@ python main.py \
   --model_config configs/models/model00.yaml \
   --train_config configs/training/train00.yaml \
   --eval_config configs/evals/eval00.yaml \
-  --name_prefix eval_test
+  --name_prefix dna_test
 
 # Print job completion time
 echo "Job finished on $(date)"

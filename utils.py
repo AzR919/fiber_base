@@ -31,7 +31,7 @@ def save_slurm_script(res_dir, slurm_script_path):
         shutil.copy(slurm_script_path, destination)
         print(f"[Slurm Tracker] Successfully copied submission script to: {destination}")
     except:
-        pass
+        print(f"[Slurm Tracker] Failed to copy submission script [{slurm_script_path}] to: {destination}")
 
 def set_seed(seed: int = 919):
     """
@@ -68,7 +68,7 @@ def get_config_names_str(args) -> str:
     and joins them with underscores.
     """
     config_keys = ["data_config", "model_config", "train_config"]
-    config_names = [args.name_prefix]
+    config_names = [args.name_prefix] if args.name_prefix is not None else []
 
     for key in config_keys:
         cfg_path = getattr(args, key, None)
@@ -77,7 +77,8 @@ def get_config_names_str(args) -> str:
             base_name = os.path.splitext(os.path.basename(cfg_path))[0]
             config_names.append(base_name)
 
-    config_names.append(args.name_suffix)
+    if args.name_suffix is not None:
+        config_names.append(args.name_suffix)
 
     # Join extracted config names (e.g., "data_config_model_config_train_config")
     return "_".join(config_names)

@@ -2,6 +2,8 @@
 Main model file
 """
 import os
+import inspect
+
 import torch
 import torch.nn as nn
 
@@ -14,9 +16,13 @@ class BaseModel(nn.Module):
     Abstract base class providing unified save and load functionality
     for all fiber-seq models.
     """
-    def __init__(self):
+    def __init__(self, input_flags, dna_type, decoder_type):
         super().__init__()
-        self.init_args = {}
+        self.init_args = {
+            "input_flags": input_flags,
+            "dna_type": dna_type,
+            "decoder_type": decoder_type,
+        }
 
     def save_model(self, dir_name, epoch, external_config=None):
         """
@@ -29,15 +35,16 @@ class BaseModel(nn.Module):
         save_path = os.path.join(dir_name, f"Model_epoch_{epoch}.pt")
 
         if external_config is not None:
-            model_config = vars(external_config).copy() if hasattr(external_config, "__dict__") else dict(external_config).copy()
+            if hasattr(external_config, "__dict__"):
+                complete_config = vars(external_config).copy()
+            else:
+                complete_config = dict(external_config).copy()
         else:
-            model_config = {}
-
-        # Merge model initialization arguments
-        model_config.update(self.init_args)
+            complete_config = {}
 
         checkpoint_bundle = {
-            "model_config": model_config,
+            "model_config": self.init_args,
+            "config": complete_config,
             "state_dict": self.state_dict()
         }
 
@@ -57,30 +64,38 @@ class BaseModel(nn.Module):
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"No bundled checkpoint found at path: {filepath}")
 
-        checkpoint = torch.load(filepath, map_location=map_location)
+        checkpoint = torch.load(filepath, map_location=map_location, weights_only=False)
 
         if "model_config" not in checkpoint or "state_dict" not in checkpoint:
             raise KeyError("The checkpoint file does not match the expected bundle format.")
 
-        config = checkpoint["model_config"]
+        init_args = checkpoint["model_config"]
         state_dict = checkpoint["state_dict"]
+        config = checkpoint.get("config", {})
 
-        # Extract input_flags safely from top-level or config dict
-        input_flags = checkpoint.get("input_flags", config.get("input_flags", None))
+        # Robustly extract input_flags
+        input_flags = init_args.get("input_flags")
+
         if input_flags is None:
-            raise ValueError(f"Checkpoint at {filepath} does not contain 'input_flags'. Cannot verify input features.")
+            raise ValueError(f"Checkpoint at {filepath} does not contain 'input_flags'.")
 
-        # Ensure in_channels in config matches sum(input_flags)
-        assert config["in_channels"] == sum(input_flags), f"Input flag mismatch, {config['in_channels']} != {sum(input_flags)}"
+        # DYNAMIC ARGUMENT FILTERING
+        # Get the signature of the current class's __init__ method
+        sig = inspect.signature(cls.__init__)
+        valid_params = set(sig.parameters.keys()) - {"self", "args", "kwargs"}
 
-        # Filter init arguments matching model class constructor
-        init_kwargs = {k: v for k, v in config.items() if k in getattr(cls, "_init_keys", [])}
-        model = cls(**init_kwargs)
+        # Filter config to only include arguments that the constructor actually accepts
+        init_kwargs = {k: v for k, v in init_args.items() if k in valid_params}
+
+        # Instantiate the model
+        try:
+            model = cls(**init_kwargs)
+        except TypeError as e:
+            raise TypeError(f"Failed to instantiate {cls.__name__}. Missing required args? "
+                            f"Expected: {list(valid_params)}, Got: {list(init_kwargs.keys())}. Error: {e}")
 
         model.load_state_dict(state_dict)
         print(f"Model successfully reconstituted from: {filepath}")
-        print(f"Loaded Model Input Flags: {input_flags} (Active Channels: {sum(input_flags)})")
-
         return model, config
 
 
@@ -117,17 +132,12 @@ class ResidualBlock1D(nn.Module):
 # Concrete Model Implementation
 
 class Base01DebugModel(BaseModel):
-    _init_keys = ["num_input_features", "decoder_type", "kernel_size"]
 
-    def __init__(self, input_flags, decoder_type="avg_n", kernel_size=15):
-        super().__init__()
+    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
+        super().__init__(input_flags, dna_type, decoder_type)
 
         # Store init args for automatic saving/loading in BaseModel
-        self.init_args = {
-            "input_flags": input_flags,
-            "decoder_type": decoder_type,
-            "kernel_size": kernel_size,
-        }
+        self.init_args["kernel_size"] = kernel_size
 
         self.num_input_features = sum(input_flags)
         self.decoder_type = decoder_type
@@ -179,17 +189,12 @@ class Base01DebugModel(BaseModel):
         return y_final, processed_fibers
 
 class Deep01ResConv1dBlock(BaseModel):
-    _init_keys = ["num_input_features", "decoder_type", "kernel_size"]
 
-    def __init__(self, input_flags, decoder_type="avg_n", kernel_size=15):
-        super().__init__()
+    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
+        super().__init__(input_flags, dna_type, decoder_type)
 
         # Store init args for automatic saving/loading in BaseModel
-        self.init_args = {
-            "input_flags": input_flags,
-            "decoder_type": decoder_type,
-            "kernel_size": kernel_size,
-        }
+        self.init_args["kernel_size"] = kernel_size
 
         self.num_input_features = sum(input_flags)
         self.decoder_type = decoder_type
@@ -250,12 +255,14 @@ def model_selector(model_arg, args):
     if model_name=="base01":
         return Base01DebugModel(
                     input_flags=args.input_flags,
+                    dna_type=args.dna_type,
                     decoder_type=args.decoder_type,
                     kernel_size=args.kernel_size
                 )
     elif model_name=="deep01":
         return Deep01ResConv1dBlock(
                     input_flags=args.input_flags,
+                    dna_type=args.dna_type,
                     decoder_type=args.decoder_type,
                     kernel_size=args.kernel_size
                 )

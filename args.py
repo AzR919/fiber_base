@@ -57,8 +57,7 @@ def get_args():
     # Dataset Parameters
     data_group.add_argument("--context_length", type=int, default=4096)
     data_group.add_argument("--fibers_per_entry", type=int, default=200)
-    data_group.add_argument("--return_dna", action="store_true",
-                            help="If set, returns both genomic_dna and fiber_dna tensors in batch dict")
+
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")
@@ -69,6 +68,8 @@ def get_args():
     model_group.add_argument("--dilation", type=int, default=1)
     model_group.add_argument("--input_flags", type=int, nargs="+", default=[1, 1, 1, 1, 1],
                                 help="Binary indicators list [m6a, cpg, msp, nuc, fire_msp]")
+    model_group.add_argument("--dna_type", type=str, default="none", choices=["none", "ref", "fiber", "both"],
+                            help="dna_type to use as input")
 
     # Individual input feature flags for hyperparameter sweeps
     model_group.add_argument("--use_individual_input_flags", action="store_true",
@@ -92,9 +93,9 @@ def get_args():
     io_group = parser.add_argument_group("Model I/O")
     io_group.add_argument("--res_dir", type=str, default="./results",
                           help="Directory to save trained models and final results")
-    io_group.add_argument("--name_prefix", type=str, default="",
+    io_group.add_argument("--name_prefix", type=str, default=None,
                               help="prefix to append to auto-generated model name")
-    io_group.add_argument("--name_suffix", type=str, default="",
+    io_group.add_argument("--name_suffix", type=str, default=None,
                           help="Suffix to append to auto-generated model name")
 
     # Misc
@@ -182,7 +183,7 @@ def tester():
     print("--- Parsed Arguments & Metadata ---")
     print(f"Context Length          : {args.context_length}")
     print(f"Fibers per Entry        : {args.fibers_per_entry}")
-    print(f"Return DNA Tensors      : {args.return_dna}")
+    print(f"Return DNA Tensors      : {args.dna_type}")
     print(f"Active Input Flags      : {args.input_flags}")
     print(f"Num Input Features      : {args.num_input_features}")
     print("\n--- Metadata Dict ---")

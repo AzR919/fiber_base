@@ -34,7 +34,7 @@ def main():
         "iters_per_epoch": args.iters_per_epoch,
         "input_flags": args.input_flags,
         "seed": args.seed,
-        "return_dna": args.return_dna
+        "return_dna": args.dna_type != "none"
     }
 
     train_data_iterator = fiber_data_iterator(mode="train", **kwargs)

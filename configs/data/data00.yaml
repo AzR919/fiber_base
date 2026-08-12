@@ -2,7 +2,6 @@
 
 context_length: 256
 fibers_per_entry: 50
-return_dna: true
 bulk_name: "ATAC_seq_fcc"
 
 metadata:
