@@ -277,9 +277,11 @@ def tester():
     B, C_in, L, N = 16, 5, 2048, 200
     decoder_type = "sum"
     kernel_size = 15
+    input_flags = [1, 1, 1, 1, 1]
 
     test_model = Deep01ResConv1dBlock(
-        num_input_features=C_in,
+        input_flags=input_flags,
+        dna_type="none",
         decoder_type=decoder_type,
         kernel_size=kernel_size
     )
