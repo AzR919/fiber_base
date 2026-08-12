@@ -1,8 +1,8 @@
-# test config, acts as the base template
+# GM12878 ATAC-seq test
 
 context_length: 256
 fibers_per_entry: 50
-num_sample_ccres: 5
+num_sample_ccres: -1
 bulk_name: "ATAC_seq_fcc"
 seed: 919
 
@@ -16,8 +16,4 @@ metadata:
     GM12878:
       fibers: "GM12878-fire-v0.1-filtered.cram"
       bulk: "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
-      ratio: 0.5
-    K562:
-      fibers: "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
-      bulk: "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
-      ratio: 0.5
+      ratio: 1.0

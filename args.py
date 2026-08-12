@@ -5,23 +5,9 @@ Priority Order: Command Line Arguments > Config JSON/YAML Files > Parser Default
 
 import os
 import sys
-import json
-import yaml
 import argparse
 
-#--------------------------------------------------------------------------------------------------
-
-def load_config_file(config_path):
-    """Loads JSON or YAML configuration files safely."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    if config_path.endswith(".yaml") or config_path.endswith(".yml"):
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f)
-    else:
-        with open(config_path, "r") as f:
-            return json.load(f)
+from utils import *
 
 #--------------------------------------------------------------------------------------------------
 
@@ -154,9 +140,6 @@ def get_args():
             for key, val in cfg_dict.items():
                 if hasattr(parsed_args, key) and key not in cli_args_set:
                     setattr(parsed_args, key, val)
-
-    if parsed_args.eval_config_path is not None:
-        parsed_args.eval_config = load_config_file(parsed_args.eval_config_path)
 
     # Step 4: Reconcile sweep feature flags vs input_flags list
     indiv_flags = ["m6a", "cpg", "msp", "nuc", "fire_msp"]

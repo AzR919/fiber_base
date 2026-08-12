@@ -34,23 +34,16 @@ def main():
         "iters_per_epoch": args.iters_per_epoch,
         "input_flags": args.input_flags,
         "seed": args.seed,
-        "return_dna": args.dna_type != "none"
+        "return_dna": args.dna_type != "none",
+        "bulk_name": args.bulk_name
     }
 
     train_data_iterator = fiber_data_iterator(mode="train", **kwargs)
     val_data_iterator = fiber_data_iterator(mode="val", **kwargs)
-    test_iterator = None
-
-    if args.eval_config is not None:
-        kwargs["metadata"] = args.eval_config["metadata"]
-        kwargs["fibers_per_entry"] = args.eval_config["fibers_per_entry"]
-        kwargs["context_length"] = args.eval_config["context_length"]
-        kwargs["seed"] = args.eval_config["seed"]
-        test_iterator = MixedCellFiberDataset(**kwargs)
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, train_data_iterator, val_data_iterator, test_iterator,
+    trainer = Trainer(model, train_data_iterator, val_data_iterator, args.eval_config_path,
                       epochs=args.epochs, batch_size=args.batch_size,
                       run_name=get_config_names_str(args), config=args)
 

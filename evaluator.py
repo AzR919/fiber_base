@@ -4,11 +4,37 @@ Evaluates model performance across mixed composite signals as well as
 individual cell-type reconstructions.
 """
 
-import torch
+import os
+import sys
 import numpy as np
-import torch.nn as nn
 
-from utils import AverageMeter
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+from eval_dataset import MixedCellFiberDataset
+from utils import *
+
+#--------------------------------------------------------------------------------------------------
+# data setup
+
+def test_dataset_from_path_and_extra_args(eval_config_path, overwrite_args):
+
+    eval_config = load_config_file(eval_config_path)
+    kwargs = {
+            "metadata": eval_config["metadata"],
+            "context_length": eval_config["context_length"],
+            "fibers_per_entry": eval_config["fibers_per_entry"],
+            "num_sample_ccres": eval_config["num_sample_ccres"],
+            "bulk_name": eval_config["bulk_name"],
+            "seed": eval_config["seed"],
+            "input_flags": [1, 1, 1, 1, 1],
+            "return_dna": False
+        }
+
+    kwargs.update(overwrite_args)
+
+    return MixedCellFiberDataset(**kwargs)
 
 
 class Evaluator:
@@ -18,7 +44,7 @@ class Evaluator:
     MSE loss and Pearson correlation metrics.
     """
 
-    def __init__(self, model, device="cuda", criterion=None):
+    def __init__(self, model, test_set, batch_size, device="cuda", criterion=None):
         """
         Args:
             model (nn.Module): Pre-trained PyTorch model instance.
@@ -28,6 +54,8 @@ class Evaluator:
         self.model = model
         self.device = torch.device(device)
         self.model.to(self.device)
+        self.test_set = test_set
+        self.batch_size = batch_size
         self.criterion = criterion if criterion is not None else nn.MSELoss()
 
     @staticmethod
@@ -85,7 +113,7 @@ class Evaluator:
         else:
             raise NotImplementedError(f"Decoder type '{decoder_type}' not supported for deconvolution.")
 
-    def evaluate(self, dataloader):
+    def evaluate(self):
         """
         Runs evaluation loop over the provided mixed-cell dataloader.
 
@@ -95,12 +123,15 @@ class Evaluator:
         """
         self.model.eval()
 
+        test_loader = DataLoader(
+                                self.test_set,
+                                batch_size=self.batch_size,
+                                worker_init_fn=seed_worker,
+                            )
+
         # Metrics trackers
         composite_loss_meter = AverageMeter()
-        composite_pearson_meter = AverageMeter()
-
         cell_type_loss_meters = {}
-        cell_type_pearson_meters = {}
 
         # Store locus-level outputs for plotting/inspection
         locus_records = []
@@ -108,7 +139,7 @@ class Evaluator:
         decoder_type = getattr(self.model, "decoder_type", "avg_n")
 
         with torch.no_grad():
-            for batch_idx, batch in enumerate(dataloader):
+            for batch_idx, batch in enumerate(test_loader):
                 # Prepare model inputs
                 inputs = batch["fiber_features"].to(self.device)  # [B, C, L, N]
                 target_bulk = batch["target_bulk"].to(self.device)  # [B, L]
@@ -119,10 +150,7 @@ class Evaluator:
 
                 # Composite evaluation
                 comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()
-                comp_pearson = self._compute_pearson_r(pred_composite_bulk, target_bulk)
-
                 composite_loss_meter.update(comp_loss)
-                composite_pearson_meter.update(comp_pearson)
 
                 # Cell-type specific deconvolution and evaluation
                 ct_targets = batch["cell_type_targets"]
@@ -130,13 +158,11 @@ class Evaluator:
 
                 cell_type_preds = {}
                 cell_type_losses = {}
-                cell_type_pearsons = {}
 
                 for ct_name, mask_tensor in ct_masks.items():
                     # Initialize meters if seeing cell type for the first time
                     if ct_name not in cell_type_loss_meters:
                         cell_type_loss_meters[ct_name] = AverageMeter()
-                        cell_type_pearson_meters[ct_name] = AverageMeter()
 
                     # Squeeze batch dimension for mask
                     ct_mask = mask_tensor[0] if mask_tensor.dim() > 1 else mask_tensor
@@ -150,26 +176,22 @@ class Evaluator:
 
                     # Calculate cell-type specific metrics
                     ct_loss = self.criterion(pred_ct_bulk, target_ct_bulk).item()
-                    ct_pearson = self._compute_pearson_r(pred_ct_bulk, target_ct_bulk)
-
                     cell_type_loss_meters[ct_name].update(ct_loss)
-                    cell_type_pearson_meters[ct_name].update(ct_pearson)
 
                     cell_type_preds[ct_name] = pred_ct_bulk.cpu()
                     cell_type_losses[ct_name] = ct_loss
-                    cell_type_pearsons[ct_name] = ct_pearson
 
                 # Package payload for downstream plotting modules
                 locus_records.append({
                     "locus": batch["locus"],
-                    "inputs": inputs.cpu(),
+                    "fiber_features": inputs.cpu(),
                     "processed_fibers": processed_fibers.cpu(),
-                    "pred_composite_bulk": pred_composite_bulk.cpu(),
-                    "target_composite_bulk": target_bulk.cpu(),
+                    "pred_bulk": pred_composite_bulk.cpu(),
+                    "target_bulk": target_bulk.cpu(),
                     "pred_cell_type_bulks": cell_type_preds,
                     "target_cell_type_bulks": {k: v.cpu() for k, v in ct_targets.items()},
                     "cell_type_masks": ct_masks,
-                    "composite_loss": comp_loss,
+                    "loss": comp_loss,
                     "cell_type_losses": cell_type_losses
                 })
 
@@ -177,12 +199,10 @@ class Evaluator:
         metrics_summary = {
             "composite": {
                 "loss": composite_loss_meter.avg,
-                "pearson_r": composite_pearson_meter.avg
             },
             "per_cell_type": {
                 ct: {
                     "loss": cell_type_loss_meters[ct].avg,
-                    "pearson_r": cell_type_pearson_meters[ct].avg
                 }
                 for ct in cell_type_loss_meters
             },

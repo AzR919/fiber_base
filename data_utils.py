@@ -21,10 +21,11 @@ class fiber_data_iterator(IterableDataset):
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  iters_per_epoch, input_flags, mode="train", seed=919,
-                 return_dna=False):
+                 return_dna=False, bulk_name="N/A"):
 
         self.metadata = metadata
         self.fasta_path = metadata["fasta_path"]
+        self.bulk_name = bulk_name
 
         # Parse cell type mappings into lists of names and absolute file paths
         self.cell_type_names = list(metadata["cell_types"].keys())
@@ -57,7 +58,6 @@ class fiber_data_iterator(IterableDataset):
 
         # Base random number generators
         self.rng = random.Random(seed)
-        self.np_rng = np.random.default_rng(seed)
 
         # Read chromosome sizes directly from the FASTA index (.fai)
         if not os.path.exists(self.fasta_path + ".fai"):
@@ -144,9 +144,8 @@ class fiber_data_iterator(IterableDataset):
         random_end = random_start + self.context_length
         return random_chr, random_start, random_end
 
-    def generate_ccre_locus(self, jitter_range=200):
+    def expand_ccre_locus(self, ccre_chrom, ccre_start, ccre_end, jitter_range=200):
         """Generates a genomic window centered around a random cCRE with optional jitter."""
-        ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
         true_center = (ccre_start + ccre_end) // 2
 
         jitter = self.rng.randint(-jitter_range, jitter_range)
@@ -165,6 +164,11 @@ class fiber_data_iterator(IterableDataset):
             random_start = max_size - self.context_length
 
         return ccre_chrom, int(random_start), int(random_end)
+
+    def generate_ccre_locus(self, jitter_range=200):
+            """Generates a genomic window centered around a random cCRE with optional jitter."""
+            ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
+            return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
 
     def get_m6a(self, fiber, start, end, Q_THRESHOLD=200):
         m6a_data = np.zeros((self.context_length), dtype=np.float32)
@@ -307,7 +311,6 @@ class fiber_data_iterator(IterableDataset):
 
         worker_seed = self.seed + seed_offset
         self.rng = random.Random(worker_seed)
-        self.np_rng = np.random.default_rng(worker_seed)
 
         for _ in range(self.iters_per_epoch):
             found_possible_locus = False

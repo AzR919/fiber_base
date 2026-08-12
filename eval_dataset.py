@@ -18,15 +18,15 @@ class MixedCellFiberDataset(fiber_data_iterator):
     """
 
     def __init__(self, metadata, fibers_per_entry, context_length,
-                 input_flags, iters_per_epoch=1000, mode="val",
-                 seed=919, return_dna=False):
+                 input_flags, num_sample_ccres=1000, seed=919,
+                 return_dna=False, bulk_name="N/A"):
         """
         Args:
             metadata (dict): Dataset configuration containing paths and cell types.
             fibers_per_entry (int): Total number of fibers in the combined stack.
             context_length (int): Window length in base pairs.
             input_flags (list): 5-bit feature mask (e.g., [1, 1, 1, 1, 1]).
-            iters_per_epoch (int): Number of composite samples generated per epoch.
+            num_sample_ccres (int): Number of composite samples generated per epoch.
             cell_ratios (dict): Optional dict mapping cell_type_name -> ratio (e.g., {'GM12878': 0.5, 'K562': 0.5}).
             mode (str): 'val' or 'test' chromosome partition selection.
             seed (int): Random seed for reproducible locus & fiber sampling.
@@ -36,16 +36,24 @@ class MixedCellFiberDataset(fiber_data_iterator):
             metadata=metadata,
             fibers_per_entry=fibers_per_entry,
             context_length=context_length,
-            iters_per_epoch=iters_per_epoch,
+            iters_per_epoch=num_sample_ccres,
             input_flags=input_flags,
-            mode=mode,
+            mode="val",
             seed=seed,
-            return_dna=return_dna
+            return_dna=return_dna,
+            bulk_name=bulk_name
         )
 
-        meta_cell_ratios = {cell_type:metadata["cell_types"][cell_type]["ratio"] for cell_type in metadata["cell_types"].keys()}
+        try:
+            meta_cell_ratios = {cell_type:metadata["cell_types"][cell_type]["ratio"] for cell_type in metadata["cell_types"].keys()}
+        except:
+            print("Failed to extract cell ratio from meta. Falling back to uniform distribution")
+            meta_cell_ratios = None
         self.cell_ratios = self._setup_mixing_ratios(meta_cell_ratios)
         self.fiber_counts_per_cell = self._calculate_fiber_counts()
+        self.bulk_name = bulk_name
+        self.input_flags = input_flags
+        self.num_sample_ccres = num_sample_ccres
 
     # -------------------------------------------------------------------------
     # Helper 1: Configuration & Ratio Allocation
@@ -87,12 +95,12 @@ class MixedCellFiberDataset(fiber_data_iterator):
             return None
 
         # Fetch fibers using inherited method
-        fiber_tensor, fiber_dna_tensor, n_retrieved = self.get_fiber_data(
+        fiber_tensor, fiber_dna_tensor, n_fibers = self.get_fiber_data(
             cell_idx, *locus, min_overlap=self.context_length // 8
         )
 
         # Insufficient reads check
-        if n_retrieved < min(5, n_fibers_needed):
+        if n_fibers < min(5, n_fibers_needed):
             return None
 
         # Fetch BigWig target profile
@@ -113,7 +121,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
             "fiber_features": trimmed_fiber_tensor,
             "target_bulk": bw_tensor,
             "fiber_dna": trimmed_dna_tensor,
-            "n_retrieved": n_retrieved
+            "n_fibers": n_fibers_needed
         }
 
     # -------------------------------------------------------------------------
@@ -125,49 +133,47 @@ class MixedCellFiberDataset(fiber_data_iterator):
         Combines individual cell-type samples into unified tensors,
         creates boolean masks, and computes composite targets.
         """
-        mixed_fiber_tensors = []
-        mixed_dna_tensors = []
+        mixed_fiber_tensors = np.zeros((len(self.input_features), self.context_length, self.fibers_per_entry), dtype=np.float32)
+        mixed_dna_tensors = np.zeros((4, self.context_length, self.fibers_per_entry), dtype=np.float32) if self.return_dna else None
         cell_type_masks = {}
         individual_bulk_targets = {}
 
         current_fiber_offset = 0
-        total_sampled_fibers = 0
 
         for sample in cell_samples:
             ct = sample["cell_type"]
-            n_retrieved = sample["n_retrieved"]
+            n_fibers = sample["n_fibers"]
 
             individual_bulk_targets[ct] = sample["target_bulk"]
-            mixed_fiber_tensors.append(sample["fiber_features"])
+            mixed_fiber_tensors[:,:,current_fiber_offset:current_fiber_offset+n_fibers] = sample["fiber_features"][:n_fibers]
 
             if sample["fiber_dna"] is not None:
                 mixed_dna_tensors.append(sample["fiber_dna"])
+                mixed_dna_tensors[:,:,current_fiber_offset:current_fiber_offset+n_fibers] = sample["fiber_dna"][:n_fibers]
 
             # Build boolean cell-type mask
             mask = torch.zeros(self.fibers_per_entry, dtype=torch.bool)
-            mask[current_fiber_offset : current_fiber_offset + n_retrieved] = True
+            mask[current_fiber_offset : current_fiber_offset + n_fibers] = True
             cell_type_masks[ct] = mask
 
-            current_fiber_offset += n_retrieved
-            total_sampled_fibers += n_retrieved
+            current_fiber_offset += n_fibers
 
-        # Concatenate tensors along fiber dimension
-        composite_fiber_tensor = torch.cat(mixed_fiber_tensors, dim=-1)
-        composite_bulk = torch.stack(list(individual_bulk_targets.values()), dim=0).mean(dim=0)
+        composite_bulk_list = [self.cell_ratios[ct]*individual_bulk_targets[ct] for ct in individual_bulk_targets.keys()]
+        composite_bulk = torch.stack(composite_bulk_list, dim=0).sum(dim=0)
 
         out_dict = {
-            "fiber_features": composite_fiber_tensor,
+            "fiber_features": mixed_fiber_tensors,
             "target_bulk": composite_bulk,
             "cell_type_targets": individual_bulk_targets,
             "cell_type_masks": cell_type_masks,
-            "n_fibers": total_sampled_fibers,
+            "n_fibers": current_fiber_offset,
             "locus": locus,
             "mixing_ratios": self.cell_ratios
         }
 
         if self.return_dna:
             out_dict["genomic_dna"] = self.onehot_for_locus(locus)
-            out_dict["fiber_dna"] = torch.cat(mixed_dna_tensors, dim=-1)
+            out_dict["fiber_dna"] = mixed_dna_tensors
 
         return out_dict
 
@@ -178,27 +184,19 @@ class MixedCellFiberDataset(fiber_data_iterator):
     def __iter__(self):
         self.init_worker_resources()
 
-        # Seed configuration
-        worker_info = torch.utils.data.get_worker_info()
-        seed_offset = 0 if self.mode == "val" else (
-            self.epoch * 1000 if worker_info is None else worker_info.id + self.epoch * 1000
-        )
+        ccre_iter_list = self.ccre_list if self.num_sample_ccres == -1 else self.ccre_list[:self.num_sample_ccres]
 
-        worker_seed = self.seed + seed_offset
-        self.rng = random.Random(worker_seed)
-        self.np_rng = np.random.default_rng(worker_seed)
-
-        for _ in range(self.iters_per_epoch):
+        for ccre_locus in ccre_iter_list:
             found_valid_locus = False
             out_dict = None
 
             while not found_valid_locus:
-                random_locus = self.generate_ccre_locus()
+                selected_locus = self.expand_ccre_locus(*ccre_locus)
                 cell_samples = []
                 failed_sampling = False
 
                 for cell_idx, ct in enumerate(self.cell_type_names):
-                    sample = self._sample_single_cell_type(cell_idx, ct, random_locus)
+                    sample = self._sample_single_cell_type(cell_idx, ct, selected_locus)
                     if sample is None and self.fiber_counts_per_cell[ct] > 0:
                         failed_sampling = True
                         break
@@ -208,7 +206,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
                 if failed_sampling or not cell_samples:
                     continue
 
-                out_dict = self._build_composite_sample(random_locus, cell_samples)
+                out_dict = self._build_composite_sample(selected_locus, cell_samples)
                 found_valid_locus = True
 
             yield out_dict
@@ -218,37 +216,21 @@ class MixedCellFiberDataset(fiber_data_iterator):
 # Testing
 
 def tester():
-    data_root = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER"
+    import yaml
 
-    metadata = {
-        "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-        "ccre_path": "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed",
-        "train_chrs": ["chr20"],
-        "val_chrs": ["chr21"],
-        "fiber_base_path": f"{data_root}/fiber_multi_cell",
-        "bulk_base_path": f"{data_root}/atac_multi_cell",
-        # Map cell type names directly to their (CRAM, BigWig) tuple
-        "cell_types": {
-            "GM12878": (
-                "GM12878-fire-v0.1-filtered.cram",
-                "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
-            ),
-            "K562": (
-                "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram",
-                "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
-            ),
-        "cell_ratios": [0.5,0.5]
-        }
-    }
+    config_path = "./configs/evals/eval00.yaml"
+    with open(config_path, "r") as f:
+        eval_config =  yaml.safe_load(f)
 
     kwargs = {
-        "metadata": metadata,
-        "fibers_per_entry": 10,
-        "context_length": 20,
-        "iters_per_epoch": 5,
+        "metadata": eval_config["metadata"],
+        "context_length": eval_config["context_length"],
+        "fibers_per_entry": eval_config["fibers_per_entry"],
+        "num_sample_ccres": eval_config["num_sample_ccres"],
+        "bulk_name": eval_config["bulk_name"],
+        "seed": eval_config["seed"],
         "input_flags": [1, 1, 1, 1, 1],
-        "mode": "val",
-        "return_dna": True
+        "return_dna": False
     }
 
     t_set = MixedCellFiberDataset(**kwargs)

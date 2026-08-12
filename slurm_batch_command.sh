@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-11_00_test
+#SBATCH --job-name=2026-08-12_01_GM12878_atac_base
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -37,11 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data00.yaml \
-  --model_config configs/models/model00.yaml \
-  --train_config configs/training/train00.yaml \
-  --eval_config configs/evals/eval00.yaml \
-  --name_prefix dna_test
+  --data_config configs/data/data01.yaml \
+  --model_config configs/models/model01.yaml \
+  --train_config configs/training/train01.yaml \
+  --eval_config configs/evals/eval01.yaml \
+  --name_prefix gm_atac \
+  --name_suffix complete
 
 # Print job completion time
 echo "Job finished on $(date)"

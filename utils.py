@@ -4,6 +4,8 @@ Common utility functions for experiment tracking, seeding, training, and visuali
 
 import os
 import sys
+import json
+import yaml
 import random
 import shutil
 import datetime
@@ -61,6 +63,18 @@ def seed_worker(worker_id):
 
 #--------------------------------------------------------------------------------------------------
 # File Utilities & Experiment Tracking
+
+def load_config_file(config_path):
+    """Loads JSON or YAML configuration files safely."""
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    if config_path.endswith(".yaml") or config_path.endswith(".yml"):
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f)
+    else:
+        with open(config_path, "r") as f:
+            return json.load(f)
 
 def get_config_names_str(args) -> str:
     """
@@ -221,50 +235,17 @@ def render_input_channels(fig, gs_column, inp, input_flags):
     return input_axes
 
 
-def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None):
+def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None, cell_type=None):
     """Sub-renderer for target vs predicted bulk signal comparison."""
     ax.plot(target.cpu().numpy(), color='dimgray', lw=1.5, label=bulk_name)
     ax.plot(pred_bulk.cpu().detach().numpy(), color='darkorange', lw=1.5, label='Predicted', alpha=0.8)
     ax.set_ylabel("Signal Intensity")
     ax.legend(loc='upper right', frameon=False)
 
-    title = f"Imputation Results ({mode} Loss: {instance_loss:.6f})\n{chr_info}"
+    title = f"Imputation Results {cell_type} ({mode} Loss: {instance_loss:.6f})\n{chr_info}"
     if avg_loss is not None:
         title += f" (Epoch Avg {mode} Loss: {avg_loss:.6f})"
     ax.set_title(title, fontsize=13, fontweight='bold')
-    ax.set_xticklabels([])
-
-def render_bulk_signal_panel(ax, target, pred, bulk_name, title_prefix="", color_pred='darkorange', color_tar='dimgray'):
-    """
-    Sub-renderer for comparing target bulk signal vs predicted bulk signal on RHS.
-    Computes MSE loss and Pearson R correlation on the fly, and uses configurable prediction colors.
-
-    Args:
-        ax (matplotlib.axes.Axes): Axis object to draw on.
-        target (torch.Tensor or np.ndarray): Ground truth bulk signal tensor/array.
-        pred (torch.Tensor or np.ndarray): Predicted bulk signal tensor/array.
-        bulk_name (str): Histone modification or bulk signal name (e.g., 'H3K27ac', 'H3K4me3').
-        title_prefix (str): Prefix title for the panel (e.g., 'Composite Mixed Signal', 'Deconvoluted Bulk: GM12878').
-        color_pred (str): Line color for the prediction trace.
-        color_tar (str): Line color for the target trace.
-    """
-    # 1. Flatten inputs to 1D numpy arrays
-    t_np = target.detach().cpu().numpy().flatten() if isinstance(target, torch.Tensor) else np.asarray(target).flatten()
-    p_np = pred.detach().cpu().numpy().flatten() if isinstance(pred, torch.Tensor) else np.asarray(pred).flatten()
-
-    # 2. Compute performance metrics
-    loss = float(np.mean((t_np - p_np) ** 2))
-
-    # 3. Plot target and prediction traces
-    ax.plot(t_np, color=color_tar, lw=1.5, label=f"Target ({bulk_name})")
-    ax.plot(p_np, color=color_pred, lw=1.5, label="Predicted", alpha=0.85)
-
-    # 4. Format labels, legend, and title
-    ax.set_ylabel("Signal", fontsize=10)
-    ax.legend(loc='upper right', frameon=False, fontsize=9)
-
-    title_str = f"{title_prefix} [{bulk_name}]" if title_prefix else f"[{bulk_name}]"
-    ax.set_title(f"{title_str} (MSE: {loss:.5f})", fontsize=11, fontweight='bold')
     ax.set_xticklabels([])
 
 
@@ -437,27 +418,9 @@ def plot_loss(dir_path, losses, epoch, bulk_name):
     plt.close(fig)
 
 
-def plot_evaluator_record(record, input_flags, bulk_name="H3K27ac", mode="Val"):
+def plot_evaluator_record(record, input_flags, loss=0.0, ct_losses={}, bulk_name="H3K27ac", mode="Test"):
     """
     Plots a multi-panel deconvolution dashboard from a single Evaluator locus record.
-
-    Layout Architecture:
-      - Left Column : Dynamic input channels stacked vertically with a boundary line separating cell types.
-      - Right Column: Stacked 1D signals and single-cell heatmap:
-            1. Composite Mixed Bulk (Target vs Prediction)
-            2. Imputed Single-Cell Fiber Accessibility Heatmap
-            3. Cell Type A Bulk Signal (Target vs Deconvoluted Prediction)
-            4. Cell Type B Bulk Signal (Target vs Deconvoluted Prediction)
-
-    Args:
-        record (dict): A dictionary element from Evaluator.evaluate()['locus_records'].
-                       Expected keys: 'locus', 'inputs', 'processed_fibers',
-                       'pred_composite_bulk', 'target_composite_bulk',
-                       'pred_cell_type_bulks', 'target_cell_type_bulks', 'cell_type_masks'.
-        input_flags (list of int): 5-bit list indicating active feature channels (e.g., [1, 1, 1, 1, 1]).
-        bulk_name (str): Histone modification target label (e.g., 'H3K27ac', 'H3K4me3').
-        mode (str): Evaluation split label ('Val' or 'Test').
-
     Returns:
         matplotlib.figure.Figure: The complete figure object for saving or logging.
     """
@@ -466,23 +429,17 @@ def plot_evaluator_record(record, input_flags, bulk_name="H3K27ac", mode="Val"):
     chr_name, start, end = locus[0][0], locus[1][0], locus[2][0]
     chr_info = f"{chr_name}:{start}-{end}"
 
-    inp = record["inputs"]                          # Shape: [1, C, L, N]
-    processed_fibers = record["processed_fibers"]  # Shape: [1, L, N]
-    pred_composite = record["pred_composite_bulk"]  # Shape: [1, L]
-    target_composite = record["target_composite_bulk"] # Shape: [1, L]
-    ct_preds = record["pred_cell_type_bulks"]        # Dict: cell_type -> [1, L]
-    ct_targets = record["target_cell_type_bulks"]    # Dict: cell_type -> [1, L]
-    ct_masks = record["cell_type_masks"]            # Dict: cell_type -> [N]
+    inp = record["fiber_features"]                  # Shape: [1, C, L, N]
+    processed_fibers = record["processed_fibers"]   # Shape: [1, L, N]
+    pred_bulk = record["pred_bulk"]                 # Shape: [1, L]
+    target_bulk = record["target_bulk"]             # Shape: [1, L]
+    ct_preds = record["pred_cell_type_bulks"]       # Dict: cell_type -> [1, L]
+    ct_targets = record["target_cell_type_bulks"]   # Dict: cell_type -> [1, L]
+    instance_loss = record["loss"]
+    ct_instance_loss = record["cell_type_losses"]
 
-    cell_types = sorted(list(ct_preds.keys()))
+    cell_types = list(ct_preds.keys())[:2]
     num_active_inputs = sum(input_flags)
-
-    # 2. Determine Fiber Boundary Index for Visual Separation
-    split_idx = None
-    if len(cell_types) >= 1:
-        mask_ct0 = ct_masks[cell_types[0]]
-        mask_ct0 = mask_ct0[0] if mask_ct0.dim() > 1 else mask_ct0
-        split_idx = int(mask_ct0.sum().item())
 
     # 3. Figure Layout Creation
     fig = plt.figure(figsize=(22, 14))
@@ -491,19 +448,14 @@ def plot_evaluator_record(record, input_flags, bulk_name="H3K27ac", mode="Val"):
     # 4. Left Column: Render Input Feature Channels
     input_axes = render_input_channels(fig, gs, inp, input_flags)
     if input_axes:
-        ct_label = f"{cell_types[0]} (Top) / {cell_types[1]} (Bottom)" if len(cell_types) == 2 else "Mixed Stack"
-        input_axes[0].set_title(f"Input Fiber Stack [{ct_label}]\n{chr_info}", fontsize=12, fontweight='bold')
+        input_axes[0].set_title(f"Input Fiber Stack\n{chr_info}", fontsize=12, fontweight='bold')
 
     # 5. Right Column Sub-Grid: Composite, Heatmap, and Deconvoluted Profiles
     rhs_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1], hspace=0.45)
 
     # RHS Row 0: Composite Mixed Signal
     ax_comp = fig.add_subplot(rhs_gs[0, 0])
-    render_bulk_signal_panel(
-        ax_comp, target_composite, pred_composite,
-        bulk_name=bulk_name, title_prefix=f"{mode} Composite Mixed Signal",
-        color_pred="darkorange"
-    )
+    render_bulk_comparison(ax_comp, target_bulk[0], pred_bulk[0], chr_info, instance_loss, mode, bulk_name, loss, cell_type="Mixed")
 
     # RHS Row 1: Predicted Fiber Continuous Heatmap
     ax_heat = fig.add_subplot(rhs_gs[1, 0], sharex=ax_comp)
@@ -513,21 +465,13 @@ def plot_evaluator_record(record, input_flags, bulk_name="H3K27ac", mode="Val"):
     if len(cell_types) >= 1:
         ct_a = cell_types[0]
         ax_cta = fig.add_subplot(rhs_gs[2, 0], sharex=ax_comp)
-        render_bulk_signal_panel(
-            ax_cta, ct_targets[ct_a], ct_preds[ct_a],
-            bulk_name=f"{bulk_name} ({ct_a})", title_prefix=f"Deconvoluted Bulk: {ct_a}",
-            color_pred="crimson"
-        )
+        render_bulk_comparison(ax_cta, ct_targets[ct_a][0], ct_preds[ct_a][0], "", ct_instance_loss[ct_a], mode, bulk_name, ct_losses[ct_a]["loss"], cell_type=ct_a)
 
     # RHS Row 3: Cell Type B Bulk Signal Deconvolution
     if len(cell_types) >= 2:
         ct_b = cell_types[1]
         ax_ctb = fig.add_subplot(rhs_gs[3, 0], sharex=ax_comp)
-        render_bulk_signal_panel(
-            ax_ctb, ct_targets[ct_b], ct_preds[ct_b],
-            bulk_name=f"{bulk_name} ({ct_b})", title_prefix=f"Deconvoluted Bulk: {ct_b}",
-            color_pred="royalblue"
-        )
+        render_bulk_comparison(ax_ctb, ct_targets[ct_b][0], ct_preds[ct_b][0], "", ct_instance_loss[ct_a], mode, bulk_name, ct_losses[ct_b]["loss"], cell_type=ct_b)
         ax_ctb.set_xlabel("Genomic Position (bp)", fontsize=11)
 
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
