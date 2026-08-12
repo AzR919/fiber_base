@@ -67,7 +67,7 @@ def get_config_names_str(args) -> str:
     Extracts filenames (without paths or extensions) from provided config arguments
     and joins them with underscores.
     """
-    config_keys = ["data_config", "model_config", "train_config"]
+    config_keys = ["data_config", "model_config", "train_config", "eval_config"]
     config_names = [args.name_prefix] if args.name_prefix is not None else []
 
     for key in config_keys:
