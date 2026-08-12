@@ -39,7 +39,7 @@ def get_args():
                              help="Path to JSON or YAML file containing model configuration")
     config_group.add_argument("--train_config", type=str, default=None,
                              help="Path to JSON or YAML file containing trainer configuration")
-    config_group.add_argument("--eval_config", type=str, default=None,
+    config_group.add_argument("--eval_config_path", type=str, default=None,
                              help="Path to JSON or YAML file containing evaluation configuration")
 
     # Data - Paths & Metadata Defaults
@@ -155,8 +155,8 @@ def get_args():
                 if hasattr(parsed_args, key) and key not in cli_args_set:
                     setattr(parsed_args, key, val)
 
-    if parsed_args.eval_config is not None:
-        parsed_args.eval_config = load_config_file(parsed_args.eval_config)
+    if parsed_args.eval_config_path is not None:
+        parsed_args.eval_config = load_config_file(parsed_args.eval_config_path)
 
     # Step 4: Reconcile sweep feature flags vs input_flags list
     indiv_flags = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
