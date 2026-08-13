@@ -127,6 +127,20 @@ class ResidualBlock1D(nn.Module):
     def forward(self, x):
         return self.act(self.shortcut(x) + self.norm(self.conv(x)))
 
+class PositionalEncoding1D(nn.Module):
+    """
+    Learned positional embeddings matching dynamic context window sequences up to max_len.
+    """
+    def __init__(self, d_model, max_len=6000):
+        super().__init__()
+        self.pos_embedding = nn.Embedding(max_len, d_model)
+
+    def forward(self, x):
+        # x shape: [Batch, Length, d_model]
+        seq_len = x.size(1)
+        positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0) # [1, L]
+        return x + self.pos_embedding(positions)
+
 
 #--------------------------------------------------------------------------------------------------
 # Concrete Model Implementation
@@ -246,6 +260,86 @@ class Deep01ResConv1dBlock(BaseModel):
         return y_final, processed_fibers
 
 
+class TransformerFiber1DModel(BaseModel):
+    """
+    A Transformer Encoder model for high-context window genomic sequence imputation.
+    Flattens single-cell tracks and computes dependencies globally across sequence lengths.
+    """
+    def __init__(self, input_flags, dna_type, decoder_type="avg_n", d_model=64, n_head=4, num_layers=4, dim_feedforward=128, max_len=6000):
+        super().__init__(input_flags, dna_type, decoder_type)
+
+        # Save structural parameters for checkpoint serialization blueprinting
+        self.init_args.update({
+            "d_model": d_model,
+            "nhead": n_head,
+            "num_layers": num_layers,
+            "dim_feedforward": dim_feedforward,
+            "max_len": max_len
+        })
+
+        self.num_input_features = sum(input_flags)
+        self.decoder_type = decoder_type
+
+        # 1. Feature Map Projection Input Layer
+        self.input_projection = nn.Linear(self.num_input_features, d_model)
+        self.pos_encoder = PositionalEncoding1D(d_model, max_len=max_len)
+
+        # 2. Transformer Encoder Engine
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_head,
+            dim_feedforward=dim_feedforward,
+            dropout=0.1,
+            activation="gelu",
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # 3. Output Projection Layer back to a 1D probability/signal stream
+        self.output_projection = nn.Linear(d_model, 1)
+
+        implemented_decoders = ["avg", "sum", "avg_n"]
+        if decoder_type not in implemented_decoders:
+            raise NotImplementedError(f"decoder_type not implemented: {decoder_type}")
+
+        self.final_layer = nn.Sequential(nn.GELU())
+
+    def forward(self, x, *args, **kwargs):
+        B, C, L, N = x.shape
+
+        # 1. Standard structural rearrangement to process context length elementwise
+        # [B, C, L, N] -> permute -> [B * N, L, C]
+        x_flat = x.permute(0, 3, 2, 1).reshape(B * N, L, C)
+
+        # 2. Project channel configurations into embedding tracks & add positional information
+        x_proj = self.input_projection(x_flat)
+        x_encoded = self.pos_encoder(x_proj)
+
+        # 3. Evaluate transformer contextual weights sequence-wide
+        transformer_out = self.transformer_encoder(x_encoded) # [B * N, L, d_model]
+
+        # 4. Collapse dimension mappings back to single accessibility vectors
+        out_flat = self.output_projection(transformer_out).squeeze(-1) # [B * N, L]
+
+        # 5. Map directly back to expected canonical workspace orientation: [B, L, N]
+        processed_fibers = out_flat.view(B, N, L).permute(0, 2, 1)
+
+        # 6. Apply backward-compatible resolution decoders
+        if self.decoder_type == "sum":
+            y = torch.sum(processed_fibers, dim=-1)
+        elif self.decoder_type == "avg":
+            y = torch.mean(processed_fibers, dim=-1)
+        elif self.decoder_type == "avg_n":
+            n_fibers = kwargs.get("n_fibers")
+            if n_fibers is None:
+                raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+            y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+        else:
+            raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
+
+        y_final = self.final_layer(y)
+        return y_final, processed_fibers
+
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory
 
@@ -265,6 +359,18 @@ def model_selector(model_arg, args):
                     dna_type=args.dna_type,
                     decoder_type=args.decoder_type,
                     kernel_size=args.kernel_size
+                )
+
+    elif model_name == "trans01":
+        return TransformerFiber1DModel(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
+                    decoder_type=args.decoder_type,
+                    d_model=args.d_model,
+                    n_head=args.n_head,
+                    num_layers=args.num_layers,
+                    dim_feedforward=args.dim_feedforward,
+                    max_len=args.context_length
                 )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
