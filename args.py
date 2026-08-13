@@ -140,6 +140,8 @@ def get_args():
             for key, val in cfg_dict.items():
                 if hasattr(parsed_args, key) and key not in cli_args_set:
                     setattr(parsed_args, key, val)
+                elif not hasattr(parsed_args,key):
+                    setattr(parsed_args, key, val)
 
     # Step 4: Reconcile sweep feature flags vs input_flags list
     indiv_flags = ["m6a", "cpg", "msp", "nuc", "fire_msp"]

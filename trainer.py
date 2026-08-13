@@ -213,22 +213,18 @@ class Trainer:
                 "input_flags": self.config.input_flags,
                 "return_dna": self.config.dna_type != "none",
             }
-            test_set = test_dataset_from_path_and_extra_args(self.eval_config_path, extra_args)
+            test_set, eval_seed = test_dataset_from_path_and_extra_args(self.eval_config_path, extra_args)
 
-            evaluator = Evaluator(self.model, test_set, batch_size=1, device=self.device)
+            evaluator = Evaluator(self.model, test_set, batch_size=1, num_plots_to_log=5, device=self.device, seed=eval_seed)
 
             eval_results = evaluator.evaluate()
             test_log_dict = {"test_loss": eval_results["composite"]["loss"]}
 
             # Select locus records to visualize (e.g., top N samples or first N samples)
             locus_records = eval_results.get("locus_records", [])
-            num_plots_to_log = min(5, len(locus_records))  # Log up to 5 locus figures to WandB
-
             wandb_image_list = []
 
-            indices_to_plot = np.linspace(0, len(locus_records) - 1, num_plots_to_log, dtype=int)
-            for idx in indices_to_plot:
-                record = locus_records[idx]
+            for idx, record in enumerate(locus_records):
 
                 # Generate the 2-column deconvolution plot
                 fig = plot_evaluator_record(

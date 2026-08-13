@@ -42,6 +42,8 @@ def main():
     val_data_iterator = fiber_data_iterator(mode="val", **kwargs)
 
     model = model_selector(args.model, args)
+    input_size = (args.batch_size, sum(args.input_flags), args.context_length, args.fibers_per_entry)
+    print_model_summary(model, input_size)
 
     trainer = Trainer(model, train_data_iterator, val_data_iterator, args.eval_config_path,
                       epochs=args.epochs, batch_size=args.batch_size,

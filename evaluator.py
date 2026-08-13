@@ -34,7 +34,7 @@ def test_dataset_from_path_and_extra_args(eval_config_path, overwrite_args):
 
     kwargs.update(overwrite_args)
 
-    return MixedCellFiberDataset(**kwargs)
+    return MixedCellFiberDataset(**kwargs), eval_config["seed"]
 
 
 class Evaluator:
@@ -44,7 +44,7 @@ class Evaluator:
     MSE loss and Pearson correlation metrics.
     """
 
-    def __init__(self, model, test_set, batch_size, device="cuda", criterion=None):
+    def __init__(self, model, test_set, batch_size, num_plots_to_log, device="cuda", seed=919, criterion=None):
         """
         Args:
             model (nn.Module): Pre-trained PyTorch model instance.
@@ -57,6 +57,9 @@ class Evaluator:
         self.test_set = test_set
         self.batch_size = batch_size
         self.criterion = criterion if criterion is not None else nn.MSELoss()
+
+        self.rng = random.Random(seed)
+        self.num_to_save = num_plots_to_log
 
     @staticmethod
     def _compute_pearson_r(pred, target):
@@ -135,6 +138,7 @@ class Evaluator:
 
         # Store locus-level outputs for plotting/inspection
         locus_records = []
+        valid_locus_count = 0
 
         decoder_type = getattr(self.model, "decoder_type", "avg_n")
 
@@ -182,7 +186,7 @@ class Evaluator:
                     cell_type_losses[ct_name] = ct_loss
 
                 # Package payload for downstream plotting modules
-                locus_records.append({
+                locus_record = {
                     "locus": batch["locus"],
                     "fiber_features": inputs.cpu(),
                     "processed_fibers": processed_fibers.cpu(),
@@ -193,7 +197,15 @@ class Evaluator:
                     "cell_type_masks": ct_masks,
                     "loss": comp_loss,
                     "cell_type_losses": cell_type_losses
-                })
+                }
+                valid_locus_count += 1
+
+                if len(locus_records) < self.num_to_save:
+                    locus_records.append(locus_record)
+                else:
+                    j = self.rng.randint(0, valid_locus_count - 1)
+                    if j < self.num_to_save:
+                        locus_records[j] = locus_record
 
         # Compile final metric dictionary
         metrics_summary = {
