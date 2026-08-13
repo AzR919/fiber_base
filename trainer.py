@@ -58,6 +58,7 @@ class Trainer:
         wandb.define_metric("val_loss", step_metric="epoch")
         if eval_config_path is not None:
             wandb.define_metric("test_loss")
+        wandb.watch(model, log="all")
 
     def _unpack_batch(self, batch):
         """Extracts batch dictionary elements and moves tensors to target device."""
