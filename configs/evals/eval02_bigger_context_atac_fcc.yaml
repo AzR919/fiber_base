@@ -1,0 +1,19 @@
+# GM12878 ATAC-seq test
+
+context_length: 5000
+fibers_per_entry: 200
+num_sample_ccres: -1
+bulk_name: "ATAC_seq_fcc"
+seed: 919
+
+metadata:
+  fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
+  ccre_path: "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed"
+  val_chrs: ["chr21"]
+  fiber_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell"
+  bulk_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/atac_multi_cell"
+  cell_types:
+    GM12878:
+      fibers: "GM12878-fire-v0.1-filtered.cram"
+      bulk: "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+      ratio: 1.0
