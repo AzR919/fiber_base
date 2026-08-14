@@ -49,7 +49,5 @@ def main():
 
     trainer.train(save_dir=res_dir)
 
-    save_slurm_script(res_dir, args.script_path)
-
 if __name__=="__main__":
     main()

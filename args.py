@@ -89,7 +89,7 @@ def get_args():
     misc_group.add_argument("--debug", "-D", action='store_true',
                             help="Enable debug mode with extra logging")
     misc_group.add_argument("--seed", type=int, default=919)
-    misc_group.add_argument("--script_path", type=str, default="./slurm_batch_command_copy.sh",
+    misc_group.add_argument("--script_path", type=str, default="./slurm_batch_command.sh",
                               help="slurm batch script to save with the model")
 
     # Step 1: Parse arguments passed via CLI

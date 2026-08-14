@@ -31,7 +31,7 @@ def save_slurm_script(res_dir, slurm_script_path):
     os.makedirs(res_dir, exist_ok=True)
     try:
         destination = os.path.join(res_dir, "submitted_sbatch_script.sh")
-        shutil.move(slurm_script_path, destination)
+        shutil.copy(slurm_script_path, destination)
         print(f"[Slurm Tracker] Successfully copied submission script to: {destination}")
     except:
         print(f"[Slurm Tracker] Failed to copy submission script [{slurm_script_path}] to: {destination}")
