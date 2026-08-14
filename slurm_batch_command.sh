@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-13_00_trans_test_2
+#SBATCH --job-name=2026-08-13_07_tran_test_no_pos_extra_dim
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -41,8 +41,8 @@ python main.py \
   --model_config configs/models/model02.yaml \
   --train_config configs/training/train01.yaml \
   --eval_config configs/evals/eval01.yaml \
-  --name_prefix trans_test \
-  --name_suffix no_positional
+  --name_prefix tran_test \
+  --name_suffix w_amp_larger_dim
 
 # Print job completion time
 echo "Job finished on $(date)"

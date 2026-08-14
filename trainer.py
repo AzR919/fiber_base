@@ -27,6 +27,7 @@ class Trainer:
         self.config = config
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
 
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -34,6 +35,9 @@ class Trainer:
             self.optimizer, mode='min', patience=patience
         )
         self.criterion = nn.MSELoss()
+
+        # Initialize Gradient Scaler for Automatic Mixed Precision (AMP)
+        self.scaler = torch.amp.GradScaler(self.device)
 
         if hasattr(config, "input_flags") and sum(config.input_flags) == 0:
             print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
@@ -80,19 +84,36 @@ class Trainer:
         fiber_features, target, forward_kwargs = self._unpack_batch(batch)
 
         self.optimizer.zero_grad()
-        output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-        loss = self.criterion(output, target)
-        loss.backward()
-        self.optimizer.step()
+        # output, processed_fibers = self.model(fiber_features, **forward_kwargs)
+        # loss = self.criterion(output, target)
+        # loss.backward()
+        # self.optimizer.step()
+
+        # Execute forward pass under mixed precision context
+        with torch.amp.autocast(self.device_type):
+            output, processed_fibers = self.model(fiber_features, **forward_kwargs)
+            loss = self.criterion(output, target)
+
+        # Scale loss and backpropagate using the Gradient Scaler
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
         return loss.item(), output, processed_fibers
 
     def val_step(self, batch):
         self.model.eval()
         fiber_features, target, forward_kwargs = self._unpack_batch(batch)
 
+        # with torch.no_grad():
+        #     output, processed_fibers = self.model(fiber_features, **forward_kwargs)
+        #     loss = self.criterion(output, target)
+
         with torch.no_grad():
-            output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-            loss = self.criterion(output, target)
+            # Run validation evaluation under mixed precision context
+            with torch.amp.autocast(self.device_type):
+                output, processed_fibers = self.model(fiber_features, **forward_kwargs)
+                loss = self.criterion(output, target)
 
         return loss.item(), output, processed_fibers
 
@@ -200,7 +221,6 @@ class Trainer:
         # Final loss summary curve & model save
         plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
         self.model.save_model(save_dir, self.epochs, external_config=self.config)
-
 
         if self.eval_config_path is not None:
             # -------------------------------------------------------------------------
