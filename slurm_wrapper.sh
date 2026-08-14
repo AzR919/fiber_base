@@ -1,0 +1,2 @@
+cp slurm_batch_command.sh slurm_batch_command_copy.sh
+sbatch slurm_batch_command.sh
