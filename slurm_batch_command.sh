@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-13_07_tran_test_no_pos_extra_dim
+#SBATCH --job-name=2026-08-14_00_eval_demo
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -37,12 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data01.yaml \
-  --model_config configs/models/model02.yaml \
-  --train_config configs/training/train01.yaml \
-  --eval_config configs/evals/eval01.yaml \
-  --name_prefix tran_test \
-  --name_suffix w_amp_larger_dim
+  --data_config configs/data/data00.yaml \
+  --model_config configs/models/model00.yaml \
+  --train_config configs/training/train00.yaml \
+  --eval_config configs/evals/eval00.yaml \
+  --lr 0.00001 \
+  --name_prefix eval_demo \
 
 # Print job completion time
 echo "Job finished on $(date)"
