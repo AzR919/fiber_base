@@ -98,7 +98,6 @@ def get_config_names_str(args) -> str:
     # Join extracted config names (e.g., "data_config_model_config_train_config")
     return "_".join(config_names)
 
-
 def create_save_str(args) -> str:
     """Generates a structured, unique run identifier including timestamp and concatenated config names."""
     now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
@@ -110,7 +109,6 @@ def create_save_str(args) -> str:
         components.append(configs_str)
 
     return "_".join(components)
-
 
 class AverageMeter:
     """Computes and stores the running average and current value of metrics during training."""
@@ -129,11 +127,9 @@ class AverageMeter:
         self.count += n
         self.avg = self.sum / self.count
 
-
 def count_parameters(model: nn.Module) -> int:
     """Returns total count of trainable parameters in a PyTorch model."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
 
 def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)):
     """
@@ -151,7 +147,8 @@ def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)
             input_size=input_size,
             col_names=["input_size", "output_size", "num_params", "kernel_size"],
             row_settings=["var_names"],
-            verbose=0
+            verbose=0,
+            n_fibers=torch.tensor(input_size[0]*input_size[-1])
         )
         print(summary_str)
     except Exception as e:
@@ -159,6 +156,14 @@ def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)
         print(model)
     print("=" * 60 + "\n")
 
+def print_gpu_memory(stage=""):
+    if torch.cuda.is_available():
+        # Convert bytes to Gigabytes for readability
+        allocated = torch.cuda.memory_allocated() / (1024 ** 3)
+        max_allocated = torch.cuda.max_memory_allocated() / (1024 ** 3)
+        reserved = torch.cuda.memory_reserved() / (1024 ** 3)
+
+        print(f"[{stage}] Allocated: {allocated:.2f} GB | Peak Allocated: {max_allocated:.2f} GB | Reserved: {reserved:.2f} GB")
 
 @contextlib.contextmanager
 def suppress_stdout_stderr():
@@ -181,7 +186,6 @@ def suppress_stdout_stderr():
         os.close(save_stdout)
         os.close(save_stderr)
         os.close(devnull)
-
 
 #--------------------------------------------------------------------------------------------------
 # Modular Plotting Components

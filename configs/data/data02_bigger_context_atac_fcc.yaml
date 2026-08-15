@@ -2,7 +2,7 @@
 # GM12878 atac-seq
 
 context_length: 5000
-fibers_per_entry: 200
+fibers_per_entry: 100
 bulk_name: "ATAC_seq_fcc"
 
 metadata:
