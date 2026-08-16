@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-15_01_5k_atac_signal_unet
+#SBATCH --job-name=2026-08-15_04_h3k4me3_sig
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-3:00:00  # 0 days, 3 hours, 0 minutes
+#SBATCH --time=0-4:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -37,12 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data03_bigger_context_atac_signal.yaml \
+  --data_config configs/data/data06_mixed_h3k4me3_sig.yaml \
   --model_config configs/models/model03_unet_conv1d.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config configs/evals/eval03_bigger_context_atac_signal.yaml \
-  --name_prefix unet \
-  --name_suffix 5k_atac_signal
+  --eval_config configs/evals/eval06_mixed_h3k4me3_sig.yaml \
+  --name_prefix mixed_h3k4me3 \
+  --name_suffix sig
 
 # Print job completion time
 echo "Job finished on $(date)"

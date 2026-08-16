@@ -102,6 +102,7 @@ class Evaluator:
         Returns:
             torch.Tensor: Reconstructed cell-type bulk profile [B, L].
         """
+        assert decoder_type == "avg_n"
         # Slice fibers belonging to this cell type: [B, L, N_ct]
         ct_fibers = processed_fibers[:, :, ct_mask]
         n_ct_fibers = ct_fibers.shape[-1]
@@ -109,12 +110,7 @@ class Evaluator:
         if n_ct_fibers == 0:
             return torch.zeros((processed_fibers.shape[0], processed_fibers.shape[1]), device=self.device)
 
-        if decoder_type == "sum":
-            return self.model.final_layer(torch.sum(ct_fibers, dim=-1))
-        elif decoder_type in ["avg", "avg_n"]:
-            return self.model.final_layer(torch.mean(ct_fibers, dim=-1))
-        else:
-            raise NotImplementedError(f"Decoder type '{decoder_type}' not supported for deconvolution.")
+        return torch.mean(ct_fibers, dim=-1)
 
     def evaluate(self):
         """

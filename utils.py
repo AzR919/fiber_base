@@ -320,7 +320,7 @@ def plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus, cel
     out_sig = out[0].cpu().detach().numpy()
     instance_loss = float(np.mean((tar_sig - out_sig) ** 2))
 
-    render_bulk_comparison(ax_bulk, tar[0], out[0], chr_info, instance_loss, mode, bulk_name, avg_loss)
+    render_bulk_comparison(ax_bulk, tar[0], out[0], chr_info, instance_loss, mode, bulk_name, avg_loss, cell_info)
     render_fiber_heatmap(ax_heat, out_fibers)
 
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
