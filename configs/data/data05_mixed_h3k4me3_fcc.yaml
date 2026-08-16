@@ -1,0 +1,20 @@
+# mixed cell h3k4me3_fcc for GM12878 and K562
+
+context_length: 5000
+fibers_per_entry: 100
+bulk_name: "h3k4me3_fcc"
+
+metadata:
+  fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
+  ccre_path: "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed"
+  train_chrs: ["chr20"]
+  val_chrs: ["chr21"]
+  fiber_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell"
+  bulk_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k4me3_multi_cell/"
+  cell_types:
+    GM12878:
+      fibers: "GM12878-fire-v0.1-filtered.cram"
+      bulk: "GM12878_ENCFF287HAO_H3K4me3_fcc.bigWig"
+    K562:
+      fibers: "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
+      bulk: "K562_ENCFF911JVK_H3K4me3_fcc.bigWig"
