@@ -1,4 +1,4 @@
-# GM12878 atac-seq. Bigger context
+# mixed cell atac_fcc for GM12878 and K562
 
 context_length: 5000
 fibers_per_entry: 100
@@ -15,3 +15,6 @@ metadata:
     GM12878:
       fibers: "GM12878-fire-v0.1-filtered.cram"
       bulk: "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+    K562:
+      fibers: "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
+      bulk: "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"

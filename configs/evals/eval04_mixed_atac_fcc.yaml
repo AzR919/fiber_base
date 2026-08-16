@@ -1,13 +1,14 @@
-# GM12878 atac-seq. Bigger context
+# mixed cell atac_fcc
 
 context_length: 5000
-fibers_per_entry: 100
+fibers_per_entry: 200
+num_sample_ccres: -1
 bulk_name: "ATAC_seq_fcc"
+seed: 919
 
 metadata:
   fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
   ccre_path: "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed"
-  train_chrs: ["chr20"]
   val_chrs: ["chr21"]
   fiber_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell"
   bulk_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/atac_multi_cell"
@@ -15,3 +16,8 @@ metadata:
     GM12878:
       fibers: "GM12878-fire-v0.1-filtered.cram"
       bulk: "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+      ratio: 0.5
+    K562:
+      fibers: "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
+      bulk: "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
+      ratio: 0.5

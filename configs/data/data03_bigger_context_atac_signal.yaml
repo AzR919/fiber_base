@@ -1,8 +1,8 @@
-# GM12878 atac-seq. Bigger context
+# GM12878 atac-seq signal
 
 context_length: 5000
 fibers_per_entry: 100
-bulk_name: "ATAC_seq_fcc"
+bulk_name: "ATAC_seq_signal"
 
 metadata:
   fasta_path: "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa"
@@ -14,4 +14,4 @@ metadata:
   cell_types:
     GM12878:
       fibers: "GM12878-fire-v0.1-filtered.cram"
-      bulk: "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
+      bulk: "GM12878_ENCFF603BJO_ATAC_seq_signal.bigWig"
