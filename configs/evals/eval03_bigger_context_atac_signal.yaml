@@ -15,5 +15,5 @@ metadata:
   cell_types:
     GM12878:
       fibers: "GM12878-fire-v0.1-filtered.cram"
-      bulk: "GM12878_ENCFF603BJO_ATAC_seq_signal.bigWig"
+      bulk: "GM12878_ENCFF667MDI_ATAC_seq_signal.bigWig"
       ratio: 1.0

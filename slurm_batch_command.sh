@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-15_00_5k_atac_unet
+#SBATCH --job-name=2026-08-15_01_5k_atac_signal_unet
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -37,12 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data02_bigger_context_atac_fcc.yaml \
+  --data_config configs/data/data03_bigger_context_atac_signal.yaml \
   --model_config configs/models/model03_unet_conv1d.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config configs/evals/eval02_bigger_context_atac_fcc.yaml \
+  --eval_config configs/evals/eval03_bigger_context_atac_signal.yaml \
   --name_prefix unet \
-  --name_suffix 5k_atac_fcc
+  --name_suffix 5k_atac_signal
 
 # Print job completion time
 echo "Job finished on $(date)"
