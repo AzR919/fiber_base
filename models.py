@@ -450,6 +450,114 @@ class UNet01Conv1d(BaseModel):
 
         return y, processed_fibers
 
+class UNet02Conv1dWithDNA(BaseModel):
+    """
+    1D U-Net Model incorporating both Single-Molecule Fiber Features and Reference DNA.
+
+    DNA is processed through a sequence encoder, broadcast across all fibers,
+    and concatenated with fiber features prior to spatial downsampling.
+    """
+    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15, dna_emb_dim=8):
+        super().__init__(input_flags, dna_type)
+
+        assert decoder_type == "avg_n", f"UNet01Conv1dWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
+
+        self.init_args["kernel_size"] = kernel_size
+        self.init_args["dna_emb_dim"] = dna_emb_dim
+        self.num_input_features = sum(input_flags)
+        self.kernel_size = kernel_size
+        self.dna_emb_dim = dna_emb_dim
+
+        # --- Reference DNA Encoder ---
+        # Maps [B, 4, L] -> [B, dna_emb_dim, L]
+        self.dna_encoder = DoubleConv1D(4, dna_emb_dim, kernel_size=kernel_size)
+
+        # Fused channels = Fiber features + DNA embedding channels
+        total_in_channels = self.num_input_features + self.dna_emb_dim
+
+        # --- U-Net Backbone ---
+        # Adjusted enc1 channels from 32 to 28 to keep parameter budget balanced
+        self.enc1 = DoubleConv1D(total_in_channels, 28, kernel_size=kernel_size)
+        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)  # L -> L/2
+
+        self.enc2 = DoubleConv1D(28, 64, kernel_size=kernel_size)
+        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/2 -> L/4
+
+        # Bottleneck
+        self.bottleneck = DoubleConv1D(64, 128, kernel_size=kernel_size)
+
+        # Decoder (Upsampling & Skip Connections)
+        self.up2 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
+        self.dec2 = DoubleConv1D(128, 64, kernel_size=kernel_size)
+
+        self.up1 = nn.ConvTranspose1d(64, 28, kernel_size=2, stride=2)
+        self.dec1 = DoubleConv1D(56, 28, kernel_size=kernel_size)
+
+        # Output projection
+        self.out_conv = nn.Conv1d(28, 1, kernel_size=1)
+
+        # Activation for non-negative individual fiber predictions
+        self.fiber_act = nn.Softplus()
+
+    def forward(self, x, ref_dna=None, n_fibers=None, *args, **kwargs):
+        """
+        Args:
+            x: Fiber features tensor of shape [B, C_fiber, L, N]
+            ref_dna: One-hot encoded reference sequence tensor of shape [B, 4, L]
+            n_fibers: Tensor of fiber counts per batch item of shape [B]
+        """
+        if n_fibers is None:
+            raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+        if ref_dna is None:
+            raise ValueError("Forward pass requires 'ref_dna' tensor.")
+
+        B, C, L, N = x.shape
+
+        # 1. Process Reference DNA: [B, 4, L] -> [B, dna_emb_dim, L]
+        dna_feats = self.dna_encoder(ref_dna)
+
+        # 2. Broadcast DNA features across all N fibers: [B, dna_emb_dim, L, 1] -> [B, dna_emb_dim, L, N]
+        dna_feats_expanded = dna_feats.unsqueeze(-1).expand(-1, -1, -1, N)
+
+        # 3. Concatenate fiber features and DNA features along channel dimension: [B, C + dna_emb_dim, L, N]
+        fused_x = torch.cat([x, dna_feats_expanded], dim=1)
+
+        # 4. Flatten batch and fiber dimensions: [B * N, C + dna_emb_dim, L]
+        x_flat = fused_x.permute(0, 3, 1, 2).reshape(B * N, C + self.dna_emb_dim, L)
+
+        # 5. Encoder Pass
+        e1 = self.enc1(x_flat)      # [B*N, 28, L]
+        p1 = self.pool1(e1)         # [B*N, 28, L/2]
+
+        e2 = self.enc2(p1)          # [B*N, 64, L/2]
+        p2 = self.pool2(e2)         # [B*N, 64, L/4]
+
+        # 6. Bottleneck
+        b = self.bottleneck(p2)     # [B*N, 128, L/4]
+
+        # 7. Decoder Pass
+        u2 = self.up2(b)            # [B*N, 64, L/2]
+        if u2.shape[-1] != e2.shape[-1]:
+            u2 = F.pad(u2, (0, e2.shape[-1] - u2.shape[-1]))
+        d2 = self.dec2(torch.cat([u2, e2], dim=1))  # [B*N, 64, L/2]
+
+        u1 = self.up1(d2)           # [B*N, 28, L]
+        if u1.shape[-1] != e1.shape[-1]:
+            u1 = F.pad(u1, (0, e1.shape[-1] - u1.shape[-1]))
+        d1 = self.dec1(torch.cat([u1, e1], dim=1))  # [B*N, 28, L]
+
+        # 8. Output projection: [B*N, 1, L]
+        out_flat = self.out_conv(d1)
+
+        # 9. Reshape back to workspace orientation: [B, L, N]
+        raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
+
+        # 10. Non-negative activation & fiber averaging
+        processed_fibers = self.fiber_act(raw_fibers)
+        y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+
+        return y, processed_fibers
+
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory
 
@@ -484,11 +592,18 @@ def model_selector(model_arg, args):
                 )
 
     elif model_name=="unet01":
-            return UNet01Conv1d(
-                        input_flags=args.input_flags,
-                        dna_type=args.dna_type,
-                        kernel_size=args.kernel_size
-                    )
+        return UNet01Conv1d(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
+                    kernel_size=args.kernel_size
+                )
+
+    elif model_name=="unet02":
+        return UNet02Conv1dWithDNA(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
+                    kernel_size=args.kernel_size
+                )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
 

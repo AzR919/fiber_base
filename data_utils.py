@@ -338,7 +338,7 @@ class fiber_data_iterator(IterableDataset):
                 if torch.isnan(other_tensor).any().item():
                     continue
 
-                ref_dna = self.onehot_for_locus(random_locus) if self.return_ref_genome else None
+                ref_dna = self.onehot_for_locus(random_locus).T if self.return_ref_genome else None
                 found_possible_locus = True
 
             out_dict = {

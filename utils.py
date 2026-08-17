@@ -127,6 +127,21 @@ class AverageMeter:
         self.count += n
         self.avg = self.sum / self.count
 
+def unpack_batch(batch, device):
+    """Extracts batch dictionary elements and moves tensors to target device."""
+    fiber_features = batch["fiber_features"].to(device)
+    target = batch["target_bulk"].to(device)
+    n_fibers = batch["n_fibers"].to(device)
+
+    kwargs = {"n_fibers": n_fibers}
+
+    if "ref_dna" in batch:
+        kwargs["ref_dna"] = batch["ref_dna"].to(device)
+    if "fiber_dna_tensor" in batch:
+        kwargs["fiber_dna_tensor"] = batch["fiber_dna_tensor"].to(device)
+
+    return fiber_features, target, kwargs
+
 def count_parameters(model: nn.Module) -> int:
     """Returns total count of trainable parameters in a PyTorch model."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -148,7 +163,8 @@ def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)
             col_names=["input_size", "output_size", "num_params", "kernel_size"],
             row_settings=["var_names"],
             verbose=0,
-            n_fibers=torch.tensor(input_size[0]*input_size[-1])
+            n_fibers=torch.ones(input_size[0]),
+            ref_dna=torch.ones((input_size[0],4,input_size[-2]))
         )
         print(summary_str)
     except Exception as e:
@@ -460,20 +476,19 @@ def plot_evaluator_record(record, input_flags, loss=0.0, ct_losses={}, bulk_name
 
     # RHS Row 0: Composite Mixed Signal
     ax_comp = fig.add_subplot(rhs_gs[0, 0])
-    render_bulk_comparison(ax_comp, target_bulk[0], pred_bulk[0], chr_info, instance_loss, mode, bulk_name, loss, cell_type="Mixed")
+    render_bulk_comparison(ax_comp, target_bulk[0], pred_bulk[0], chr_info, instance_loss, mode, bulk_name, loss, cell_type="Mixed" if len(cell_types)>1 else cell_types[0])
 
     # RHS Row 1: Predicted Fiber Continuous Heatmap
     ax_heat = fig.add_subplot(rhs_gs[1, 0], sharex=ax_comp)
     render_fiber_heatmap(ax_heat, processed_fibers)
 
-    # RHS Row 2: Cell Type A Bulk Signal Deconvolution
-    if len(cell_types) >= 1:
+    if len(cell_types) >= 2:
+        # RHS Row 2: Cell Type A Bulk Signal Deconvolution
         ct_a = cell_types[0]
         ax_cta = fig.add_subplot(rhs_gs[2, 0], sharex=ax_comp)
         render_bulk_comparison(ax_cta, ct_targets[ct_a][0], ct_preds[ct_a][0], "", ct_instance_loss[ct_a], mode, bulk_name, ct_losses[ct_a]["loss"], cell_type=ct_a)
 
-    # RHS Row 3: Cell Type B Bulk Signal Deconvolution
-    if len(cell_types) >= 2:
+        # RHS Row 3: Cell Type B Bulk Signal Deconvolution
         ct_b = cell_types[1]
         ax_ctb = fig.add_subplot(rhs_gs[3, 0], sharex=ax_comp)
         render_bulk_comparison(ax_ctb, ct_targets[ct_b][0], ct_preds[ct_b][0], "", ct_instance_loss[ct_a], mode, bulk_name, ct_losses[ct_b]["loss"], cell_type=ct_b)

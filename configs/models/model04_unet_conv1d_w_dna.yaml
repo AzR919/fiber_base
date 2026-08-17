@@ -1,0 +1,7 @@
+# older version replication.
+# GM12878 atac-seq
+
+model: "unet02"
+input_flags: [1, 1, 1, 1, 1]
+kernel_size: 15
+dna_type: "ref"

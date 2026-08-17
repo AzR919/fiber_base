@@ -64,24 +64,9 @@ class Trainer:
             wandb.define_metric("test_loss")
         wandb.watch(model, log="all")
 
-    def _unpack_batch(self, batch):
-        """Extracts batch dictionary elements and moves tensors to target device."""
-        fiber_features = batch["fiber_features"].to(self.device)
-        target = batch["target_bulk"].to(self.device)
-        n_fibers = batch["n_fibers"].to(self.device)
-
-        kwargs = {"n_fibers": n_fibers}
-
-        if "ref_dna" in batch:
-            kwargs["ref_dna"] = batch["ref_dna"].to(self.device)
-        if "fiber_dna_tensor" in batch:
-            kwargs["fiber_dna_tensor"] = batch["fiber_dna_tensor"].to(self.device)
-
-        return fiber_features, target, kwargs
-
     def train_step(self, batch):
         self.model.train()
-        fiber_features, target, forward_kwargs = self._unpack_batch(batch)
+        fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
 
         self.optimizer.zero_grad()
 
@@ -99,7 +84,7 @@ class Trainer:
 
     def val_step(self, batch):
         self.model.eval()
-        fiber_features, target, forward_kwargs = self._unpack_batch(batch)
+        fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
 
         with torch.no_grad():
             # Run validation evaluation under mixed precision context

@@ -53,6 +53,7 @@ class Evaluator:
         """
         self.model = model
         self.device = torch.device(device)
+        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self.test_set = test_set
         self.batch_size = batch_size
@@ -142,13 +143,11 @@ class Evaluator:
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_loader):
                 # Prepare model inputs
-                inputs = batch["fiber_features"].to(self.device)  # [B, C, L, N]
-                target_bulk = batch["target_bulk"].to(self.device)  # [B, L]
-                n_fibers = batch["n_fibers"].to(self.device)  # [B]
+                fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, self.device)
 
                 # Model Forward Pass
                 with torch.amp.autocast(self.device_type):
-                    pred_composite_bulk, processed_fibers = self.model(inputs, n_fibers=n_fibers)
+                    pred_composite_bulk, processed_fibers = self.model(fiber_features, **forward_kwargs)
 
                 # Composite evaluation
                 comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()
@@ -186,7 +185,7 @@ class Evaluator:
                 # Package payload for downstream plotting modules
                 locus_record = {
                     "locus": batch["locus"],
-                    "fiber_features": inputs.cpu(),
+                    "fiber_features": fiber_features.cpu(),
                     "processed_fibers": processed_fibers.cpu(),
                     "pred_bulk": pred_composite_bulk.cpu(),
                     "target_bulk": target_bulk.cpu(),

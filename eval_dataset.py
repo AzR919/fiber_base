@@ -172,7 +172,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
         }
 
         if self.return_ref_genome:
-            out_dict["ref_dna"] = self.onehot_for_locus(locus)
+            out_dict["ref_dna"] = self.onehot_for_locus(locus).T
 
         if self.return_fiber_dna:
             out_dict["fiber_dna_tensor"] = torch.from_numpy(mixed_dna_tensors)
