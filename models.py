@@ -176,7 +176,7 @@ class DoubleConv1D(nn.Module):
 class Base01DebugModel(BaseModel):
 
     def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
-        super().__init__(input_flags, dna_type, decoder_type)
+        super().__init__(input_flags, dna_type)
 
         # Store init args for automatic saving/loading in BaseModel
         self.init_args["kernel_size"] = kernel_size
@@ -233,7 +233,7 @@ class Base01DebugModel(BaseModel):
 class Deep01ResConv1dBlock(BaseModel):
 
     def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
-        super().__init__(input_flags, dna_type, decoder_type)
+        super().__init__(input_flags, dna_type)
 
         # Store init args for automatic saving/loading in BaseModel
         self.init_args["kernel_size"] = kernel_size
@@ -293,7 +293,7 @@ class TransformerFiber1DModel(BaseModel):
     Flattens single-cell tracks and computes dependencies globally across sequence lengths.
     """
     def __init__(self, input_flags, dna_type, decoder_type="avg_n", d_model=64, n_head=4, num_layers=4, dim_feedforward=128, max_len=6000):
-        super().__init__(input_flags, dna_type, decoder_type)
+        super().__init__(input_flags, dna_type)
 
         # Save structural parameters for checkpoint serialization blueprinting
         self.init_args.update({

@@ -72,10 +72,10 @@ class Trainer:
 
         kwargs = {"n_fibers": n_fibers}
 
-        if "genomic_dna" in batch:
-            kwargs["dna"] = batch["genomic_dna"].to(self.device)
-        if "fiber_dna" in batch:
-            kwargs["dna_tensor"] = batch["fiber_dna"].to(self.device)
+        if "ref_dna" in batch:
+            kwargs["ref_dna"] = batch["ref_dna"].to(self.device)
+        if "fiber_dna_tensor" in batch:
+            kwargs["fiber_dna_tensor"] = batch["fiber_dna_tensor"].to(self.device)
 
         return fiber_features, target, kwargs
 
@@ -84,10 +84,6 @@ class Trainer:
         fiber_features, target, forward_kwargs = self._unpack_batch(batch)
 
         self.optimizer.zero_grad()
-        # output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-        # loss = self.criterion(output, target)
-        # loss.backward()
-        # self.optimizer.step()
 
         # Execute forward pass under mixed precision context
         with torch.amp.autocast(self.device_type):
@@ -104,10 +100,6 @@ class Trainer:
     def val_step(self, batch):
         self.model.eval()
         fiber_features, target, forward_kwargs = self._unpack_batch(batch)
-
-        # with torch.no_grad():
-        #     output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-        #     loss = self.criterion(output, target)
 
         with torch.no_grad():
             # Run validation evaluation under mixed precision context
@@ -232,7 +224,7 @@ class Trainer:
 
             extra_args = {
                 "input_flags": self.config.input_flags,
-                "return_dna": self.config.dna_type != "none",
+                "dna_type": self.config.dna_type,
             }
             test_set, eval_seed = test_dataset_from_path_and_extra_args(self.eval_config_path, extra_args)
 

@@ -103,7 +103,7 @@ def main():
         "cell_ratios": eval_cfg.get("cell_ratios", None),
         "mode": eval_cfg.get("mode", "val"),
         "seed": args.seed,
-        "return_dna": eval_cfg.get("return_dna", False)
+        "dna_type": eval_cfg.get("dna_type", "none")
     }
 
     eval_dataset = MixedCellFiberDataset(**dataset_kwargs)

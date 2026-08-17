@@ -21,7 +21,7 @@ class fiber_data_iterator(IterableDataset):
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  iters_per_epoch, input_flags, mode="train", seed=919,
-                 return_dna=False, bulk_name="N/A"):
+                 dna_type="none", bulk_name="N/A"):
 
         self.metadata = metadata
         self.fasta_path = metadata["fasta_path"]
@@ -54,7 +54,15 @@ class fiber_data_iterator(IterableDataset):
         self.seed = seed
         self.epoch = 0
         self.mode = mode
-        self.return_dna = return_dna
+
+        # DNA Return Options: "none", "ref", "fiber", "both"
+        valid_dna_types = {"none", "ref", "fiber", "both"}
+        if dna_type not in valid_dna_types:
+            raise ValueError(f"Invalid dna_type '{dna_type}'. Expected one of {valid_dna_types}")
+
+        self.dna_type = dna_type
+        self.return_ref_genome = self.dna_type in ("ref", "both")
+        self.return_fiber_dna = self.dna_type in ("fiber", "both")
 
         # Base random number generators
         self.rng = random.Random(seed)
@@ -166,9 +174,9 @@ class fiber_data_iterator(IterableDataset):
         return ccre_chrom, int(random_start), int(random_end)
 
     def generate_ccre_locus(self, jitter_range=200):
-            """Generates a genomic window centered around a random cCRE with optional jitter."""
-            ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
-            return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
+        """Generates a genomic window centered around a random cCRE with optional jitter."""
+        ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
+        return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
 
     def get_m6a(self, fiber, start, end, Q_THRESHOLD=200):
         m6a_data = np.zeros((self.context_length), dtype=np.float32)
@@ -249,7 +257,7 @@ class fiber_data_iterator(IterableDataset):
 
     def get_fiber_data(self, cell_idx, chrom, start, end, min_overlap=50):
         fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
-        dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32) if self.return_dna else None
+        dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32) if self.return_fiber_dna else None
 
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bams[cell_idx].fetch(chrom, start, end)
@@ -269,7 +277,7 @@ class fiber_data_iterator(IterableDataset):
                 continue
 
             # Process optional per-fiber DNA sequence
-            if self.return_dna:
+            if self.return_fiber_dna:
                 dna_buffer = list("N" * self.context_length)
                 win_offset_start = overlap_start - start
                 read_offset_start = overlap_start - fiber.start
@@ -289,8 +297,8 @@ class fiber_data_iterator(IterableDataset):
             fibers_tensor[i] = single_fiber_data
             i += 1
 
-        fiber_dna_out = torch.from_numpy(dna_tensor).permute(2, 1, 0) if self.return_dna else None
-        return torch.from_numpy(fibers_tensor).permute(1, 2, 0), fiber_dna_out, i
+        fiber_dna_tensor = torch.from_numpy(dna_tensor).permute(2, 1, 0) if self.return_fiber_dna else None
+        return torch.from_numpy(fibers_tensor).permute(1, 2, 0), fiber_dna_tensor, i
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
         raw_vals = np.array(self.other_bws[cell_idx].values(chrom, start, end), dtype=np.float32)
@@ -330,7 +338,7 @@ class fiber_data_iterator(IterableDataset):
                 if torch.isnan(other_tensor).any().item():
                     continue
 
-                genomic_dna_tensor = self.onehot_for_locus(random_locus) if self.return_dna else None
+                ref_dna = self.onehot_for_locus(random_locus) if self.return_ref_genome else None
                 found_possible_locus = True
 
             out_dict = {
@@ -341,9 +349,11 @@ class fiber_data_iterator(IterableDataset):
                 "cell_type": cell_type_name
             }
 
-            if self.return_dna:
-                out_dict["genomic_dna"] = genomic_dna_tensor
-                out_dict["fiber_dna"] = fiber_dna_tensor
+            if self.return_ref_genome:
+                out_dict["ref_dna"] = ref_dna
+
+            if self.return_fiber_dna:
+                out_dict["fiber_dna_tensor"] = fiber_dna_tensor
 
             yield out_dict
 
@@ -352,48 +362,30 @@ class fiber_data_iterator(IterableDataset):
 # Testing
 
 def tester():
-    data_root = "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER"
-
-    metadata = {
-        "fasta_path": "/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa",
-        "ccre_path": "/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed",
-        "train_chrs": ["chr20"],
-        "val_chrs": ["chr21"],
-        "fiber_base_path": f"{data_root}/fiber_multi_cell",
-        "bulk_base_path": f"{data_root}/atac_multi_cell",
-        # Map cell type names directly to their (CRAM, BigWig) tuple
-        "cell_types": {
-            "GM12878": (
-                "GM12878-fire-v0.1-filtered.cram",
-                "GM12878_ENCFF603BJO_ATAC_seq_fcc.bigWig"
-            ),
-            "K562": (
-                "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram",
-                "K562_ENCFF102ARJ_ATAC_seq_fcc.bigWig"
-            )
-        }
-    }
+    config_path = "./configs/evals/eval00.yaml"
+    with open(config_path, "r") as f:
+        eval_config = yaml.safe_load(f)
 
     kwargs = {
-        "metadata": metadata,
-        "fibers_per_entry": 200,
-        "context_length": 4096,
-        "iters_per_epoch": 5,
-        "input_flags": [1, 1, 1, 1, 1],
+        "metadata": eval_config["metadata"],
+        "fibers_per_entry": 100,
+        "context_length": 20,
+        "iters_per_epoch": 50,
+        "input_flags": [1, 1, 0, 0, 0],
         "mode": "train",
-        "return_dna": True
+        "dna_type": "both"
     }
 
     t_set = fiber_data_iterator(**kwargs)
 
     # Single-instance check using dictionary unpacking
     sample_dict = next(iter(t_set))
-    print(f"Single instance check -> Cell: {sample_dict['cell_type']}, Locus: {sample_dict['locus']}, Fibers: {sample_dict['num_fibers']}")
-    print(f"Keys present in dictionary (return_dna={kwargs['return_dna']}): {list(sample_dict.keys())}")
+    print(f"Single instance check -> Cell: {sample_dict['cell_type']}, Locus: {sample_dict['locus']}, Fibers: {sample_dict['n_fibers']}")
+    print(f"Keys present in dictionary (dna_type='{kwargs['dna_type']}'): {list(sample_dict.keys())}")
 
     # Loop inspection
     for i, batch in enumerate(t_set):
-        print(f"Sample {i+1} | Locus: {batch['locus']} | Cell: {batch['cell_type']} | Fibers: {batch['num_fibers']} | Bulk Shape: {batch['target_bulk'].shape}")
+        print(f"Sample {i+1} | Locus: {batch['locus']} | Cell: {batch['cell_type']} | Fibers: {batch['n_fibers']} | Bulk Shape: {batch['target_bulk'].shape}")
 
     print("All done")
 

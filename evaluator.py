@@ -29,7 +29,7 @@ def test_dataset_from_path_and_extra_args(eval_config_path, overwrite_args):
             "bulk_name": eval_config["bulk_name"],
             "seed": eval_config["seed"],
             "input_flags": [1, 1, 1, 1, 1],
-            "return_dna": False
+            "dna_type": "none"
         }
 
     kwargs.update(overwrite_args)
@@ -147,7 +147,8 @@ class Evaluator:
                 n_fibers = batch["n_fibers"].to(self.device)  # [B]
 
                 # Model Forward Pass
-                pred_composite_bulk, processed_fibers = self.model(inputs, n_fibers=n_fibers)
+                with torch.amp.autocast(self.device_type):
+                    pred_composite_bulk, processed_fibers = self.model(inputs, n_fibers=n_fibers)
 
                 # Composite evaluation
                 comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()

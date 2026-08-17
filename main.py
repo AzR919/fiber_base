@@ -32,7 +32,7 @@ def main():
         "iters_per_epoch": args.iters_per_epoch,
         "input_flags": args.input_flags,
         "seed": args.seed,
-        "return_dna": args.dna_type != "none",
+        "dna_type": args.dna_type,
         "bulk_name": args.bulk_name
     }
 
