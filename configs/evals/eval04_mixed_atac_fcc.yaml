@@ -1,7 +1,7 @@
 # mixed cell atac_fcc
 
 context_length: 5000
-fibers_per_entry: 200
+fibers_per_entry: 100
 num_sample_ccres: -1
 bulk_name: "ATAC_seq_fcc"
 seed: 919

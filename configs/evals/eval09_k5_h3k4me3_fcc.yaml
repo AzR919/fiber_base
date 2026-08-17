@@ -1,4 +1,4 @@
-# mixed cell h3k4me3_fcc
+# K562 H3K4me3 signal test
 
 context_length: 5000
 fibers_per_entry: 100
@@ -13,11 +13,7 @@ metadata:
   fiber_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell"
   bulk_base_path: "/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k4me3_multi_cell/"
   cell_types:
-    GM12878:
-      fibers: "GM12878-fire-v0.1-filtered.cram"
-      bulk: "GM12878_ENCFF287HAO_H3K4me3_fcc.bigWig"
-      ratio: 0.5
     K562:
       fibers: "K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram"
       bulk: "K562_ENCFF911JVK_H3K4me3_fcc.bigWig"
-      ratio: 0.5
+      ratio: 1.0

@@ -1,7 +1,7 @@
 # mixed cell h3k4me3_sig
 
 context_length: 5000
-fibers_per_entry: 200
+fibers_per_entry: 100
 num_sample_ccres: -1
 bulk_name: "h3k4me3_sig"
 seed: 919
