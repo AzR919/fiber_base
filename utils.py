@@ -51,7 +51,6 @@ def set_seed(seed: int = 919):
     #     torch.backends.cudnn.deterministic = True
     #     torch.backends.cudnn.benchmark = False
 
-
 def seed_worker(worker_id):
     """
     Worker init function for PyTorch DataLoader to ensure deterministic multi-processing sampling.
@@ -60,7 +59,6 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32 + worker_id
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
 
 #--------------------------------------------------------------------------------------------------
 # File Utilities & Experiment Tracking
@@ -209,6 +207,10 @@ def suppress_stdout_stderr():
 FEATURE_NAMES = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
 FEATURE_COLORS = ["black", "purple", "blue", "green", "red"]
 
+# Secondary color for unmethylated sites (-1)
+UNMETHYLATED_COLOR = "lightslategrey"
+
+
 def render_input_channels(fig, gs_column, inp, input_flags):
     """Sub-renderer for discrete and continuous dynamic input channels (Left Column)."""
     num_fibers = inp.shape[-1]
@@ -226,11 +228,36 @@ def render_input_channels(fig, gs_column, inp, input_flags):
             fiber_feat = inp[0, k, :, i].cpu().detach()
 
             if is_single_bit:
-                indices = torch.where(fiber_feat > 0.5)[0].numpy()
-                if len(indices) > 0:
-                    ax.scatter(indices, np.full_like(indices, -i),
-                               marker='|', color=FEATURE_COLORS[j], s=25, alpha=0.7, linewidths=0.9)
+                # 1. Unmethylated background sites (-1)
+                unmeth_indices = torch.where(fiber_feat < -0.5)[0].numpy()
+                if len(unmeth_indices) > 0:
+                    ax.scatter(
+                        unmeth_indices,
+                        np.full_like(unmeth_indices, -i),
+                        marker='|',
+                        color=UNMETHYLATED_COLOR,
+                        s=15,
+                        alpha=0.35,
+                        linewidths=0.6,
+                        label="Unmethylated (-1)" if (i == 0 and k == 0) else ""
+                    )
+
+                # 2. Methylated sites (+1)
+                meth_indices = torch.where(fiber_feat > 0.5)[0].numpy()
+                if len(meth_indices) > 0:
+                    ax.scatter(
+                        meth_indices,
+                        np.full_like(meth_indices, -i),
+                        marker='|',
+                        color=FEATURE_COLORS[j],
+                        s=25,
+                        alpha=0.85,
+                        linewidths=1.0,
+                        label="Methylated (+1)" if (i == 0 and k == 0) else ""
+                    )
+
             else:
+                # Continuous interval features (MSP, NUC, etc.)
                 masked = (fiber_feat > 0.5).float()
                 diff = torch.diff(masked, prepend=torch.tensor([0.0]), append=torch.tensor([0.0]))
                 starts = torch.where(diff == 1)[0]
@@ -238,9 +265,15 @@ def render_input_channels(fig, gs_column, inp, input_flags):
 
                 for s, e in zip(starts, ends):
                     if e > s:
-                        ax.axhspan(-i - 0.35, -i + 0.35,
-                                   xmin=(s / len(fiber_feat)).item(), xmax=(e / len(fiber_feat)).item(),
-                                   color=FEATURE_COLORS[j], alpha=0.5, lw=0)
+                        ax.axhspan(
+                            -i - 0.35,
+                            -i + 0.35,
+                            xmin=(s / len(fiber_feat)).item(),
+                            xmax=(e / len(fiber_feat)).item(),
+                            color=FEATURE_COLORS[j],
+                            alpha=0.5,
+                            lw=0
+                        )
 
         ax.set_ylabel(FEATURE_NAMES[j], fontsize=11, fontweight='bold')
         ax.set_ylim(-num_fibers - 0.5, 0.5)
@@ -254,7 +287,6 @@ def render_input_channels(fig, gs_column, inp, input_flags):
         input_axes[-1].set_xlabel("Genomic Position (bp)")
 
     return input_axes
-
 
 def render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None, cell_type=None):
     """Sub-renderer for target vs predicted bulk signal comparison."""

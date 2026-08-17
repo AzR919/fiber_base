@@ -178,8 +178,14 @@ class fiber_data_iterator(IterableDataset):
         ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
         return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
 
-    def get_m6a(self, fiber, start, end, Q_THRESHOLD=200):
+    def get_m6a(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
         m6a_data = np.zeros((self.context_length), dtype=np.float32)
+
+        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
+        at_mask = np.isin(ref_seq_arr, ['A', 'T'])
+        # Set all potential m6A target sites (A/T) to -1 (unmethylated background)
+        m6a_data[at_mask] = -1.0
+
         ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
         qualities = np.array(fiber.m6a.ml, dtype=np.float32)
 
@@ -188,17 +194,37 @@ class fiber_data_iterator(IterableDataset):
         m6a_data[valid_positions] = 1
         return m6a_data
 
-    def get_cpg(self, fiber, start, end, Q_THRESHOLD=200):
-        cpg_data = np.zeros((self.context_length), dtype=np.float32)
+    def get_cpg(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+        cpg_data = np.zeros(self.context_length, dtype=np.float32)
+        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
+        L = len(ref_seq_arr)
+
+        # 1. Identify CpG sites on the reference sequence
+        # Forward strand: 'C' followed by 'G' -> mark the 'C' position
+        c_positions = np.where(ref_seq_arr[:-1] == 'C')[0]
+        valid_cg = c_positions[ref_seq_arr[c_positions + 1] == 'G']
+
+        # Reverse strand: 'G' preceded by 'C' -> mark the 'G' position
+        g_positions = np.where(ref_seq_arr[1:] == 'G')[0] + 1
+        valid_gc = g_positions[ref_seq_arr[g_positions - 1] == 'C']
+
+        # Combine all CpG positions and set them to -1.0 (unmethylated background)
+        cpg_indices = np.unique(np.concatenate([valid_cg, valid_gc]))
+        cpg_data[cpg_indices] = -1.0
+
+        # 2. Extract methylated CpG positions from fiber
         ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
         qualities = np.array(fiber.cpg.ml, dtype=np.float32)
 
         mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
         valid_positions = (ref_starts[mask] - start).astype(np.int32)
-        cpg_data[valid_positions] = 1
+
+        # 3. Mark identified methylated positions as 1.0
+        cpg_data[valid_positions] = 1.0
+
         return cpg_data
 
-    def get_msp(self, fiber, start, end, Q_THRESHOLD=0):
+    def get_msp(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
         msp_data = np.zeros((self.context_length), dtype=np.float32)
 
         for ref_pos, length, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
@@ -216,7 +242,7 @@ class fiber_data_iterator(IterableDataset):
 
         return msp_data
 
-    def get_nuc(self, fiber, start, end, Q_THRESHOLD=0):
+    def get_nuc(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
         nuc_data = np.zeros((self.context_length), dtype=np.float32)
 
         for ref_pos, length, aq in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths, fiber.nuc.qual):
@@ -234,7 +260,7 @@ class fiber_data_iterator(IterableDataset):
 
         return nuc_data
 
-    def get_fire_msp(self, fiber, start, end, Q_THRESHOLD=200):
+    def get_fire_msp(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
         fire_msp_data = np.zeros((self.context_length), dtype=np.float32)
 
         # Access fire_msp if explicitly separated, else fallback to msp
@@ -258,6 +284,8 @@ class fiber_data_iterator(IterableDataset):
     def get_fiber_data(self, cell_idx, chrom, start, end, min_overlap=50):
         fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
         dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32) if self.return_fiber_dna else None
+
+        ref_dna_seq = self.fasta.fetch(chrom, start, end)
 
         with suppress_stdout_stderr():
             possible_fibers = self.fiber_bams[cell_idx].fetch(chrom, start, end)
@@ -293,7 +321,7 @@ class fiber_data_iterator(IterableDataset):
                 dna_tensor[i] = self.dna_to_onehot("".join(dna_buffer))
 
             # Feature functions handle boundary clipping safely
-            single_fiber_data = np.array([func(fiber, start, end) for func in self.input_features])
+            single_fiber_data = np.array([func(fiber, start, end, ref_dna_seq) for func in self.input_features])
             fibers_tensor[i] = single_fiber_data
             i += 1
 
