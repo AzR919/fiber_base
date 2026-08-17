@@ -126,6 +126,7 @@ class Evaluator:
                                 self.test_set,
                                 batch_size=self.batch_size,
                                 worker_init_fn=seed_worker,
+                                drop_last=True
                             )
 
         # Metrics trackers
@@ -214,7 +215,8 @@ class Evaluator:
                 }
                 for ct in cell_type_loss_meters
             },
-            "locus_records": locus_records
+            "locus_records": locus_records,
+            "num_locus": valid_locus_count * self.batch_size
         }
 
         return metrics_summary

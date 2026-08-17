@@ -261,7 +261,8 @@ class Trainer:
                 chr_name = record["locus"][0][0]
                 start = record["locus"][1][0]
                 end = record["locus"][2][0]
-                caption = f"Locus {idx}: {chr_name}:{start}-{end}"
+                num_locus = eval_results["num_locus"]
+                caption = f"Locus {idx}/{num_locus}: {chr_name}:{start}-{end}"
 
                 # Convert Matplotlib figure to wandb.Image
                 wandb_image_list.append(

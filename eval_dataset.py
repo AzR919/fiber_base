@@ -100,7 +100,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
         )
 
         # Insufficient reads check
-        if n_fibers < min(5, n_fibers_needed):
+        if n_fibers < n_fibers_needed:
             return None
 
         # Fetch BigWig target profile
@@ -187,27 +187,23 @@ class MixedCellFiberDataset(fiber_data_iterator):
         ccre_iter_list = self.ccre_list if self.num_sample_ccres == -1 else self.ccre_list[:self.num_sample_ccres]
 
         for ccre_locus in ccre_iter_list:
-            found_valid_locus = False
-            out_dict = None
 
-            while not found_valid_locus:
-                selected_locus = self.expand_ccre_locus(*ccre_locus)
-                cell_samples = []
-                failed_sampling = False
+            selected_locus = self.expand_ccre_locus(*ccre_locus, jitter_range=0)
+            cell_samples = []
+            failed_sampling = False
 
-                for cell_idx, ct in enumerate(self.cell_type_names):
-                    sample = self._sample_single_cell_type(cell_idx, ct, selected_locus)
-                    if sample is None and self.fiber_counts_per_cell[ct] > 0:
-                        failed_sampling = True
-                        break
-                    if sample is not None:
-                        cell_samples.append(sample)
+            for cell_idx, ct in enumerate(self.cell_type_names):
+                sample = self._sample_single_cell_type(cell_idx, ct, selected_locus)
+                if sample is None and self.fiber_counts_per_cell[ct] > 0:
+                    failed_sampling = True
+                    break
+                if sample is not None:
+                    cell_samples.append(sample)
 
-                if failed_sampling or not cell_samples:
-                    continue
+            if failed_sampling or not cell_samples:
+                continue
 
-                out_dict = self._build_composite_sample(selected_locus, cell_samples)
-                found_valid_locus = True
+            out_dict = self._build_composite_sample(selected_locus, cell_samples)
 
             yield out_dict
 
