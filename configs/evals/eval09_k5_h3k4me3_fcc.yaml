@@ -1,4 +1,4 @@
-# K562 H3K4me3 signal test
+# K562 H3K4me3 fcc test
 
 context_length: 5000
 fibers_per_entry: 100
