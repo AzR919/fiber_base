@@ -2,6 +2,7 @@
 Main model file
 """
 import os
+import math
 import inspect
 
 import torch
@@ -169,6 +170,30 @@ class DoubleConv1D(nn.Module):
             # Recomputes activations on backward pass instead of storing them all in VRAM
             return checkpoint(self._forward_impl, x, use_reentrant=False)
         return self._forward_impl(x)
+
+class SinusoidalPositionalEncoding(nn.Module):
+    """Standard 1D Sinusoidal Positional Encoding (Vaswani et al.)."""
+    def __init__(self, d_model=96, max_len=1000):
+        super().__init__()
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Shape: [1, max_len, d_model] for broadcasting across batch
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe, persistent=False)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape [Batch, Seq_Len, d_model]
+        """
+        seq_len = x.size(1)
+        return x + self.pe[:, :seq_len, :]
 
 #--------------------------------------------------------------------------------------------------
 # Concrete Model Implementation
@@ -461,6 +486,7 @@ class UNet02Conv1dWithDNA(BaseModel):
         super().__init__(input_flags, dna_type)
 
         assert decoder_type == "avg_n", f"UNet01Conv1dWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
+        assert dna_type in ("both", "ref"), f"dna_type must be 'both' or 'ref', got '{dna_type}'."
 
         self.init_args["kernel_size"] = kernel_size
         self.init_args["dna_emb_dim"] = dna_emb_dim
@@ -558,6 +584,159 @@ class UNet02Conv1dWithDNA(BaseModel):
 
         return y, processed_fibers
 
+class UNet03ConvTransformerWithDNA(BaseModel):
+    """
+    1D Hybrid U-Net Model with Sinusoidal Positional Encoding Transformer Bottleneck.
+
+    Architecture Overview:
+    - 3-level 1D Conv Encoder: compresses spatial context down to L / 8.
+    - Sinusoidal Positional Encoding + Transformer Bottleneck: global spatial attention on L / 8 tokens.
+    - 3-level 1D Conv Decoder: upsamples features back to L.
+    - Output projection + Softplus non-negativity + Fiber averaging (decoder_type='avg_n').
+    """
+
+    def __init__(self, input_flags, dna_type="none", decoder_type="avg_n",
+                 kernel_size=15, dna_emb_dim=8, tf_heads=4, tf_layers=2, max_len=1000):
+        super().__init__(input_flags, dna_type)
+
+        assert decoder_type == "avg_n", f"UNetTransformerSinusoidalWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
+        assert dna_type in ("none", "ref", "both"), f"dna_type must be 'none' 'ref' or 'both', got '{dna_type}'."
+
+        self.init_args["kernel_size"] = kernel_size
+        self.init_args["dna_emb_dim"] = dna_emb_dim
+        self.init_args["tf_heads"] = tf_heads
+        self.init_args["tf_layers"] = tf_layers
+
+        self.num_input_features = sum(input_flags)
+        self.dna_type = dna_type
+        self.kernel_size = kernel_size
+        self.dna_emb_dim = dna_emb_dim if dna_type == "ref" else 0
+
+        # --- Optional Reference DNA Encoder ---
+        if self.dna_type == "ref" or self.dna_type == "both":
+            self.dna_encoder = DoubleConv1D(4, self.dna_emb_dim, kernel_size=kernel_size)
+        else:
+            self.dna_encoder = None
+
+        total_in_channels = self.num_input_features + self.dna_emb_dim
+
+        # --- Encoder (Downsampling L -> L/8) ---
+        self.enc1 = DoubleConv1D(total_in_channels, 24, kernel_size=kernel_size)
+        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)  # L -> L/2
+
+        self.enc2 = DoubleConv1D(24, 48, kernel_size=kernel_size)
+        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/2 -> L/4
+
+        self.enc3 = DoubleConv1D(48, 96, kernel_size=kernel_size)
+        self.pool3 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/4 -> L/8
+
+        # --- Sinusoidal Positional Encoding & Transformer Bottleneck ---
+        self.bottleneck_dim = 96
+        self.pos_encoder = SinusoidalPositionalEncoding(d_model=self.bottleneck_dim, max_len=max_len)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.bottleneck_dim,
+            nhead=tf_heads,
+            dim_feedforward=self.bottleneck_dim * 2,
+            activation="gelu",
+            batch_first=True
+        )
+        self.transformer_bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=tf_layers)
+
+        # --- Decoder (Upsampling L/8 -> L) ---
+        self.up3 = nn.ConvTranspose1d(96, 48, kernel_size=2, stride=2)  # Output: 48 channels
+        self.dec3 = DoubleConv1D(48 + 96, 48, kernel_size=kernel_size)   # 48 (up3) + 96 (enc3) = 144 channels
+
+        self.up2 = nn.ConvTranspose1d(48, 24, kernel_size=2, stride=2)  # Output: 24 channels
+        self.dec2 = DoubleConv1D(24 + 48, 24, kernel_size=kernel_size)   # 24 (up2) + 48 (enc2) = 72 channels
+
+        self.up1 = nn.ConvTranspose1d(24, 24, kernel_size=2, stride=2)  # Output: 24 channels
+        self.dec1 = DoubleConv1D(24 + 24, 24, kernel_size=kernel_size)   # 24 (up1) + 24 (enc1) = 48 channels
+
+        # Output projection
+        self.out_conv = nn.Conv1d(24, 1, kernel_size=1)
+
+        # Non-negative activation for single-molecule accessibility
+        self.fiber_act = nn.Softplus()
+
+    def forward(self, x, ref_dna=None, n_fibers=None, *args, **kwargs):
+        """
+        Args:
+            x: Fiber features tensor of shape [B, C_fiber, L, N]
+            ref_dna: Optional reference sequence tensor of shape [B, 4, L]
+            n_fibers: Tensor of valid fiber counts per batch item of shape [B]
+        """
+        if n_fibers is None:
+            raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+
+        B, C, L, N = x.shape
+
+        # 1. Process Reference DNA sequence if enabled
+        if self.dna_type == "ref" or self.dna_type == "both":
+            if ref_dna is None:
+                raise ValueError("Model configured with dna_type='ref', but ref_dna=None was provided.")
+
+            dna_feats = self.dna_encoder(ref_dna)  # [B, dna_emb_dim, L]
+            dna_feats_expanded = dna_feats.unsqueeze(-1).expand(-1, -1, -1, N)
+            fused_x = torch.cat([x, dna_feats_expanded], dim=1)  # [B, C + dna_emb_dim, L, N]
+        else:
+            fused_x = x
+
+        # 2. Flatten Batch and Fiber Dimensions: [B * N, C_total, L]
+        in_channels = fused_x.shape[1]
+        x_flat = fused_x.permute(0, 3, 1, 2).reshape(B * N, in_channels, L)
+
+        # 3. Encoder Pass
+        e1 = self.enc1(x_flat)  # [B*N, 24, L]
+        p1 = self.pool1(e1)     # [B*N, 24, L/2]
+
+        e2 = self.enc2(p1)      # [B*N, 48, L/2]
+        p2 = self.pool2(e2)     # [B*N, 48, L/4]
+
+        e3 = self.enc3(p2)      # [B*N, 96, L/4]
+        p3 = self.pool3(e3)     # [B*N, 96, L/8]
+
+        # 4. Transformer Bottleneck Pass
+        # Reshape [B*N, 96, L/8] -> [B*N, L/8, 96] for sequence attention
+        tf_in = p3.permute(0, 2, 1)
+
+        # Add Sinusoidal Positional Encoding
+        tf_in = self.pos_encoder(tf_in)
+
+        # Self-Attention
+        tf_out = self.transformer_bottleneck(tf_in)
+
+        # Reshape back to [B*N, 96, L/8] for UNet Decoder
+        b = tf_out.permute(0, 2, 1)
+
+        # 5. Decoder Pass
+        # Level 3 (L/8 -> L/4)
+        u3 = self.up3(b)
+        if u3.shape[-1] != e3.shape[-1]:
+            u3 = F.pad(u3, (0, e3.shape[-1] - u3.shape[-1]))
+        d3 = self.dec3(torch.cat([u3, e3], dim=1))
+
+        # Level 2 (L/4 -> L/2)
+        u2 = self.up2(d3)
+        if u2.shape[-1] != e2.shape[-1]:
+            u2 = F.pad(u2, (0, e2.shape[-1] - u2.shape[-1]))
+        d2 = self.dec2(torch.cat([u2, e2], dim=1))
+
+        # Level 1 (L/2 -> L)
+        u1 = self.up1(d2)
+        if u1.shape[-1] != e1.shape[-1]:
+            u1 = F.pad(u1, (0, e1.shape[-1] - u1.shape[-1]))
+        d1 = self.dec1(torch.cat([u1, e1], dim=1))
+
+        # 6. Output Projection & Fiber Averaging
+        out_flat = self.out_conv(d1)  # [B*N, 1, L]
+        raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
+
+        processed_fibers = self.fiber_act(raw_fibers)
+        y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+
+        return y, processed_fibers
+
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory
 
@@ -603,6 +782,14 @@ def model_selector(model_arg, args):
                     input_flags=args.input_flags,
                     dna_type=args.dna_type,
                     kernel_size=args.kernel_size
+                )
+
+    elif model_name=="unet03":
+        return UNet03ConvTransformerWithDNA(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
+                    kernel_size=args.kernel_size,
+                    max_len=args.context_length
                 )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")

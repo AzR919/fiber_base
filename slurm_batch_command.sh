@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-17_01_gm_atac_unet02
+#SBATCH --job-name=2026-08-17_07_gm_h3_unet03_transformer
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-3:00:00
+#SBATCH --time=0-5:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -37,12 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data02_bigger_context_atac_fcc.yaml \
-  --model_config configs/models/model04_unet_conv1d_w_dna.yaml \
+  --data_config configs/data/data07_gm_h3k4me3_fcc.yaml \
+  --model_config configs/models/model05_unet_conv_transformer.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config configs/evals/eval02_bigger_context_atac_fcc.yaml \
-  --name_prefix unet_02 \
-  --name_suffix gm
+  --eval_config configs/evals/eval07_gm_h3k4me3_fcc.yaml \
+  --name_prefix unet_03 \
+  --name_suffix gm_h3_transformer
 
 # Print job completion time
 echo "Job finished on $(date)"
