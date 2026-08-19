@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-17_09_gm_h3_sig_unet03
+#SBATCH --job-name=2026-08-18_01_gm_atac_fcc_unet03
 #SBATCH --account=def-maxwl
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -37,10 +37,10 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data10_gm_h3k4me3_sig.yaml \
+  --data_config configs/data/data02_bigger_context_atac_fcc.yaml \
   --model_config configs/models/model05_unet_conv_transformer.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config configs/evals/eval10_gm_h3k4me3_sig.yaml \
+  --eval_config configs/evals/eval02_bigger_context_atac_fcc.yaml \
   --epochs 50 \
   --name_prefix unet_03 \
   --name_suffix 50e

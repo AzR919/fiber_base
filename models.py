@@ -596,65 +596,67 @@ class UNet03ConvTransformerWithDNA(BaseModel):
     """
 
     def __init__(self, input_flags, dna_type="none", decoder_type="avg_n",
-                 kernel_size=15, dna_emb_dim=8, tf_heads=4, tf_layers=2, max_len=1000):
+                 kernel_size=15, emb_dims=[8, 32, 64, 128], tf_heads=4, tf_layers=2, max_len=1000):
         super().__init__(input_flags, dna_type)
 
         assert decoder_type == "avg_n", f"UNetTransformerSinusoidalWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
-        assert dna_type in ("none", "ref", "both"), f"dna_type must be 'none' 'ref' or 'both', got '{dna_type}'."
+        assert dna_type in ("none", "ref"), f"dna_type must be 'none' or 'ref', got '{dna_type}'."
 
         self.init_args["kernel_size"] = kernel_size
-        self.init_args["dna_emb_dim"] = dna_emb_dim
         self.init_args["tf_heads"] = tf_heads
         self.init_args["tf_layers"] = tf_layers
+        self.init_args["emb_dims"] = emb_dims
+        self.init_args["dna_type"] = dna_type
 
+        self.emb_dims = emb_dims
         self.num_input_features = sum(input_flags)
         self.dna_type = dna_type
         self.kernel_size = kernel_size
-        self.dna_emb_dim = dna_emb_dim if dna_type == "ref" else 0
 
         # --- Optional Reference DNA Encoder ---
-        if self.dna_type == "ref" or self.dna_type == "both":
-            self.dna_encoder = DoubleConv1D(4, self.dna_emb_dim, kernel_size=kernel_size)
+        if self.dna_type == "ref":
+            self.dna_encoder = DoubleConv1D(4, self.emb_dims[0], kernel_size=kernel_size)
+            total_in_channels = 2 * self.emb_dims[0]
         else:
             self.dna_encoder = None
+            total_in_channels = self.emb_dims[0]
 
-        total_in_channels = self.num_input_features + self.dna_emb_dim
+        self.fiber_encoder = DoubleConv1D(self.num_input_features, self.emb_dims[0], kernel_size=kernel_size)
 
         # --- Encoder (Downsampling L -> L/8) ---
-        self.enc1 = DoubleConv1D(total_in_channels, 24, kernel_size=kernel_size)
+        self.enc1 = DoubleConv1D(total_in_channels, self.emb_dims[1], kernel_size=kernel_size)
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)  # L -> L/2
 
-        self.enc2 = DoubleConv1D(24, 48, kernel_size=kernel_size)
+        self.enc2 = DoubleConv1D(self.emb_dims[1], self.emb_dims[2], kernel_size=kernel_size)
         self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/2 -> L/4
 
-        self.enc3 = DoubleConv1D(48, 96, kernel_size=kernel_size)
+        self.enc3 = DoubleConv1D(self.emb_dims[2], self.emb_dims[3], kernel_size=kernel_size)
         self.pool3 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/4 -> L/8
 
         # --- Sinusoidal Positional Encoding & Transformer Bottleneck ---
-        self.bottleneck_dim = 96
-        self.pos_encoder = SinusoidalPositionalEncoding(d_model=self.bottleneck_dim, max_len=max_len)
+        self.pos_encoder = SinusoidalPositionalEncoding(d_model=self.emb_dims[3], max_len=max_len)
 
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.bottleneck_dim,
+            d_model=self.emb_dims[3],
             nhead=tf_heads,
-            dim_feedforward=self.bottleneck_dim * 2,
+            dim_feedforward=self.emb_dims[3] * 2,
             activation="gelu",
             batch_first=True
         )
         self.transformer_bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=tf_layers)
 
         # --- Decoder (Upsampling L/8 -> L) ---
-        self.up3 = nn.ConvTranspose1d(96, 48, kernel_size=2, stride=2)  # Output: 48 channels
-        self.dec3 = DoubleConv1D(48 + 96, 48, kernel_size=kernel_size)   # 48 (up3) + 96 (enc3) = 144 channels
+        self.up3 = nn.ConvTranspose1d(self.emb_dims[3], self.emb_dims[2], kernel_size=2, stride=2)  # Output: 48 channels
+        self.dec3 = DoubleConv1D(self.emb_dims[2] + self.emb_dims[3], self.emb_dims[2], kernel_size=kernel_size)   # 48 (up3) + 96 (enc3) = 144 channels
 
-        self.up2 = nn.ConvTranspose1d(48, 24, kernel_size=2, stride=2)  # Output: 24 channels
-        self.dec2 = DoubleConv1D(24 + 48, 24, kernel_size=kernel_size)   # 24 (up2) + 48 (enc2) = 72 channels
+        self.up2 = nn.ConvTranspose1d(self.emb_dims[2], self.emb_dims[1], kernel_size=2, stride=2)  # Output: 24 channels
+        self.dec2 = DoubleConv1D(self.emb_dims[1] + self.emb_dims[2], self.emb_dims[1], kernel_size=kernel_size)   # 24 (up2) + 48 (enc2) = 72 channels
 
-        self.up1 = nn.ConvTranspose1d(24, 24, kernel_size=2, stride=2)  # Output: 24 channels
-        self.dec1 = DoubleConv1D(24 + 24, 24, kernel_size=kernel_size)   # 24 (up1) + 24 (enc1) = 48 channels
+        self.up1 = nn.ConvTranspose1d(self.emb_dims[1], self.emb_dims[1], kernel_size=2, stride=2)  # Output: 24 channels
+        self.dec1 = DoubleConv1D(self.emb_dims[1] + self.emb_dims[1], self.emb_dims[1], kernel_size=kernel_size)   # 24 (up1) + 24 (enc1) = 48 channels
 
         # Output projection
-        self.out_conv = nn.Conv1d(24, 1, kernel_size=1)
+        self.out_conv = nn.Conv1d(self.emb_dims[1], 1, kernel_size=1)
 
         # Non-negative activation for single-molecule accessibility
         self.fiber_act = nn.Softplus()
@@ -671,14 +673,17 @@ class UNet03ConvTransformerWithDNA(BaseModel):
 
         B, C, L, N = x.shape
 
+        x = x.permute(0,3,1,2).reshape(B * N, self.num_input_features, L)
+        x = self.fiber_encoder(x).reshape(B, N, self.emb_dims[0], L).permute(0,2,3,1)
+
         # 1. Process Reference DNA sequence if enabled
-        if self.dna_type == "ref" or self.dna_type == "both":
+        if self.dna_type == "ref":
             if ref_dna is None:
                 raise ValueError("Model configured with dna_type='ref', but ref_dna=None was provided.")
 
-            dna_feats = self.dna_encoder(ref_dna)  # [B, dna_emb_dim, L]
+            dna_feats = self.dna_encoder(ref_dna)  # [B, emb_dim[0], L]
             dna_feats_expanded = dna_feats.unsqueeze(-1).expand(-1, -1, -1, N)
-            fused_x = torch.cat([x, dna_feats_expanded], dim=1)  # [B, C + dna_emb_dim, L, N]
+            fused_x = torch.cat([x, dna_feats_expanded], dim=1)  # [B, C + emb_dim[0], L, N]
         else:
             fused_x = x
 
@@ -789,7 +794,10 @@ def model_selector(model_arg, args):
                     input_flags=args.input_flags,
                     dna_type=args.dna_type,
                     kernel_size=args.kernel_size,
-                    max_len=args.context_length
+                    max_len=args.context_length,
+                    emb_dims=args.emb_dims,
+                    tf_heads=args.tf_heads,
+                    tf_layers=args.tf_layers
                 )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
