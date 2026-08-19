@@ -1,5 +1,4 @@
-# older version replication.
-# GM12878 atac-seq
+# conv + transformer bottleneck unet
 
 model: "unet03"
 input_flags: [1, 1, 1, 1, 1]

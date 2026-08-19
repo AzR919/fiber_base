@@ -1,5 +1,4 @@
-# older version replication.
-# GM12878 atac-seq
+# standard conv unet
 
 model: "unet01"
 input_flags: [1, 1, 1, 1, 1]

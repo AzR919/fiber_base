@@ -1,5 +1,5 @@
-# older version replication.
-# GM12878 atac-seq
+# conv + transformer bottleneck unet.
+# ~biggest model to fit in 40GB VRAM
 
 model: "unet03"
 input_flags: [1, 1, 1, 1, 1]
