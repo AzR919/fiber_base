@@ -75,6 +75,40 @@ def load_config_file(config_path):
         with open(config_path, "r") as f:
             return json.load(f)
 
+def load_metapaths(path: str) -> dict:
+    return load_config_file(path)
+
+def resolve_config_with_metapaths(config: dict, metapaths: dict) -> dict:
+    assay = config.get("assay")
+    if assay not in metapaths["assay_base_paths"]:
+        raise ValueError(f"assay '{assay}' not in metapaths.assay_base_paths")
+
+    metadata = {
+        "fasta_path":      metapaths["fasta_path"],
+        "ccre_path":       metapaths["ccre_path"],
+        "fiber_base_path": config.get("fiber_base_path") or metapaths["assay_base_paths"]["fiber_seq"],
+        "bulk_base_path":  config.get("bulk_base_path")  or metapaths["assay_base_paths"][assay],
+        "train_chrs":      config.get("train_chrs")      or metapaths["train_chrs"],
+        "val_chrs":        config.get("val_chrs")        or metapaths["val_chrs"],
+        "cell_types":      {},
+    }
+
+    mp_cts = metapaths["cell_types"]
+    for ct_name, ct_cfg in (config.get("cell_types") or {}).items():
+        if ct_name not in mp_cts:
+            raise ValueError(f"Cell type '{ct_name}' not in metapaths.cell_types")
+        if mp_cts[ct_name].get(assay) is None:
+            raise ValueError(f"Assay '{assay}' not available for cell type '{ct_name}' in metapaths")
+        entry = {
+            "fibers": mp_cts[ct_name]["fiber_seq"],
+            "bulk":   mp_cts[ct_name][assay],
+        }
+        if ct_cfg and "ratio" in ct_cfg:
+            entry["ratio"] = ct_cfg["ratio"]
+        metadata["cell_types"][ct_name] = entry
+
+    return metadata
+
 def get_config_names_str(args) -> str:
     """
     Extracts filenames (without paths or extensions) from provided config arguments

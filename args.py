@@ -27,6 +27,8 @@ def get_args():
                              help="Path to JSON or YAML file containing trainer configuration")
     config_group.add_argument("--eval_config_path", type=str, default=None,
                              help="Path to JSON or YAML file containing evaluation configuration")
+    config_group.add_argument("--metapaths", type=str, default="configs/metapaths.yaml",
+                             help="Path to metapaths YAML file for centralized path resolution")
 
     # Data - Paths & Metadata Defaults
     data_group = parser.add_argument_group("Data Configuration")
@@ -115,12 +117,25 @@ def get_args():
         "cell_types": {}
     }
 
+    # Load metapaths if available
+    metapaths = None
+    if os.path.exists(parsed_args.metapaths):
+        metapaths = load_metapaths(parsed_args.metapaths)
+
     # Step 3: Load data config JSON/YAML file if provided
     if parsed_args.data_config:
         data_cfg = load_config_file(parsed_args.data_config)
 
-        # Merge metadata section from config file
-        if "metadata" in data_cfg:
+        if "assay" in data_cfg and metapaths is not None:
+            # New-style slim config: resolve paths via metapaths
+            resolved = resolve_config_with_metapaths(data_cfg, metapaths)
+            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_path", "cell_types"]:
+                if key not in cli_args_set:
+                    parsed_args.metadata[key] = resolved[key]
+                    if hasattr(parsed_args, key):
+                        setattr(parsed_args, key, resolved[key])
+        elif "metadata" in data_cfg:
+            # Old-style config with explicit metadata block
             meta_cfg = data_cfg["metadata"]
             for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_path", "cell_types"]:
                 if key in meta_cfg and key not in cli_args_set:
@@ -128,9 +143,9 @@ def get_args():
                     if hasattr(parsed_args, key):
                         setattr(parsed_args, key, meta_cfg[key])
 
-        # Merge non-metadata data configuration parameters
+        # Merge non-metadata/non-system data configuration parameters
         for key, val in data_cfg.items():
-            if key != "metadata" and hasattr(parsed_args, key) and key not in cli_args_set:
+            if key not in ("metadata", "assay", "cell_types") and hasattr(parsed_args, key) and key not in cli_args_set:
                 setattr(parsed_args, key, val)
 
     # Load model and train config JSON/YAML files if provided

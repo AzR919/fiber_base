@@ -1,0 +1,27 @@
+fasta_path: /home/azr/projects/def-maxwl/azr/data/misc/hg38.fa
+ccre_path:  /home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed
+
+train_chrs: [chr20]
+val_chrs:   [chr21]
+
+# Base directory for each assay — no fcc/signal suffix in key
+assay_base_paths:
+  fiber_seq: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell
+  atac:      /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/atac_multi_cell
+  h3k4me3:   /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k4me3_multi_cell
+  h3k27ac:   /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k27ac_multi_cell
+
+# Per-cell-type filenames (signal/p-value variants only)
+# null = file not yet available on cluster; add filename when ready
+# To add a new cell type: add a block here — no code changes needed
+cell_types:
+  GM12878:
+    fiber_seq: GM12878-fire-v0.1-filtered.cram
+    atac:      GM12878_ENCFF667MDI_ATAC_seq_signal.bigWig
+    h3k4me3:   GM12878_ENCFF012DMX_H3K4me3_signal.bigWig
+    h3k27ac:   null
+  K562:
+    fiber_seq: K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram
+    atac:      null
+    h3k4me3:   K562_ENCFF071GML_H3K4me3_signal.bigWig
+    h3k27ac:   null
