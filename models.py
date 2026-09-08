@@ -248,7 +248,7 @@ class Base01DebugModel(BaseModel):
         elif self.decoder_type == "avg":
             y = torch.mean(processed_fibers, dim=-1)
         elif self.decoder_type == "avg_n":
-            y = torch.sum(processed_fibers, dim=-1) / kwargs["n_fibers"].unsqueeze(-1)
+            y = torch.sum(processed_fibers, dim=-1) / kwargs["fiber_coverage"].float().clamp(min=1)
         else:
             raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
 
@@ -305,7 +305,7 @@ class Deep01ResConv1dBlock(BaseModel):
         elif self.decoder_type == "avg":
             y = torch.mean(processed_fibers, dim=-1)
         elif self.decoder_type == "avg_n":
-            y = torch.sum(processed_fibers, dim=-1) / kwargs["n_fibers"].unsqueeze(-1)
+            y = torch.sum(processed_fibers, dim=-1) / kwargs["fiber_coverage"].float().clamp(min=1)
         else:
             raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
 
@@ -382,10 +382,10 @@ class TransformerFiber1DModel(BaseModel):
         elif self.decoder_type == "avg":
             y = torch.mean(processed_fibers, dim=-1)
         elif self.decoder_type == "avg_n":
-            n_fibers = kwargs.get("n_fibers")
-            if n_fibers is None:
-                raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
-            y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+            fiber_coverage = kwargs.get("fiber_coverage")
+            if fiber_coverage is None:
+                raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
+            y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
         else:
             raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
 
@@ -431,9 +431,9 @@ class UNet01Conv1d(BaseModel):
         # Non-negative activation applied to individual fiber predictions
         self.fiber_act = nn.Softplus()
 
-    def forward(self, x, n_fibers=None, *args, **kwargs):
-        if n_fibers is None:
-            raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+    def forward(self, x, fiber_coverage=None, *args, **kwargs):
+        if fiber_coverage is None:
+            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
 
         B, C, L, N = x.shape
 
@@ -471,7 +471,7 @@ class UNet01Conv1d(BaseModel):
         processed_fibers = self.fiber_act(raw_fibers)
 
         # 8. Aggregate fibers to compute non-negative bulk prediction
-        y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
 
         return y, processed_fibers
 
@@ -525,15 +525,15 @@ class UNet02Conv1dWithDNA(BaseModel):
         # Activation for non-negative individual fiber predictions
         self.fiber_act = nn.Softplus()
 
-    def forward(self, x, ref_dna=None, n_fibers=None, *args, **kwargs):
+    def forward(self, x, ref_dna=None, fiber_coverage=None, *args, **kwargs):
         """
         Args:
             x: Fiber features tensor of shape [B, C_fiber, L, N]
             ref_dna: One-hot encoded reference sequence tensor of shape [B, 4, L]
-            n_fibers: Tensor of fiber counts per batch item of shape [B]
+            fiber_coverage: Per-position fiber count tensor of shape [B, L]
         """
-        if n_fibers is None:
-            raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+        if fiber_coverage is None:
+            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
         if ref_dna is None:
             raise ValueError("Forward pass requires 'ref_dna' tensor.")
 
@@ -580,7 +580,7 @@ class UNet02Conv1dWithDNA(BaseModel):
 
         # 10. Non-negative activation & fiber averaging
         processed_fibers = self.fiber_act(raw_fibers)
-        y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
 
         return y, processed_fibers
 
@@ -661,15 +661,15 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         # Non-negative activation for single-molecule accessibility
         self.fiber_act = nn.Softplus()
 
-    def forward(self, x, ref_dna=None, n_fibers=None, *args, **kwargs):
+    def forward(self, x, ref_dna=None, fiber_coverage=None, *args, **kwargs):
         """
         Args:
             x: Fiber features tensor of shape [B, C_fiber, L, N]
             ref_dna: Optional reference sequence tensor of shape [B, 4, L]
-            n_fibers: Tensor of valid fiber counts per batch item of shape [B]
+            fiber_coverage: Per-position fiber count tensor of shape [B, L]
         """
-        if n_fibers is None:
-            raise ValueError("Forward pass requires 'n_fibers' tensor when decoder_type is 'avg_n'.")
+        if fiber_coverage is None:
+            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
 
         B, C, L, N = x.shape
 
@@ -738,7 +738,7 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
 
         processed_fibers = self.fiber_act(raw_fibers)
-        y = torch.sum(processed_fibers, dim=-1) / n_fibers.unsqueeze(-1)
+        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
 
         return y, processed_fibers
 
@@ -820,8 +820,8 @@ def tester():
     )
 
     test_inp = torch.rand((B, C_in, L, N))
-    n_fibers = torch.full((B,), 15)
-    test_out, processed = test_model(test_inp, n_fibers=n_fibers)
+    fiber_coverage = torch.full((B, L), 15, dtype=torch.float32)
+    test_out, processed = test_model(test_inp, fiber_coverage=fiber_coverage)
 
     print(f"Output shape: {test_out.shape}")
     print(f"Processed fibers shape: {processed.shape}")

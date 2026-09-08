@@ -169,13 +169,13 @@ class fiber_data_iterator(IterableDataset):
 
     def _collect_fiber_tensors(self, cell_idx, chrom, start, end, min_overlap=50):
         """Thin torch wrapper around fiber_utils.get_fiber_data. Returns (C,L,N) tensors."""
-        fibers_np, dna_np, n_fibers = _get_fiber_data_np(
+        fibers_np, dna_np, n_fibers, coverage_np = _get_fiber_data_np(
             self.fiber_bams[cell_idx], chrom, start, end, self.fasta,
             self.fibers_per_entry, self.context_length, self.input_features,
             return_fiber_dna=self.return_fiber_dna, min_overlap=min_overlap,
         )
         fiber_dna_tensor = torch.from_numpy(dna_np).permute(2, 1, 0) if dna_np is not None else None
-        return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers
+        return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers, torch.from_numpy(coverage_np)
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
         raw_vals = np.array(self.other_bws[cell_idx].values(chrom, start, end), dtype=np.float32)
@@ -207,7 +207,7 @@ class fiber_data_iterator(IterableDataset):
 
                 random_locus = self.generate_ccre_locus()
 
-                fiber_tensor, fiber_dna_tensor, n_fibers = self._collect_fiber_tensors(cell_idx, *random_locus, min_overlap=self.context_length//8)
+                fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(cell_idx, *random_locus, min_overlap=self.context_length//8)
                 if n_fibers == 0:
                     continue
 
@@ -222,6 +222,7 @@ class fiber_data_iterator(IterableDataset):
                 "fiber_features": fiber_tensor,
                 "target_bulk": other_tensor,
                 "n_fibers": n_fibers,
+                "fiber_coverage": fiber_coverage,
                 "locus": random_locus,
                 "cell_type": cell_type_name
             }

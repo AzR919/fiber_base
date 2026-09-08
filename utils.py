@@ -165,6 +165,8 @@ def unpack_batch(batch, device):
 
     kwargs = {"n_fibers": n_fibers}
 
+    if "fiber_coverage" in batch:
+        kwargs["fiber_coverage"] = batch["fiber_coverage"].to(device)
     if "ref_dna" in batch:
         kwargs["ref_dna"] = batch["ref_dna"].to(device)
     if "fiber_dna_tensor" in batch:
@@ -194,6 +196,7 @@ def print_model_summary(model: nn.Module, input_size: tuple = (16, 5, 2048, 200)
             row_settings=["var_names"],
             verbose=0,
             n_fibers=torch.ones(input_size[0]),
+            fiber_coverage=torch.ones(input_size[0], input_size[2]),
             ref_dna=torch.ones((input_size[0],4,input_size[-2]))
         )
         print(summary_str)

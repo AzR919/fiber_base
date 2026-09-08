@@ -194,20 +194,22 @@ def get_fiber_data(
 
     Returns
     -------
-    fibers_array : np.ndarray  (fibers_per_entry, n_features, context_length)
-    dna_array    : np.ndarray  (fibers_per_entry, context_length, 4)  or  None
-    n_fibers     : int  — actual fibers collected (≤ fibers_per_entry)
+    fibers_array   : np.ndarray  (fibers_per_entry, n_features, context_length)
+    dna_array      : np.ndarray  (fibers_per_entry, context_length, 4)  or  None
+    n_fibers       : int  — actual fibers collected (≤ fibers_per_entry)
+    fiber_coverage : np.ndarray  (context_length,)  — per-position fiber count
     """
-    ref_dna_seq  = fasta.fetch(chrom, start, end)
-    fibers_array = np.zeros((fibers_per_entry, len(input_features), context_length), dtype=np.float32)
-    dna_array    = np.zeros((fibers_per_entry, context_length, 4), dtype=np.float32) if return_fiber_dna else None
+    ref_dna_seq    = fasta.fetch(chrom, start, end)
+    fibers_array   = np.zeros((fibers_per_entry, len(input_features), context_length), dtype=np.float32)
+    dna_array      = np.zeros((fibers_per_entry, context_length, 4), dtype=np.float32) if return_fiber_dna else None
+    fiber_coverage = np.zeros(context_length, dtype=np.float32)
 
     with suppress_stdout_stderr():
         possible_fibers = fiber_bam.fetch(chrom, start, end)
 
-    i = 0
+    n_fibers = 0
     for fiber in possible_fibers:
-        if i == fibers_per_entry:
+        if n_fibers == fibers_per_entry:
             break
 
         overlap_start = max(start, fiber.start)
@@ -215,19 +217,22 @@ def get_fiber_data(
         if overlap_end - overlap_start < min_overlap:
             continue
 
+        win_start = overlap_start - start
+        win_end   = overlap_end   - start
+        fiber_coverage[win_start:win_end] += 1
+
         if return_fiber_dna:
             dna_buffer = list("N" * context_length)
-            win_off    = overlap_start - start
             read_off   = overlap_start - fiber.start
             read_end   = overlap_end   - fiber.start
             if fiber.seq is not None:
                 slc     = fiber.seq[read_off:read_end]
-                slc_len = min(len(slc), context_length - win_off)
+                slc_len = min(len(slc), context_length - win_start)
                 if slc_len > 0:
-                    dna_buffer[win_off:win_off + slc_len] = list(slc[:slc_len])
-            dna_array[i] = _dna_to_onehot("".join(dna_buffer))
+                    dna_buffer[win_start:win_start + slc_len] = list(slc[:slc_len])
+            dna_array[n_fibers] = _dna_to_onehot("".join(dna_buffer))
 
-        fibers_array[i] = np.array([fn(fiber, start, end, ref_dna_seq) for fn in input_features])
-        i += 1
+        fibers_array[n_fibers] = np.array([fn(fiber, start, end, ref_dna_seq) for fn in input_features])
+        n_fibers += 1
 
-    return fibers_array, dna_array, i
+    return fibers_array, dna_array, n_fibers, fiber_coverage

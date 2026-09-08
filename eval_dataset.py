@@ -95,7 +95,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
             return None
 
         # Fetch fibers using inherited method
-        fiber_tensor, fiber_dna_tensor, n_fibers = self._collect_fiber_tensors(
+        fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
             cell_idx, *locus, min_overlap=self.context_length // 8
         )
 
@@ -121,7 +121,8 @@ class MixedCellFiberDataset(fiber_data_iterator):
             "fiber_features": trimmed_fiber_tensor,
             "target_bulk": bw_tensor,
             "fiber_dna_tensor": trimmed_dna_tensor,
-            "n_fibers": n_fibers_needed
+            "n_fibers": n_fibers_needed,
+            "fiber_coverage": fiber_coverage,
         }
 
     # -------------------------------------------------------------------------
@@ -138,6 +139,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
 
         cell_type_masks = {}
         individual_bulk_targets = {}
+        mixed_coverage = torch.zeros(self.context_length, dtype=torch.float32)
 
         current_fiber_offset = 0
 
@@ -147,6 +149,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
 
             individual_bulk_targets[ct] = sample["target_bulk"]
             mixed_fiber_tensors[:, :, current_fiber_offset : current_fiber_offset + n_fibers] = sample["fiber_features"][:, :, :n_fibers]
+            mixed_coverage += sample["fiber_coverage"]
 
             if self.return_fiber_dna and sample["fiber_dna_tensor"] is not None:
                 mixed_dna_tensors[:, :, current_fiber_offset : current_fiber_offset + n_fibers] = sample["fiber_dna_tensor"][:, :, :n_fibers]
@@ -168,6 +171,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
             "cell_type_targets": individual_bulk_targets,
             "cell_type_masks": cell_type_masks,
             "n_fibers": current_fiber_offset,
+            "fiber_coverage": mixed_coverage,
             "locus": locus,
             "mixing_ratios": self.cell_ratios
         }
