@@ -211,3 +211,4 @@ ignore/
 results/
 logs/
 wandb/
+.vscode/settings.json
