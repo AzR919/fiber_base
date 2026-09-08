@@ -95,7 +95,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
             return None
 
         # Fetch fibers using inherited method
-        fiber_tensor, fiber_dna_tensor, n_fibers = self.get_fiber_data(
+        fiber_tensor, fiber_dna_tensor, n_fibers = self._collect_fiber_tensors(
             cell_idx, *locus, min_overlap=self.context_length // 8
         )
 

@@ -5,13 +5,12 @@ Standalone CLI entrypoint for evaluating saved models on mixed cell-type fiber d
 import os
 import json
 import argparse
-import yaml
 import torch
 
 from models import BaseModel, model_selector
 from eval_dataset import MixedCellFiberDataset
 from evaluator import Evaluator
-from utils import set_seed, print_model_summary
+from utils import set_seed, print_model_summary, load_config_file
 
 
 def parse_args():
@@ -38,14 +37,6 @@ def parse_args():
         help="Random seed for evaluation reproducible sampling."
     )
     return parser.parse_args()
-
-
-def load_yaml_config(config_path):
-    """Loads and returns a dictionary from a YAML config file."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Evaluation YAML config file not found at: {config_path}")
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
 
 
 def main():
@@ -90,7 +81,7 @@ def main():
 
     # 2. Load Evaluation Configuration
     print("--> Parsing evaluation YAML config...")
-    eval_cfg = load_yaml_config(args.eval_config)
+    eval_cfg = load_config_file(args.eval_config)
 
     # 3. Instantiate MixedCellFiberDataset & DataLoader
     print("--> Building MixedCellFiberDataset...")

@@ -3,13 +3,11 @@ Common utility functions for experiment tracking, seeding, training, and visuali
 """
 
 import os
-import sys
 import json
 import yaml
 import random
 import shutil
 import datetime
-import contextlib
 import numpy as np
 
 import torch
@@ -212,28 +210,6 @@ def print_gpu_memory(stage=""):
         reserved = torch.cuda.memory_reserved() / (1024 ** 3)
 
         print(f"[{stage}] Allocated: {allocated:.2f} GB | Peak Allocated: {max_allocated:.2f} GB | Reserved: {reserved:.2f} GB")
-
-@contextlib.contextmanager
-def suppress_stdout_stderr():
-    """A context manager that redirects stdout and stderr at the OS level."""
-    devnull = os.open(os.devnull, os.O_RDWR)
-    save_stdout = os.dup(1)
-    save_stderr = os.dup(2)
-
-    try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        yield
-    finally:
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os.dup2(save_stdout, 1)
-        os.dup2(save_stderr, 2)
-        os.close(save_stdout)
-        os.close(save_stderr)
-        os.close(devnull)
 
 #--------------------------------------------------------------------------------------------------
 # Modular Plotting Components

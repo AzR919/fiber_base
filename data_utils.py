@@ -15,6 +15,12 @@ from pathlib import Path
 from torch.utils.data import IterableDataset
 
 from utils import *
+from fiber_utils import (
+    get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp,
+    get_fiber_data as _get_fiber_data_np,
+    get_locus_onehot,
+    suppress_stdout_stderr,
+)
 
 #--------------------------------------------------------------------------------------------------
 
@@ -86,24 +92,12 @@ class fiber_data_iterator(IterableDataset):
         """Call this at the beginning of your training loop: train_dataset.set_epoch(epoch)"""
         self.epoch = epoch
 
-    def dna_to_onehot(self, sequence):
-        """
-        Convert a nucleotide sequence string into a 4-channel one-hot PyTorch tensor.
-        'N's map to channel index 4, which is removed, producing zero vectors [0,0,0,0] for padding.
-        """
-        mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4}
-        indices = torch.tensor([mapping.get(nuc.upper(), 4) for nuc in sequence], dtype=torch.long)
-        one_hot = torch.nn.functional.one_hot(indices, num_classes=5)
-        # Remove fifth column ('N' representation / zero-padding)
-        return one_hot[:, :4].to(torch.float32)
-
     def onehot_for_locus(self, locus):
-        """Helper to fetch genomic DNA sequence for a locus [chrom, start, end] and return [context_length, 4]."""
+        """Fetch genomic DNA for a locus and return (context_length, 4) torch tensor."""
         chrom, start, end = locus[0], int(locus[1]), int(locus[2])
         if start < 0 or end <= start:
             raise ValueError(f"Invalid genomic range: {start}-{end}")
-        seq = self.fasta.fetch(chrom, start, end)
-        return self.dna_to_onehot(seq)
+        return torch.from_numpy(get_locus_onehot(self.fasta, chrom, start, end))
 
     def load_genomic_sizes(self, possible_chr_sizes, mode="train"):
         """Filter chromosomes based on train/val chromosomes specified in metadata."""
@@ -138,13 +132,7 @@ class fiber_data_iterator(IterableDataset):
                 pysam.faidx(self.fasta_path)
             self.fasta = pysam.FastaFile(self.fasta_path)
 
-        feature_map = [
-            self.get_m6a,
-            self.get_cpg,
-            self.get_msp,
-            self.get_nuc,
-            self.get_fire_msp,
-        ]
+        feature_map = [get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp]
         self.input_features = [feature_map[i] for i in self.active_feature_indices]
 
     def generate_random_locus(self):
@@ -179,238 +167,15 @@ class fiber_data_iterator(IterableDataset):
         ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
         return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
 
-    def get_m6a(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
-        m6a_data = np.zeros((self.context_length), dtype=np.float32)
-
-        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-        at_mask = np.isin(ref_seq_arr, ['A', 'T'])
-        # Set all potential m6A target sites (A/T) to -1 (unmethylated background)
-        m6a_data[at_mask] = -1.0
-
-        ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
-        qualities = np.array(fiber.m6a.ml, dtype=np.float32)
-
-        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-        valid_positions = (ref_starts[mask] - start).astype(np.int32)
-        m6a_data[valid_positions] = 1
-        return m6a_data
-
-    def get_m6a_o(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
-        m6a_data = np.zeros(self.context_length, dtype=np.float32)
-
-        # 1. Determine relative overlap of the fiber within [start, end)
-        fiber_ref_start = fiber.start
-        fiber_ref_end = fiber.end
-
-        overlap_start = max(start, fiber_ref_start)
-        overlap_end = min(end, fiber_ref_end)
-
-        # If the fiber does not overlap this context region at all, return zeros
-        if overlap_start >= overlap_end:
-            return m6a_data
-
-        # Map genomic overlap to array indices relative to `start`
-        f_start_idx = overlap_start - start
-        f_end_idx = overlap_end - start
-
-        # 2. Mark A/T sites as -1 ONLY within the covered region
-        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-        at_mask = np.isin(ref_seq_arr, ['A', 'T'])
-
-        fiber_at_mask = np.zeros(self.context_length, dtype=bool)
-        fiber_at_mask[f_start_idx:f_end_idx] = at_mask[f_start_idx:f_end_idx]
-
-        m6a_data[fiber_at_mask] = -1.0
-
-        # 3. Mark high-confidence m6A calls as +1.0
-        ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
-        qualities = np.array(fiber.m6a.ml, dtype=np.float32)
-
-        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-        valid_positions = (ref_starts[mask] - start).astype(np.int32)
-        m6a_data[valid_positions] = 1.0
-        return m6a_data
-
-    def get_cpg(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
-        cpg_data = np.zeros(self.context_length, dtype=np.float32)
-        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-        L = len(ref_seq_arr)
-
-        # 1. Identify CpG sites on the reference sequence
-        # Forward strand: 'C' followed by 'G' -> mark the 'C' position
-        c_positions = np.where(ref_seq_arr[:-1] == 'C')[0]
-        valid_cg = c_positions[ref_seq_arr[c_positions + 1] == 'G']
-
-        # Reverse strand: 'G' preceded by 'C' -> mark the 'G' position
-        g_positions = np.where(ref_seq_arr[1:] == 'G')[0] + 1
-        valid_gc = g_positions[ref_seq_arr[g_positions - 1] == 'C']
-
-        # Combine all CpG positions and set them to -1.0 (unmethylated background)
-        cpg_indices = np.unique(np.concatenate([valid_cg, valid_gc]))
-        cpg_data[cpg_indices] = -1.0
-
-        # 2. Extract methylated CpG positions from fiber
-        ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
-        qualities = np.array(fiber.cpg.ml, dtype=np.float32)
-
-        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-        valid_positions = (ref_starts[mask] - start).astype(np.int32)
-
-        # 3. Mark identified methylated positions as 1.0
-        cpg_data[valid_positions] = 1.0
-
-        return cpg_data
-
-    def get_cpg_o(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
-        cpg_data = np.zeros(self.context_length, dtype=np.float32)
-
-        # 1. Determine the overlapping region between the window [start, end) and the fiber alignment
-        fiber_ref_start = fiber.start
-        fiber_ref_end = fiber.end
-
-        overlap_start = max(start, fiber_ref_start)
-        overlap_end = min(end, fiber_ref_end)
-
-        # 2. Identify CpG sites ONLY within the fiber's aligned coverage window
-        if overlap_start < overlap_end:
-            # Relative indices inside the cpg_data array [0, context_length)
-            local_start = int(overlap_start - start)
-            local_end = int(overlap_end - start)
-
-            ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-
-            # Forward strand CpG: 'C' followed by 'G' -> mark 'C' index
-            c_positions = np.where(ref_seq_arr[:-1] == 'C')[0]
-            valid_cg = c_positions[ref_seq_arr[c_positions + 1] == 'G']
-
-            # Reverse strand CpG: 'G' preceded by 'C' -> mark 'G' index
-            g_positions = np.where(ref_seq_arr[1:] == 'G')[0] + 1
-            valid_gc = g_positions[ref_seq_arr[g_positions - 1] == 'C']
-
-            all_cpg_indices = np.unique(np.concatenate([valid_cg, valid_gc]))
-
-            # Filter CpG indices to only include those residing inside the fiber alignment
-            cpg_in_fiber_mask = (all_cpg_indices >= local_start) & (all_cpg_indices < local_end)
-            fiber_cpg_indices = all_cpg_indices[cpg_in_fiber_mask]
-
-            # Set valid CpG sites inside the fiber to -1.0 (unmethylated background)
-            cpg_data[fiber_cpg_indices] = -1.0
-
-        # 3. Extract methylated CpG positions from fiber above quality threshold
-        ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
-        qualities = np.array(fiber.cpg.ml, dtype=np.float32)
-
-        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-        valid_positions = (ref_starts[mask] - start).astype(np.int32)
-
-        # 4. Mark identified methylated positions as 1.0
-        cpg_data[valid_positions] = 1.0
-
-        return cpg_data
-
-    def get_msp(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
-        msp_data = np.zeros((self.context_length), dtype=np.float32)
-
-        for ref_pos, length, aq in zip(fiber.msp.reference_starts, fiber.msp.reference_lengths, fiber.msp.qual):
-            if ref_pos is None or length is None:
-                continue
-
-            ref_end = ref_pos + length
-            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
-                rel_start = ref_pos - start
-                rel_end = ref_end - start
-
-                win_start = max(0, rel_start)
-                win_end = min(self.context_length, rel_end)
-                msp_data[win_start:win_end] = 1
-
-        return msp_data
-
-    def get_nuc(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
-        nuc_data = np.zeros((self.context_length), dtype=np.float32)
-
-        for ref_pos, length, aq in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths, fiber.nuc.qual):
-            if ref_pos is None or length is None:
-                continue
-
-            ref_end = ref_pos + length
-            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
-                rel_start = ref_pos - start
-                rel_end = ref_end - start
-
-                win_start = max(0, rel_start)
-                win_end = min(self.context_length, rel_end)
-                nuc_data[win_start:win_end] = 1
-
-        return nuc_data
-
-    def get_fire_msp(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
-        fire_msp_data = np.zeros((self.context_length), dtype=np.float32)
-
-        # Access fire_msp if explicitly separated, else fallback to msp
-        fire_source = getattr(fiber, 'fire_msp', fiber.msp)
-
-        for ref_pos, length, aq in zip(fire_source.reference_starts, fire_source.reference_lengths, fire_source.qual):
-            if ref_pos is None or length is None:
-                continue
-
-            ref_end = ref_pos + length
-            if ref_pos < end and ref_end > start and aq >= Q_THRESHOLD:
-                rel_start = ref_pos - start
-                rel_end = ref_end - start
-
-                win_start = max(0, rel_start)
-                win_end = min(self.context_length, rel_end)
-                fire_msp_data[win_start:win_end] = 1
-
-        return fire_msp_data
-
-    def get_fiber_data(self, cell_idx, chrom, start, end, min_overlap=50):
-        fibers_tensor = np.zeros((self.fibers_per_entry, len(self.input_features), self.context_length), dtype=np.float32)
-        dna_tensor = np.zeros((self.fibers_per_entry, self.context_length, 4), dtype=np.float32) if self.return_fiber_dna else None
-
-        ref_dna_seq = self.fasta.fetch(chrom, start, end)
-
-        with suppress_stdout_stderr():
-            possible_fibers = self.fiber_bams[cell_idx].fetch(chrom, start, end)
-
-        i = 0
-        for fiber in possible_fibers:
-            if i == self.fibers_per_entry:
-                break
-
-            # Calculate overlap between read and target window
-            overlap_start = max(start, fiber.start)
-            overlap_end = min(end, fiber.end)
-            overlap_len = overlap_end - overlap_start
-
-            # Skip fibers that barely intersect the region
-            if overlap_len < min_overlap:
-                continue
-
-            # Process optional per-fiber DNA sequence
-            if self.return_fiber_dna:
-                dna_buffer = list("N" * self.context_length)
-                win_offset_start = overlap_start - start
-                read_offset_start = overlap_start - fiber.start
-                read_offset_end = overlap_end - fiber.start
-
-                if fiber.seq is not None:
-                    read_seq_slice = fiber.seq[read_offset_start:read_offset_end]
-                    # Clamp slice length so slice substitution never alters array length
-                    slice_len = min(len(read_seq_slice), self.context_length - win_offset_start)
-                    if slice_len > 0:
-                        dna_buffer[win_offset_start : win_offset_start + slice_len] = list(read_seq_slice[:slice_len])
-
-                dna_tensor[i] = self.dna_to_onehot("".join(dna_buffer))
-
-            # Feature functions handle boundary clipping safely
-            single_fiber_data = np.array([func(fiber, start, end, ref_dna_seq) for func in self.input_features])
-            fibers_tensor[i] = single_fiber_data
-            i += 1
-
-        fiber_dna_tensor = torch.from_numpy(dna_tensor).permute(2, 1, 0) if self.return_fiber_dna else None
-        return torch.from_numpy(fibers_tensor).permute(1, 2, 0), fiber_dna_tensor, i
+    def _collect_fiber_tensors(self, cell_idx, chrom, start, end, min_overlap=50):
+        """Thin torch wrapper around fiber_utils.get_fiber_data. Returns (C,L,N) tensors."""
+        fibers_np, dna_np, n_fibers = _get_fiber_data_np(
+            self.fiber_bams[cell_idx], chrom, start, end, self.fasta,
+            self.fibers_per_entry, self.context_length, self.input_features,
+            return_fiber_dna=self.return_fiber_dna, min_overlap=min_overlap,
+        )
+        fiber_dna_tensor = torch.from_numpy(dna_np).permute(2, 1, 0) if dna_np is not None else None
+        return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
         raw_vals = np.array(self.other_bws[cell_idx].values(chrom, start, end), dtype=np.float32)
@@ -442,7 +207,7 @@ class fiber_data_iterator(IterableDataset):
 
                 random_locus = self.generate_ccre_locus()
 
-                fiber_tensor, fiber_dna_tensor, n_fibers = self.get_fiber_data(cell_idx, *random_locus, min_overlap=self.context_length//8)
+                fiber_tensor, fiber_dna_tensor, n_fibers = self._collect_fiber_tensors(cell_idx, *random_locus, min_overlap=self.context_length//8)
                 if n_fibers == 0:
                     continue
 
