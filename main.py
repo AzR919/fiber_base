@@ -35,9 +35,20 @@ def main():
         "dna_type": args.dna_type,
         "bulk_name": args.bulk_name
     }
+    kwargs = {
+        "metadata": args.metadata,
+        "fibers_per_entry": args.fibers_per_entry,
+        "context_length": args.context_length,
+        "num_sample_ccres": args.iters_per_epoch,
+        "input_flags": args.input_flags,
+        "seed": args.seed,
+        "dna_type": args.dna_type,
+        "bulk_name": args.bulk_name
+    }
 
-    train_data_iterator = fiber_data_iterator(mode="train", **kwargs)
-    val_data_iterator = fiber_data_iterator(mode="val", **kwargs)
+    # train_data_iterator = fiber_data_iterator(mode="train", **kwargs)
+    train_data_iterator = MixedCellFiberDataset(**kwargs)
+    val_data_iterator = MixedCellFiberDataset(**kwargs)
 
     model = model_selector(args.model, args)
     input_size = (args.batch_size, sum(args.input_flags), args.context_length, args.fibers_per_entry)

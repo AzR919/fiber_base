@@ -113,7 +113,7 @@ class Evaluator:
 
         return torch.mean(ct_fibers, dim=-1)
 
-    def evaluate(self):
+    def evaluate(self, save_path=None):
         """
         Runs evaluation loop over the provided mixed-cell dataloader.
 
@@ -146,7 +146,7 @@ class Evaluator:
                 fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, self.device)
 
                 # Model Forward Pass
-                with torch.amp.autocast(self.device_type):
+                with torch.amp.autocast(self.device_type, dtype=torch.float16):
                     pred_composite_bulk, processed_fibers = self.model(fiber_features, **forward_kwargs)
 
                 # Composite evaluation
@@ -203,6 +203,22 @@ class Evaluator:
                     j = self.rng.randint(0, valid_locus_count - 1)
                     if j < self.num_to_save:
                         locus_records[j] = locus_record
+
+                if save_path is not None:
+                    ct_losses = {k: {"loss":0.0} for k, v in ct_targets.items()}
+                    print(f"saving idx{batch_idx}")
+
+                    fig = plot_evaluator_record(
+                                record=locus_record,
+                                input_flags=self.model.init_args["input_flags"],
+                                loss=0.0,
+                                ct_losses=ct_losses,
+                                bulk_name=self.test_set.bulk_name,
+                                mode="Test"
+                            )
+
+                    plt.savefig(f"{save_path}test_e_{batch_idx}.png")
+                    plt.close()
 
         # Compile final metric dictionary
         metrics_summary = {

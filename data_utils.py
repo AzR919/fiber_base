@@ -11,6 +11,7 @@ import pyBigWig
 import numpy as np
 import pandas as pd
 
+from pathlib import Path
 from torch.utils.data import IterableDataset
 
 from utils import *
@@ -127,7 +128,7 @@ class fiber_data_iterator(IterableDataset):
     def init_worker_resources(self):
         """Safely instantiates file descriptors unique to each background worker process/thread."""
         if self.fiber_bams is None:
-            self.fiber_bams = [pyft.Fiberbam(p) for p in self.fiber_data_paths]
+            self.fiber_bams = [pyft.Fiberbam(str(Path(p).resolve())) for p in self.fiber_data_paths]
         if self.other_bws is None:
             self.other_bws = [pyBigWig.open(p) for p in self.other_bw_paths]
         if self.fasta is None:
@@ -194,6 +195,42 @@ class fiber_data_iterator(IterableDataset):
         m6a_data[valid_positions] = 1
         return m6a_data
 
+    def get_m6a_o(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+        m6a_data = np.zeros(self.context_length, dtype=np.float32)
+
+        # 1. Determine relative overlap of the fiber within [start, end)
+        fiber_ref_start = fiber.start
+        fiber_ref_end = fiber.end
+
+        overlap_start = max(start, fiber_ref_start)
+        overlap_end = min(end, fiber_ref_end)
+
+        # If the fiber does not overlap this context region at all, return zeros
+        if overlap_start >= overlap_end:
+            return m6a_data
+
+        # Map genomic overlap to array indices relative to `start`
+        f_start_idx = overlap_start - start
+        f_end_idx = overlap_end - start
+
+        # 2. Mark A/T sites as -1 ONLY within the covered region
+        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
+        at_mask = np.isin(ref_seq_arr, ['A', 'T'])
+
+        fiber_at_mask = np.zeros(self.context_length, dtype=bool)
+        fiber_at_mask[f_start_idx:f_end_idx] = at_mask[f_start_idx:f_end_idx]
+
+        m6a_data[fiber_at_mask] = -1.0
+
+        # 3. Mark high-confidence m6A calls as +1.0
+        ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
+        qualities = np.array(fiber.m6a.ml, dtype=np.float32)
+
+        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
+        valid_positions = (ref_starts[mask] - start).astype(np.int32)
+        m6a_data[valid_positions] = 1.0
+        return m6a_data
+
     def get_cpg(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
         cpg_data = np.zeros(self.context_length, dtype=np.float32)
         ref_seq_arr = np.array(list(ref_dna_seq.upper()))
@@ -220,6 +257,53 @@ class fiber_data_iterator(IterableDataset):
         valid_positions = (ref_starts[mask] - start).astype(np.int32)
 
         # 3. Mark identified methylated positions as 1.0
+        cpg_data[valid_positions] = 1.0
+
+        return cpg_data
+
+    def get_cpg_o(self, fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+        cpg_data = np.zeros(self.context_length, dtype=np.float32)
+
+        # 1. Determine the overlapping region between the window [start, end) and the fiber alignment
+        fiber_ref_start = fiber.start
+        fiber_ref_end = fiber.end
+
+        overlap_start = max(start, fiber_ref_start)
+        overlap_end = min(end, fiber_ref_end)
+
+        # 2. Identify CpG sites ONLY within the fiber's aligned coverage window
+        if overlap_start < overlap_end:
+            # Relative indices inside the cpg_data array [0, context_length)
+            local_start = int(overlap_start - start)
+            local_end = int(overlap_end - start)
+
+            ref_seq_arr = np.array(list(ref_dna_seq.upper()))
+
+            # Forward strand CpG: 'C' followed by 'G' -> mark 'C' index
+            c_positions = np.where(ref_seq_arr[:-1] == 'C')[0]
+            valid_cg = c_positions[ref_seq_arr[c_positions + 1] == 'G']
+
+            # Reverse strand CpG: 'G' preceded by 'C' -> mark 'G' index
+            g_positions = np.where(ref_seq_arr[1:] == 'G')[0] + 1
+            valid_gc = g_positions[ref_seq_arr[g_positions - 1] == 'C']
+
+            all_cpg_indices = np.unique(np.concatenate([valid_cg, valid_gc]))
+
+            # Filter CpG indices to only include those residing inside the fiber alignment
+            cpg_in_fiber_mask = (all_cpg_indices >= local_start) & (all_cpg_indices < local_end)
+            fiber_cpg_indices = all_cpg_indices[cpg_in_fiber_mask]
+
+            # Set valid CpG sites inside the fiber to -1.0 (unmethylated background)
+            cpg_data[fiber_cpg_indices] = -1.0
+
+        # 3. Extract methylated CpG positions from fiber above quality threshold
+        ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
+        qualities = np.array(fiber.cpg.ml, dtype=np.float32)
+
+        mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
+        valid_positions = (ref_starts[mask] - start).astype(np.int32)
+
+        # 4. Mark identified methylated positions as 1.0
         cpg_data[valid_positions] = 1.0
 
         return cpg_data

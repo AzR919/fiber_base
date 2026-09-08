@@ -19,7 +19,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  input_flags, num_sample_ccres=1000, seed=919,
-                 dna_type="none", bulk_name="N/A"):
+                 dna_type="none", bulk_name="N/A", iters_per_epoch=None):
         """
         Args:
             metadata (dict): Dataset configuration containing paths and cell types.
@@ -164,6 +164,7 @@ class MixedCellFiberDataset(fiber_data_iterator):
         out_dict = {
             "fiber_features": torch.from_numpy(mixed_fiber_tensors),
             "target_bulk": composite_bulk,
+            "cell_type": "mixed",
             "cell_type_targets": individual_bulk_targets,
             "cell_type_masks": cell_type_masks,
             "n_fibers": current_fiber_offset,
