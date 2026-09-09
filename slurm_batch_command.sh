@@ -33,7 +33,7 @@ echo "Working directory is $(pwd)"
 # module load arrow/17.0.0
 
 # Activate virtual environment
-source /home/azr/lab/misc/menv/bin/activate
+source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
 # Run the training
 python main.py \
