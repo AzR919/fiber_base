@@ -10,8 +10,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+import matplotlib.pyplot as plt
+
 from evaluator import Evaluator, test_dataset_from_path_and_extra_args
 from utils import *
+from vis_utils import plot_evaluation_dashboard_t, plot_loss, plot_evaluator_record_t
 
 class Trainer:
     def __init__(self, model, train_dataset, val_dataset=None, eval_config_path=None,
@@ -161,7 +164,7 @@ class Trainer:
 
             # Generate & Log Train Dashboard Plot
             if last_t_batch is not None:
-                fig_t = plot_evaluation_dashboard(
+                fig_t = plot_evaluation_dashboard_t(
                     last_t_batch["fiber_features"],
                     self.train_dataset.input_flags,
                     last_t_output,
@@ -178,7 +181,7 @@ class Trainer:
 
             # Generate & Log Val Dashboard Plot
             if last_v_batch is not None:
-                fig_v = plot_evaluation_dashboard(
+                fig_v = plot_evaluation_dashboard_t(
                     last_v_batch["fiber_features"],
                     self.train_dataset.input_flags,
                     last_v_output,
@@ -225,8 +228,8 @@ class Trainer:
             for idx, record in enumerate(locus_records):
 
                 # Generate the 2-column deconvolution plot
-                fig = plot_evaluator_record(
-                    record=record,
+                fig = plot_evaluator_record_t(
+                    record_t=record,
                     input_flags=test_set.input_flags,
                     loss=eval_results["composite"]["loss"],
                     ct_losses=eval_results["per_cell_type"],

@@ -12,8 +12,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+import matplotlib.pyplot as plt
+
 from eval_dataset import MixedCellFiberDataset
 from utils import *
+from vis_utils import plot_evaluator_record_t
 
 #--------------------------------------------------------------------------------------------------
 # data setup
@@ -208,8 +211,8 @@ class Evaluator:
                     ct_losses = {k: {"loss":0.0} for k, v in ct_targets.items()}
                     print(f"saving idx{batch_idx}")
 
-                    fig = plot_evaluator_record(
-                                record=locus_record,
+                    fig = plot_evaluator_record_t(
+                                record_t=locus_record,
                                 input_flags=self.model.init_args["input_flags"],
                                 loss=0.0,
                                 ct_losses=ct_losses,
