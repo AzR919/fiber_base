@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-08-26_00_h3k4me3_mixed_train_no_eval
-#SBATCH --account=def-maxwl
+#SBATCH --job-name=2026-09-08_test_fiber_coverage_vis_utils
+#SBATCH --account=def-maxwl_gpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
 #SBATCH --nodes=1
@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-4:00:00
+#SBATCH --time=0-1:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -37,12 +37,12 @@ source /home/azr/lab/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/evals/eval05_mixed_h3k4me3_fcc.yaml \
-  --model_config configs/models/model06_uct.yaml \
-  --train_config configs/training/train01.yaml \
-  --epochs 15 \
-  --name_prefix h3k4me3 \
-  --name_suffix mixed_train
+  --data_config configs/data/data00.yaml \
+  --model_config configs/models/model00.yaml \
+  --train_config configs/training/train00.yaml \
+  --eval_config_path configs/evals/eval00.yaml \
+  --name_prefix test \
+  --name_suffix smoke
 
 # Print job completion time
 echo "Job finished on $(date)"
