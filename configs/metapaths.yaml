@@ -22,6 +22,6 @@ cell_types:
     h3k27ac:   null
   K562:
     fiber_seq: K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram
-    atac:      null
+    atac:      K562_ENCFF357GNC_ATAC_seq_signal.bigWig
     h3k4me3:   K562_ENCFF071GML_H3K4me3_signal.bigWig
     h3k27ac:   null

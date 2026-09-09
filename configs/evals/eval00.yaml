@@ -3,7 +3,7 @@
 context_length: 256
 fibers_per_entry: 50
 num_sample_ccres: 5
-bulk_name: ATAC_seq_fcc
+bulk_name: ATAC_seq_p
 seed: 919
 assay: atac
 
