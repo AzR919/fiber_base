@@ -43,7 +43,7 @@ pyft==0.3.0
 pyparsing==3.2.5+computecanada
 pysam==0.23.3+computecanada
 python_dateutil==2.9.0.post0+computecanada
-pytz==2025.2+computecanada
+pytz==2026.3.post1
 pyyaml==6.0.3+computecanada
 referencing==0.37.0+computecanada
 requests==2.32.5+computecanada
@@ -61,7 +61,7 @@ torch==2.13.0+computecanada
 torchinfo==1.8.0+computecanada
 torchvision==0.28.0+computecanada
 tqdm==4.67.1+computecanada
-typing_extensions==4.15.0+computecanada
+typing_extensions==4.16.0+computecanada
 typing_inspection==0.4.2+computecanada
 tzdata==2025.2+computecanada
 urllib3==2.6.3+computecanada
