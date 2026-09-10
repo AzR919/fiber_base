@@ -10,3 +10,4 @@ assay: atac
 cell_types:
   K562:
     ratio: 1.0
+dataset_type: single

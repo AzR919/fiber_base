@@ -1,191 +1,94 @@
 """
-Evaluator module for testing and deconvoluting mixed cell-type fiber data.
-Evaluates model performance across mixed composite signals as well as
-individual cell-type reconstructions.
+Evaluator module for testing fiber data models.
+Takes a model and a dataset, runs inference, and computes MSE metrics.
+Supports both single-cell and mixed-cell batch types (auto-detected from batch keys).
 """
 
 import os
-import sys
 import numpy as np
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 
-from eval_dataset import MixedCellFiberDataset
+from metrics import mse_loss
 from utils import *
 from vis_utils import plot_evaluator_record_t
 
-#--------------------------------------------------------------------------------------------------
-# data setup
-
-def test_dataset_from_path_and_extra_args(eval_config_path, overwrite_args):
-
-    eval_config = load_config_file(eval_config_path)
-    kwargs = {
-            "metadata": eval_config["metadata"],
-            "context_length": eval_config["context_length"],
-            "fibers_per_entry": eval_config["fibers_per_entry"],
-            "num_sample_ccres": eval_config["num_sample_ccres"],
-            "bulk_name": eval_config["bulk_name"],
-            "seed": eval_config["seed"],
-            "input_flags": [1, 1, 1, 1, 1],
-            "dna_type": "none"
-        }
-
-    kwargs.update(overwrite_args)
-
-    return MixedCellFiberDataset(**kwargs), eval_config["seed"]
-
 
 class Evaluator:
-    """
-    Evaluation runner that executes forward passes on mixed-cell datasets,
-    deconvolutes single-cell fiber predictions per cell type, and computes
-    MSE loss and Pearson correlation metrics.
-    """
 
-    def __init__(self, model, test_set, batch_size, num_plots_to_log, device="cuda", seed=919, criterion=None):
-        """
-        Args:
-            model (nn.Module): Pre-trained PyTorch model instance.
-            device (str or torch.device): Hardware device ('cuda' or 'cpu').
-            criterion (nn.Module, optional): Loss function (defaults to MSELoss).
-        """
+    def __init__(self, model, dataset, batch_size=1, num_plots_to_log=5, device="cuda", seed=919):
         self.model = model
         self.device = torch.device(device)
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
-        self.test_set = test_set
+        self.dataset = dataset
         self.batch_size = batch_size
-        self.criterion = criterion if criterion is not None else nn.MSELoss()
+        self.criterion = nn.MSELoss()
 
         self.rng = random.Random(seed)
         self.num_to_save = num_plots_to_log
 
-    @staticmethod
-    def _compute_pearson_r(pred, target):
-        """
-        Computes Pearson correlation coefficient between two 1D or 2D tensors.
-
-        Args:
-            pred (torch.Tensor or np.ndarray): Predicted signal profile.
-            target (torch.Tensor or np.ndarray): Ground truth target profile.
-
-        Returns:
-            float: Pearson correlation coefficient.
-        """
-        if isinstance(pred, torch.Tensor):
-            pred = pred.detach().cpu().numpy()
-        if isinstance(target, torch.Tensor):
-            target = target.detach().cpu().numpy()
-
-        pred_flat = pred.flatten()
-        target_flat = target.flatten()
-
-        pred_std = np.std(pred_flat)
-        target_std = np.std(target_flat)
-
-        if pred_std == 0 or target_std == 0:
-            return 0.0
-
-        cov = np.cov(pred_flat, target_flat)[0, 1]
-        return float(cov / (pred_std * target_std))
-
     def _deconvolve_cell_type_bulk(self, processed_fibers, ct_mask, decoder_type):
-        """
-        Applies decoder aggregation over a masked subset of single-cell fibers.
-
-        Args:
-            processed_fibers (torch.Tensor): Processed single-cell fibers [B, L, N].
-            ct_mask (torch.Tensor): Boolean mask tensor [N] indicating fibers for this cell type.
-            decoder_type (str): Aggregation method ('avg', 'avg_n', 'sum').
-
-        Returns:
-            torch.Tensor: Reconstructed cell-type bulk profile [B, L].
-        """
-        assert decoder_type == "avg_n"
-        # Slice fibers belonging to this cell type: [B, L, N_ct]
+        if decoder_type != "avg_n":
+            raise ValueError(f"Deconvolution only supported for 'avg_n' decoder, got {decoder_type!r}")
         ct_fibers = processed_fibers[:, :, ct_mask]
-        n_ct_fibers = ct_fibers.shape[-1]
-
-        if n_ct_fibers == 0:
+        if ct_fibers.shape[-1] == 0:
             return torch.zeros((processed_fibers.shape[0], processed_fibers.shape[1]), device=self.device)
-
         return torch.mean(ct_fibers, dim=-1)
 
     def evaluate(self, save_path=None):
-        """
-        Runs evaluation loop over the provided mixed-cell dataloader.
-
-        Returns:
-            dict: Comprehensive evaluation results including composite loss/pearson,
-                  per-cell-type losses/pearsons, and plotting data payload.
-        """
         self.model.eval()
 
         test_loader = DataLoader(
-                                self.test_set,
-                                batch_size=self.batch_size,
-                                worker_init_fn=seed_worker,
-                                drop_last=True
-                            )
+            self.dataset,
+            batch_size=self.batch_size,
+            worker_init_fn=seed_worker,
+            drop_last=False,
+        )
 
-        # Metrics trackers
         composite_loss_meter = AverageMeter()
         cell_type_loss_meters = {}
-
-        # Store locus-level outputs for plotting/inspection
         locus_records = []
         valid_locus_count = 0
-
         decoder_type = getattr(self.model, "decoder_type", "avg_n")
 
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_loader):
-                # Prepare model inputs
                 fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, self.device)
 
-                # Model Forward Pass
                 with torch.amp.autocast(self.device_type, dtype=torch.float16):
                     pred_composite_bulk, processed_fibers = self.model(fiber_features, **forward_kwargs)
 
-                # Composite evaluation
                 comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()
                 composite_loss_meter.update(comp_loss)
 
-                # Cell-type specific deconvolution and evaluation
-                ct_targets = batch["cell_type_targets"]
-                ct_masks = batch["cell_type_masks"]
-
+                is_mixed = "cell_type_masks" in batch
                 cell_type_preds = {}
                 cell_type_losses = {}
 
-                for ct_name, mask_tensor in ct_masks.items():
-                    # Initialize meters if seeing cell type for the first time
-                    if ct_name not in cell_type_loss_meters:
-                        cell_type_loss_meters[ct_name] = AverageMeter()
+                if is_mixed:
+                    ct_targets = batch["cell_type_targets"]
+                    ct_masks = batch["cell_type_masks"]
 
-                    # Squeeze batch dimension for mask
-                    ct_mask = mask_tensor[0] if mask_tensor.dim() > 1 else mask_tensor
-                    ct_mask = ct_mask.to(self.device)
+                    for ct_name, mask_tensor in ct_masks.items():
+                        if ct_name not in cell_type_loss_meters:
+                            cell_type_loss_meters[ct_name] = AverageMeter()
 
-                    # Reconstruct single cell-type bulk profile from masked fibers
-                    pred_ct_bulk = self._deconvolve_cell_type_bulk(
-                        processed_fibers, ct_mask, decoder_type
-                    )
-                    target_ct_bulk = ct_targets[ct_name].to(self.device)
+                        ct_mask = mask_tensor[0] if mask_tensor.dim() > 1 else mask_tensor
+                        ct_mask = ct_mask.to(self.device)
 
-                    # Calculate cell-type specific metrics
-                    ct_loss = self.criterion(pred_ct_bulk, target_ct_bulk).item()
-                    cell_type_loss_meters[ct_name].update(ct_loss)
+                        pred_ct_bulk = self._deconvolve_cell_type_bulk(processed_fibers, ct_mask, decoder_type)
+                        target_ct_bulk = ct_targets[ct_name].to(self.device)
 
-                    cell_type_preds[ct_name] = pred_ct_bulk.cpu()
-                    cell_type_losses[ct_name] = ct_loss
+                        ct_loss = self.criterion(pred_ct_bulk, target_ct_bulk).item()
+                        cell_type_loss_meters[ct_name].update(ct_loss)
 
-                # Package payload for downstream plotting modules
+                        cell_type_preds[ct_name] = pred_ct_bulk.cpu()
+                        cell_type_losses[ct_name] = ct_loss
+
                 locus_record = {
                     "locus": batch["locus"],
                     "fiber_features": fiber_features.cpu(),
@@ -193,10 +96,10 @@ class Evaluator:
                     "pred_bulk": pred_composite_bulk.cpu(),
                     "target_bulk": target_bulk.cpu(),
                     "pred_cell_type_bulks": cell_type_preds,
-                    "target_cell_type_bulks": {k: v.cpu() for k, v in ct_targets.items()},
-                    "cell_type_masks": ct_masks,
+                    "target_cell_type_bulks": {k: v.cpu() for k, v in ct_targets.items()} if is_mixed else {},
+                    "cell_type_masks": batch.get("cell_type_masks", {}),
                     "loss": comp_loss,
-                    "cell_type_losses": cell_type_losses
+                    "cell_type_losses": cell_type_losses,
                 }
                 valid_locus_count += 1
 
@@ -208,92 +111,22 @@ class Evaluator:
                         locus_records[j] = locus_record
 
                 if save_path is not None:
-                    ct_losses = {k: {"loss":0.0} for k, v in ct_targets.items()}
+                    ct_losses_fmt = {k: {"loss": v} for k, v in cell_type_losses.items()}
                     print(f"saving idx{batch_idx}")
-
                     fig = plot_evaluator_record_t(
-                                record_t=locus_record,
-                                input_flags=self.model.init_args["input_flags"],
-                                loss=0.0,
-                                ct_losses=ct_losses,
-                                bulk_name=self.test_set.bulk_name,
-                                mode="Test"
-                            )
-
+                        record_t=locus_record,
+                        input_flags=self.model.init_args["input_flags"],
+                        loss=comp_loss,
+                        ct_losses=ct_losses_fmt,
+                        bulk_name=self.dataset.bulk_name,
+                        mode="Test"
+                    )
                     plt.savefig(f"{save_path}test_e_{batch_idx}.png")
                     plt.close()
 
-        # Compile final metric dictionary
-        metrics_summary = {
-            "composite": {
-                "loss": composite_loss_meter.avg,
-            },
-            "per_cell_type": {
-                ct: {
-                    "loss": cell_type_loss_meters[ct].avg,
-                }
-                for ct in cell_type_loss_meters
-            },
+        return {
+            "composite": {"loss": composite_loss_meter.avg},
+            "per_cell_type": {ct: {"loss": cell_type_loss_meters[ct].avg} for ct in cell_type_loss_meters},
             "locus_records": locus_records,
-            "num_locus": valid_locus_count * self.batch_size
+            "num_locus": valid_locus_count * self.batch_size,
         }
-
-        return metrics_summary
-
-
-#--------------------------------------------------------------------------------------------------
-# Verification Test
-
-def tester():
-    from models import Deep01ResConv1dBlock
-
-    print("Initializing Evaluator test with dummy inputs...")
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Deep01ResConv1dBlock(num_input_features=5, decoder_type="avg_n", kernel_size=15)
-
-    evaluator = Evaluator(model, device=device)
-
-    # Synthesize dummy batch matching MixedCellFiberDataset payload
-    B, C, L, N = 1, 5, 2048, 200
-    dummy_inputs = torch.rand((B, C, L, N))
-    dummy_composite_target = torch.rand((B, L))
-
-    # Mask: 100 fibers for GM12878, 100 fibers for K562
-    gm_mask = torch.zeros(N, dtype=torch.bool)
-    gm_mask[:100] = True
-    k562_mask = torch.zeros(N, dtype=torch.bool)
-    k562_mask[100:] = True
-
-    dummy_batch = {
-        "fiber_features": dummy_inputs,
-        "target_bulk": dummy_composite_target,
-        "n_fibers": N,
-        "locus": [("chr21",), (10000000,), (10002048,)],
-        "cell_type_targets": {
-            "GM12878": torch.rand((B, L)),
-            "K562": torch.rand((B, L))
-        },
-        "cell_type_masks": {
-            "GM12878": gm_mask,
-            "K562": k562_mask
-        }
-    }
-
-    dummy_loader = [dummy_batch]
-
-    results = evaluator.evaluate(dummy_loader)
-
-    print("\n--- Evaluation Summary ---")
-    print(f"Composite Loss: {results['composite']['loss']:.6f}")
-    print(f"Composite Pearson R: {results['composite']['pearson_r']:.4f}")
-
-    print("\nPer-Cell-Type Breakdown:")
-    for ct, metrics in results["per_cell_type"].items():
-        print(f"  [{ct}] MSE Loss: {metrics['loss']:.6f} | Pearson R: {metrics['pearson_r']:.4f}")
-
-    print("\nEvaluator test successfully completed!")
-
-
-if __name__ == "__main__":
-    tester()

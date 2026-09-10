@@ -7,3 +7,4 @@ assay: h3k4me3
 
 cell_types:
   GM12878:
+dataset_type: single

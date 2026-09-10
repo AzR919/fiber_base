@@ -12,3 +12,4 @@ cell_types:
     ratio: 0.5
   K562:
     ratio: 0.5
+dataset_type: mixed

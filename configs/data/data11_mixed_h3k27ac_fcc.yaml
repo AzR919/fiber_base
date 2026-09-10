@@ -8,3 +8,4 @@ assay: h3k27ac
 cell_types:
   GM12878:
   K562:
+dataset_type: mixed

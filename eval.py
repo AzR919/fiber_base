@@ -1,5 +1,13 @@
 """
-Standalone CLI entrypoint for evaluating saved models on mixed cell-type fiber data.
+Standalone CLI for evaluating saved fiber-seq models.
+
+Usage:
+    python eval.py --checkpoint results/.../Model_epoch_N.pt \
+                   --eval_config configs/evals/eval00.yaml \
+                   [--metapaths configs/metapaths.yaml] \
+                   [--device cpu|cuda] \
+                   [--output_dir ./eval_results] \
+                   [--save_plots]
 """
 
 import os
@@ -7,140 +15,121 @@ import json
 import argparse
 import torch
 
-from models import BaseModel, model_selector
-from eval_dataset import MixedCellFiberDataset
+from models import BaseModel
+from data_utils import make_fiber_dataset
 from evaluator import Evaluator
-from utils import set_seed, print_model_summary, load_config_file
+from utils import set_seed, load_config_file, load_metapaths, resolve_config_with_metapaths
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate pre-trained Fiber-seq models on mixed cell-type datasets.")
+    parser = argparse.ArgumentParser(description="Evaluate pre-trained Fiber-seq models.")
 
-    parser.add_argument(
-        "--checkpoint", type=str, required=True,
-        help="Path to the saved PyTorch model checkpoint bundle (.pt)."
-    )
-    parser.add_argument(
-        "--eval_config", type=str, required=True,
-        help="Path to the evaluation YAML config file (e.g., configs/eval_mixed_config.yaml)."
-    )
-    parser.add_argument(
-        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to run evaluation on ('cuda' or 'cpu')."
-    )
-    parser.add_argument(
-        "--output_dir", type=str, default="./eval_results",
-        help="Directory where evaluation metrics and logs will be saved."
-    )
-    parser.add_argument(
-        "--seed", type=int, default=919,
-        help="Random seed for evaluation reproducible sampling."
-    )
+    parser.add_argument("--checkpoint", type=str, required=True,
+                        help="Path to saved model checkpoint (.pt).")
+    parser.add_argument("--eval_config", type=str, required=True,
+                        help="Path to evaluation YAML config.")
+    parser.add_argument("--metapaths", type=str, default="configs/metapaths.yaml",
+                        help="Path to metapaths YAML for path resolution.")
+    parser.add_argument("--device", type=str,
+                        default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--output_dir", type=str, default="./eval_results")
+    parser.add_argument("--save_plots", action="store_true",
+                        help="Save per-locus dashboard plots to output_dir.")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    set_seed(args.seed)
 
     print("\n" + "=" * 60)
     print(" STANDALONE MODEL EVALUATION ")
     print("=" * 60)
-    print(f" Checkpoint Path : {args.checkpoint}")
-    print(f" Eval Config     : {args.eval_config}")
-    print(f" Target Device   : {args.device}")
+    print(f" Checkpoint  : {args.checkpoint}")
+    print(f" Eval Config : {args.eval_config}")
+    print(f" Device      : {args.device}")
     print("=" * 60 + "\n")
 
-    # 1. Load Model Checkpoint Bundle
+    # Load model; input_flags and dna_type come from model checkpoint, not config
     print("--> Loading model checkpoint...")
-    try:
-        model, checkpoint_config = BaseModel.load_model(args.checkpoint, map_location=args.device)
-    except Exception as e:
-        print(f"Error loading model using BaseModel.load_model: {e}")
-        print("Falling back to raw state dict loading via model_selector...")
-
-        # Fallback to config reading if not using bundled BaseModel architecture
-        checkpoint = torch.load(args.checkpoint, map_location=args.device)
-        state_dict = checkpoint.get("state_dict", checkpoint)
-        config = checkpoint.get("model_config", {})
-
-        # Build dummy args object
-        class DummyArgs:
-            pass
-        d_args = DummyArgs()
-        d_args.num_input_features = config.get("num_input_features", 5)
-        d_args.decoder_type = config.get("decoder_type", "avg_n")
-        d_args.kernel_size = config.get("kernel_size", 15)
-
-        model_type = config.get("model_type", "deep01")
-        model = model_selector(model_type, d_args)
-        model.load_state_dict(state_dict)
-
+    model, _ = BaseModel.load_model(args.checkpoint, map_location=args.device)
     model.to(args.device)
     model.eval()
 
-    # 2. Load Evaluation Configuration
-    print("--> Parsing evaluation YAML config...")
+    input_flags = model.init_args["input_flags"]
+    dna_type = model.init_args["dna_type"]
+
+    # Load and resolve eval config
+    print("--> Loading eval config...")
     eval_cfg = load_config_file(args.eval_config)
+    metapaths = load_metapaths(args.metapaths) if os.path.exists(args.metapaths) else None
 
-    # 3. Instantiate MixedCellFiberDataset & DataLoader
-    print("--> Building MixedCellFiberDataset...")
-    dataset_kwargs = {
-        "metadata": eval_cfg["metadata"],
-        "fibers_per_entry": eval_cfg.get("fibers_per_entry", 200),
-        "context_length": eval_cfg.get("context_length", 4096),
-        "iters_per_epoch": eval_cfg.get("iters_per_epoch", 50),
-        "input_flags": eval_cfg.get("input_flags", [1, 1, 1, 1, 1]),
-        "cell_ratios": eval_cfg.get("cell_ratios", None),
-        "mode": eval_cfg.get("mode", "val"),
-        "seed": args.seed,
-        "dna_type": eval_cfg.get("dna_type", "none")
-    }
+    if metapaths and "assay" in eval_cfg:
+        metadata = resolve_config_with_metapaths(eval_cfg, metapaths)
+    else:
+        metadata = eval_cfg.get("metadata", {})
 
-    eval_dataset = MixedCellFiberDataset(**dataset_kwargs)
+    dataset_type = eval_cfg.get("dataset_type", "mixed")
+    seed = eval_cfg.get("seed", 919)
+    num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
+    set_seed(seed)
 
-    # DataLoader wrapper around IterableDataset
-    eval_loader = torch.utils.data.DataLoader(
-        eval_dataset,
-        batch_size=None,  # Handled inside iterator return
-        num_workers=0     # Set to 0 for linear execution/debugging
+    # Build dataset in eval mode (fully deterministic)
+    print("--> Building dataset...")
+    dataset = make_fiber_dataset(
+        dataset_type,
+        mode="eval",
+        metadata=metadata,
+        fibers_per_entry=eval_cfg.get("fibers_per_entry", 200),
+        context_length=eval_cfg.get("context_length", 4096),
+        num_sample_ccres=num_sample_ccres,
+        iters_per_epoch=num_sample_ccres,
+        input_flags=input_flags,
+        dna_type=dna_type,
+        bulk_name=eval_cfg.get("bulk_name", "N/A"),
+        seed=seed,
     )
 
-    # 4. Initialize Evaluator & Execute Loop
-    print("\n--> Running evaluation loop...")
-    evaluator = Evaluator(model, device=args.device)
-    results = evaluator.evaluate(eval_loader)
+    # Run evaluation
+    print("--> Running evaluation...")
+    save_path = None
+    if args.save_plots:
+        os.makedirs(args.output_dir, exist_ok=True)
+        save_path = args.output_dir + "/"
 
-    # 5. Display Console Metrics
+    evaluator = Evaluator(model, dataset, batch_size=1, num_plots_to_log=5,
+                          device=args.device, seed=seed)
+    results = evaluator.evaluate(save_path=save_path)
+
+    # Print results
     print("\n" + "=" * 60)
-    print(" EVALUATION RESULTS SUMMARY ")
+    print(" EVALUATION RESULTS ")
     print("=" * 60)
-    print(f" Composite MSE Loss  : {results['composite']['loss']:.6f}")
-    print(f" Composite Pearson R : {results['composite']['pearson_r']:.4f}")
-    print("-" * 60)
-    print(" Per-Cell-Type Deconvolution Breakdown:")
-    for ct, metrics in results["per_cell_type"].items():
-        print(f"   * [{ct:10s}] MSE Loss: {metrics['loss']:.6f} | Pearson R: {metrics['pearson_r']:.4f}")
+    print(f" Composite MSE Loss : {results['composite']['loss']:.6f}")
+    if results["per_cell_type"]:
+        print("-" * 60)
+        print(" Per-Cell-Type Breakdown:")
+        for ct, metrics in results["per_cell_type"].items():
+            print(f"   * [{ct:10s}] MSE Loss: {metrics['loss']:.6f}")
+    print(f" Loci evaluated     : {results['num_locus']}")
     print("=" * 60 + "\n")
 
-    # 6. Save JSON Results Summary
+    # Save JSON summary
     os.makedirs(args.output_dir, exist_ok=True)
-    ckpt_filename = os.path.splitext(os.path.basename(args.checkpoint))[0]
-    out_json_path = os.path.join(args.output_dir, f"{ckpt_filename}_eval_summary.json")
+    ckpt_name = os.path.splitext(os.path.basename(args.checkpoint))[0]
+    out_json = os.path.join(args.output_dir, f"{ckpt_name}_eval_summary.json")
 
-    # Prepare JSON serializable summary
     json_summary = {
         "checkpoint": args.checkpoint,
         "eval_config": args.eval_config,
         "composite_metrics": results["composite"],
         "per_cell_type_metrics": results["per_cell_type"],
-        "num_loci_evaluated": len(results["locus_records"])
+        "num_loci_evaluated": results["num_locus"],
     }
 
-    with open(out_json_path, "w") as f:
+    with open(out_json, "w") as f:
         json.dump(json_summary, f, indent=4)
 
-    print(f"Full evaluation summary saved to: {out_json_path}")
+    print(f"Results saved to: {out_json}")
 
 
 if __name__ == "__main__":

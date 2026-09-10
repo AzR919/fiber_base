@@ -45,6 +45,9 @@ def get_args():
     # Dataset Parameters
     data_group.add_argument("--context_length", type=int, default=4096)
     data_group.add_argument("--fibers_per_entry", type=int, default=200)
+    data_group.add_argument("--dataset_type", type=str, default="single",
+                            choices=["single", "mixed"],
+                            help="Dataset mode: 'single' (one cell type per sample) or 'mixed' (composite)")
 
 
     # Model

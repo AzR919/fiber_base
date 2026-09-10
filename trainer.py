@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 
-from evaluator import Evaluator, test_dataset_from_path_and_extra_args
+from evaluator import Evaluator
+from data_utils import make_fiber_dataset
 from utils import *
 from vis_utils import plot_evaluation_dashboard_t, plot_loss, plot_evaluator_record_t
 
@@ -210,11 +211,31 @@ class Trainer:
             print(" Running Final Model Test & Deconvolution Dashboard...")
             print("=" * 60)
 
-            extra_args = {
-                "input_flags": self.config.input_flags,
-                "dna_type": self.config.dna_type,
-            }
-            test_set, eval_seed = test_dataset_from_path_and_extra_args(self.eval_config_path, extra_args)
+            eval_cfg = load_config_file(self.eval_config_path)
+            metapaths = None
+            if hasattr(self.config, "metapaths") and os.path.exists(self.config.metapaths):
+                metapaths = load_metapaths(self.config.metapaths)
+
+            if metapaths and "assay" in eval_cfg:
+                metadata = resolve_config_with_metapaths(eval_cfg, metapaths)
+            else:
+                metadata = eval_cfg.get("metadata", {})
+
+            eval_seed = eval_cfg.get("seed", 919)
+            num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
+            test_set = make_fiber_dataset(
+                eval_cfg.get("dataset_type", "mixed"),
+                mode="eval",
+                metadata=metadata,
+                fibers_per_entry=eval_cfg.get("fibers_per_entry", self.config.fibers_per_entry),
+                context_length=eval_cfg.get("context_length", self.config.context_length),
+                iters_per_epoch=num_sample_ccres,
+                num_sample_ccres=num_sample_ccres,
+                input_flags=self.model.init_args["input_flags"],
+                dna_type=self.model.init_args["dna_type"],
+                bulk_name=eval_cfg.get("bulk_name", "N/A"),
+                seed=eval_seed,
+            )
 
             evaluator = Evaluator(self.model, test_set, batch_size=1, num_plots_to_log=5, device=self.device, seed=eval_seed)
 

@@ -7,3 +7,4 @@ assay: atac
 
 cell_types:
   K562:
+dataset_type: single

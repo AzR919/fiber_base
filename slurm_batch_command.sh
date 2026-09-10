@@ -1,15 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-09_00_test_fiber_coverage_vis_utils
-#SBATCH --account=def-maxwl_gpu
+#SBATCH --job-name=2026-09-09_01_eval_overhaul_smoke
+#SBATCH --account=def-maxwl_cpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-1:00:00
+#SBATCH --time=0-0:30:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 

@@ -8,3 +8,4 @@ assay: atac
 cell_types:
   GM12878:
   K562:
+dataset_type: mixed

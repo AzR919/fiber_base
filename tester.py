@@ -21,7 +21,7 @@ from args import get_args
 from data_utils import *
 from models import *
 from utils import *
-from eval_dataset import *
+from data_utils import *
 from evaluator import *
 from vis_utils import (
     plot_evaluation_dashboard_t,
@@ -73,7 +73,7 @@ def tester_2():
     data_config["input_flags"] = input_flags
     data_config["dna_type"] = "ref"
     data_config["iters_per_epoch"] = -1
-    dataset = fiber_data_iterator(**data_config)
+    dataset = SingleCellFiberDataset(**data_config)
     dataset.init_worker_resources()
     dataloader = DataLoader(dataset)
 
