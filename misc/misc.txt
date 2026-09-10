@@ -1,10 +1,12 @@
 \\wsl$\Ubuntu\home\azr\.ssh
 
 wsl ssh -fN fir        # opens socket for Claude Code (2FA here)
+wsl ssh -fN nibi
 wsl ls ~/.ssh/sockets/
 
 wsl ~/bin/mutagen sync list
-wsl ~/bin/mutagen sync create --name fiber --sync-mode two-way-safe --ignore "wandb/" --ignore "results/" --ignore "logs/" --ignore "ignore/" --ignore "__pycache__/" --ignore "*.pyc" --ignore "*.pyo" --ignore ".git/" "/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base" "nibi:/project/def-maxwl/azr/code/fiber_base"
+wsl ~/bin/mutagen sync create --name fiber --sync-mode two-way-safe --ignore "wandb/" --ignore "results/" --ignore "ignore/" --ignore "__pycache__/" --ignore "*.pyc" --ignore "*.pyo" --ignore ".git/" "/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base" "nibi:/project/def-maxwl/azr/code/fiber_base"
+wsl ~/bin/mutagen sync terminate fiber
 
 diskusage_report
 

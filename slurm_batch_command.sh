@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-08_test_fiber_coverage_vis_utils
+#SBATCH --job-name=2026-09-09_00_test_fiber_coverage_vis_utils
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
