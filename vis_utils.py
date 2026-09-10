@@ -454,10 +454,10 @@ def plot_evaluation_dashboard_t(
     inp_t: (B, C, L, N), out_t: (B, L), out_fibers_t: (B, L, N), tar_t: (B, L).
     locus: collated list-of-lists from DataLoader. cell_type: list[str].
     """
-    inp = inp_t[0].cpu().detach().numpy()
-    out = out_t[0].cpu().detach().numpy()
-    out_fibers = out_fibers_t[0].cpu().detach().numpy()
-    tar = tar_t[0].cpu().detach().numpy()
+    inp = inp_t[0].cpu().detach().float().numpy()
+    out = out_t[0].cpu().detach().float().numpy()
+    out_fibers = out_fibers_t[0].cpu().detach().float().numpy()
+    tar = tar_t[0].cpu().detach().float().numpy()
     # locus can be a plain (chrom, start, end) tuple or DataLoader-collated ([chroms], tensor, tensor)
     if isinstance(locus[0], (list, tuple)):
         locus_tup = (locus[0][0], int(locus[1][0]), int(locus[2][0]))
@@ -486,16 +486,16 @@ def plot_single_column_fiber_stack_t(
     processed_fibers_t: (L,N) or (1,L,N).
     filter_fn receives (fiber_idx, fiber_seq_inp_np) where fiber_seq_inp_np is (C,L,N) numpy.
     """
-    true_bulk = true_bulk_t.squeeze().cpu().detach().numpy()
-    pred_bulk = pred_bulk_t.squeeze().cpu().detach().numpy()
+    true_bulk = true_bulk_t.squeeze().cpu().detach().float().numpy()
+    pred_bulk = pred_bulk_t.squeeze().cpu().detach().float().numpy()
 
     if fiber_seq_inp_t.dim() == 4:
         fiber_seq_inp_t = fiber_seq_inp_t[0]
-    fiber_seq_inp = fiber_seq_inp_t.cpu().detach().numpy()
+    fiber_seq_inp = fiber_seq_inp_t.cpu().detach().float().numpy()
 
     if processed_fibers_t.dim() == 3:
         processed_fibers_t = processed_fibers_t[0]
-    processed_fibers = processed_fibers_t.cpu().detach().numpy()
+    processed_fibers = processed_fibers_t.cpu().detach().float().numpy()
 
     return plot_single_column_fiber_stack(
         true_bulk, pred_bulk, fiber_seq_inp, processed_fibers,
@@ -515,10 +515,10 @@ def plot_evaluator_record_t(record_t, input_flags, loss=0.0, ct_losses={}, bulk_
     squeeze_keys = {"fiber_features", "processed_fibers", "pred_bulk", "target_bulk"}
     for k, v in record_t.items():
         if k in squeeze_keys and isinstance(v, torch.Tensor):
-            record[k] = v[0].cpu().detach().numpy()
+            record[k] = v[0].cpu().detach().float().numpy()
         elif k in ("pred_cell_type_bulks", "target_cell_type_bulks") and isinstance(v, dict):
             record[k] = {
-                ct: (t[0].cpu().detach().numpy() if isinstance(t, torch.Tensor) else t)
+                ct: (t[0].cpu().detach().float().numpy() if isinstance(t, torch.Tensor) else t)
                 for ct, t in v.items()
             }
         elif k == "locus":
@@ -536,5 +536,5 @@ def plot_dna_tensor_logo_t(dna_tensor_t, region_slice=None, title="Fiber Consens
     """
     if dna_tensor_t.dim() == 4:
         dna_tensor_t = dna_tensor_t[0]
-    dna_arr = dna_tensor_t.cpu().detach().numpy()
+    dna_arr = dna_tensor_t.cpu().detach().float().numpy()
     return plot_dna_tensor_logo(dna_arr, region_slice, title)
