@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-09_01_eval_overhaul_smoke
+#SBATCH --job-name=2026-09-09_02_gm_atac_smoke
 #SBATCH --account=def-maxwl_cpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -36,10 +36,10 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
 # Run the training
 python main.py \
-  --data_config configs/data/data00.yaml \
+  --data_config configs/data/data12_gm_atac.yaml \
   --model_config configs/models/model00.yaml \
   --train_config configs/training/train00.yaml \
-  --eval_config_path configs/evals/eval00.yaml \
+  --eval_config_path configs/evals/eval12_gm_atac.yaml \
   --name_prefix test \
   --name_suffix smoke
 

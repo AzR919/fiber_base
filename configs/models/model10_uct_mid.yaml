@@ -1,0 +1,10 @@
+# UNet03 conv-transformer, mid-size
+# kernel_size=15, tf_layers=2 — fits in 20GB MIG slice
+
+model: "unet03"
+input_flags: [1, 1, 1, 1, 1]
+kernel_size: 15
+dna_type: "ref"
+tf_heads: 4
+tf_layers: 2
+emb_dims: [8, 24, 48, 96]

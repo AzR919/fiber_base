@@ -1,0 +1,10 @@
+# GM12878 ATAC-seq, single-cell training
+
+context_length: 5000
+fibers_per_entry: 200
+bulk_name: ATAC_seq_p
+assay: atac
+dataset_type: single
+
+cell_types:
+  GM12878:

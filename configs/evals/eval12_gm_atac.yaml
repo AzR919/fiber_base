@@ -1,0 +1,12 @@
+# GM12878 ATAC-seq, single-cell eval
+
+context_length: 5000
+fibers_per_entry: 200
+num_sample_ccres: -1
+bulk_name: ATAC_seq_p
+seed: 919
+assay: atac
+dataset_type: single
+
+cell_types:
+  GM12878:
