@@ -1,14 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-09_02_gm_atac_smoke
-#SBATCH --account=def-maxwl_cpu
+#SBATCH --job-name=2026-09-09_03_gm12878_atac_uct_mid
+#SBATCH --account=def-maxwl_gpu
+#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-0:30:00
+#SBATCH --time=0-4:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -37,11 +38,10 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Run the training
 python main.py \
   --data_config configs/data/data12_gm_atac.yaml \
-  --model_config configs/models/model00.yaml \
-  --train_config configs/training/train00.yaml \
+  --model_config configs/models/model10_uct_mid.yaml \
+  --train_config configs/training/train01.yaml \
   --eval_config_path configs/evals/eval12_gm_atac.yaml \
-  --name_prefix test \
-  --name_suffix smoke
+  --name_prefix run
 
 # Print job completion time
 echo "Job finished on $(date)"

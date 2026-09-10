@@ -15,13 +15,165 @@ assay_base_paths:
 # null = file not yet available on cluster; add filename when ready
 # To add a new cell type: add a block here — no code changes needed
 cell_types:
+
+  # --- Fully configured (fiber + bulk assays) ---
   GM12878:
     fiber_seq: GM12878-fire-v0.1-filtered.cram
     atac:      GM12878_ENCFF667MDI_ATAC_seq_signal.bigWig
     h3k4me3:   GM12878_ENCFF012DMX_H3K4me3_signal.bigWig
     h3k27ac:   null
-  K562:
+  K562_200U:
     fiber_seq: K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram
     atac:      K562_ENCFF357GNC_ATAC_seq_signal.bigWig
     h3k4me3:   K562_ENCFF071GML_H3K4me3_signal.bigWig
     h3k27ac:   null
+  A549_200U:
+    fiber_seq: A549_Fiber_seq_200U_1M_cells_200U_PS01302-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Caco_2_100U:
+    fiber_seq: Caco_2_Fiber_seq_100U_1M_cells_100U_PS01319-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  GM25455_LCL:
+    fiber_seq: GM25455_LCL_PS01520-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  GM25456_Fibroblast:
+    fiber_seq: GM25456_Fibroblast_PS01519-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  GM27730_iPSC:
+    fiber_seq: GM27730_iPSC_PS01524-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  GM28570_LCL:
+    fiber_seq: GM28570_LCL_PS01518-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  GM28572_Fibroblast:
+    fiber_seq: GM28572_Fibroblast_PS01517-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  H1_100U:
+    fiber_seq: H1_Fiber_seq_100U_1M_cells_100U_PS01372-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  H1_200U:
+    fiber_seq: H1_Fiber_seq_200U_1M_cells_200U_PS01373-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  H9_100U:
+    fiber_seq: H9_Fiber_seq_100U_1M_cells_100U_PS01375-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  H9_200U:
+    fiber_seq: H9_Fiber_seq_200U_1M_cells_200U_PS01376-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HAP1:
+    fiber_seq: HAP1_PS01280-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Hap1_100U:
+    fiber_seq: Hap1_Fiber_seq_100U_1M_cells_100U_PS01366-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Hap1_200U:
+    fiber_seq: Hap1_Fiber_seq_200U_1M_cells_200U_PS01367-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HCT116_200U:
+    fiber_seq: HCT116_Fiber_seq_200U_1M_cells_200U_PS01314-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Hek293T_200U:
+    fiber_seq: Hek293T_Fiber_seq_200U_1M_cells_200U_PS01332-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HepG2_100U:
+    fiber_seq: HepG2_Fiber_seq_100U_1M_cells_100U_PS01307-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HepG2_200U:
+    fiber_seq: HepG2_Fiber_seq_200U_1M_cells_200U_PS01308-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HG008_3E4:
+    fiber_seq: HG008_3E4_PS01682-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HG008_SC14:
+    fiber_seq: HG008_SC14_PS01680-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  HG008_SC24:
+    fiber_seq: HG008_SC24_PS01684-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Jurkat_100U:
+    fiber_seq: Jurkat_Fiber_seq_100U_1M_cells_100U_PS01328-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Jurkat_200U:
+    fiber_seq: Jurkat_Fiber_seq_200U_1M_cells_200U_PS01329-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  K562_100U:
+    fiber_seq: K562_Fiber_seq_100U_1M_cells_100U_PS01369-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  MCF_7_200U:
+    fiber_seq: MCF_7_Fiber_seq_200U_1M_cells_200U_PS01305-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Panc1_100U:
+    fiber_seq: Panc1_Fiber_seq_100U_1M_cells_100U_PS01316-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  Panc1_200U:
+    fiber_seq: Panc1_Fiber_seq_200U_1M_cells_200U_PS01317-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  THP_1_100U:
+    fiber_seq: THP_1_Fiber_seq_100U_1M_cells_100U_PS01325-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  THP_1_200U:
+    fiber_seq: THP_1_Fiber_seq_200U_1M_cells_200U_PS01326-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
+  WTC_11_200U:
+    fiber_seq: WTC_11_Fiber_seq_200U_1M_cells_200U_PS01388-fire-v0.1-filtered.cram
+    atac: null
+    h3k4me3: null
+    h3k27ac: null
