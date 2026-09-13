@@ -4,7 +4,7 @@ setlocal
 :: Target cluster: pass as first arg (default: nibi)
 if "%~1"=="" (set TARGET=nibi) else (set TARGET=%~1)
 
-set SESSION=fiber_%TARGET%
+set SESSION=fiber-%TARGET%
 set REMOTE=%TARGET%:/project/def-maxwl/azr/code/fiber_base
 set LOCAL=/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base
 
