@@ -8,9 +8,10 @@ wsl ~/bin/mutagen sync list
 wsl ~/bin/mutagen sync create --name fiber --sync-mode two-way-safe --ignore "wandb/" --ignore "results/" --ignore "ignore/" --ignore "__pycache__/" --ignore "*.pyc" --ignore "*.pyo" --ignore ".git/" "/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base" "nibi:/project/def-maxwl/azr/code/fiber_base"
 wsl ~/bin/mutagen sync terminate fiber
 
+cluster commands
+
+module load gcc arrow/19.0.1 cuda rust/1.95.0
 diskusage_report
-
 squeue or sq
-
 salloc --cpus-per-task=2 --mem=30G --time=3:00:00
 srun --cpus-per-task=2 --gpus-per-node=nvidia_h100_80gb_hbm3_3g.40gb:1 --mem=16G --time=3:00:00 --pty bash
