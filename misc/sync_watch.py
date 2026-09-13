@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Event-driven local→remote sync using rsync + watchdog.
-Usage: sync-watch.py <local_dir> <remote:path> [--reverse] [--interval N]
+Usage: sync_watch.py <local_dir> <remote:path> [--reverse] [--interval N]
 
 --reverse    Also poll remote→local every N seconds (default 5)
 --interval N Reverse poll interval in seconds (default 5)

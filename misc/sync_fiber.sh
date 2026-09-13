@@ -16,7 +16,7 @@ LOCAL="$(cd "$SCRIPT_DIR/.." && pwd)"
 REMOTE="${TARGET}:/project/def-maxwl/azr/code/fiber_base"
 
 # Check for an existing sync process for this target
-if pgrep -f "sync-watch.py.*${TARGET}" > /dev/null 2>&1; then
+if pgrep -f "sync_watch.py.*${TARGET}" > /dev/null 2>&1; then
     echo "[sync] Session for '${TARGET}' already running."
     exit 0
 fi
@@ -24,4 +24,4 @@ fi
 # Open SSH ControlMaster socket (no-op if already open)
 ssh -fN "$TARGET" 2>/dev/null || true
 
-exec python3 "$SCRIPT_DIR/sync-watch.py" "$LOCAL" "$REMOTE" --reverse
+exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE" --reverse
