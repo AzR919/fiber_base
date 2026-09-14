@@ -3,8 +3,9 @@
 Event-driven local→remote sync using rsync + watchdog.
 Usage: sync_watch.py <local_dir> <remote:path> [--reverse] [--interval N]
 
+On startup: pulls remote → local (remote is ground truth).
+While running: pushes local saves → remote.
 --reverse    Also poll remote→local every N seconds (default 5)
---interval N Reverse poll interval in seconds (default 5)
 """
 
 import sys
@@ -99,8 +100,9 @@ def main():
         print(f"[sync] Reverse poll every {args.interval}s")
     print("[sync] Press Ctrl+C to stop.\n")
 
-    # Initial full sync on startup
-    run_rsync(local_dir.rstrip("/") + "/", args.remote.rstrip("/") + "/", label="initial")
+    # Remote is ground truth: pull remote → local before starting the watcher
+    print("[sync] Pulling from remote (remote is ground truth)...")
+    run_rsync(args.remote.rstrip("/") + "/", local_dir.rstrip("/") + "/", label="remote→local (init)")
 
     handler = DebounceHandler(local_dir, args.remote)
     observer = Observer()
