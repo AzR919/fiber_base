@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sync fiber_base to a remote cluster (macOS — uses rsync + watchdog).
-# Usage: sync-fiber.sh <target>
+# Usage: sync_fiber.sh <target>
 #   target: SSH host name, e.g. nibi or fir
 
 set -e
@@ -24,4 +24,4 @@ fi
 # Open SSH ControlMaster socket (no-op if already open)
 ssh -fN "$TARGET" 2>/dev/null || true
 
-exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE" --reverse
+exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE"

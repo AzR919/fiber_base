@@ -11,6 +11,13 @@ set LOCAL=/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base
 :: Open SSH socket (2FA happens here if not already alive)
 wsl ssh -fN %TARGET% 2>nul
 
+:: Remote is ground truth: pull remote → local before starting Mutagen
+echo [sync] Pulling from remote (remote is ground truth)...
+wsl rsync -avz --delete ^
+  --exclude="wandb/" --exclude="results/" --exclude="ignore/" ^
+  --exclude="__pycache__/" --exclude="*.pyc" --exclude="*.pyo" --exclude=".git/" ^
+  %REMOTE%/ %LOCAL%/
+
 :: Check if a session for this target already exists
 wsl bash -c "~/bin/mutagen sync list 2>/dev/null | grep -q '%SESSION%'" && (
     echo [sync] Session "%SESSION%" already running. Use "wsl ~/bin/mutagen sync list" to check status.
