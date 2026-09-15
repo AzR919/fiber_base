@@ -116,6 +116,9 @@ class Trainer:
         train_losses = []
         val_losses = []
 
+        if self.device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+
         for epoch in range(self.epochs):
             if hasattr(self.train_dataset, "set_epoch"):
                 self.train_dataset.set_epoch(epoch)
@@ -126,8 +129,13 @@ class Trainer:
             train_meter = AverageMeter()
             last_t_batch, last_t_output, last_t_fibers = None, None, None
 
-            for batch in train_loader:
+            for i, batch in enumerate(train_loader):
                 t_loss, t_output, t_processed_fibers = self.train_step(batch)
+                if epoch == 0 and i == 0 and self.device.type == "cuda":
+                    peak_mb = torch.cuda.max_memory_allocated() / 1024**2
+                    alloc_mb = torch.cuda.memory_allocated() / 1024**2
+                    print(f"GPU memory after first step — peak: {peak_mb:.0f} MB | current: {alloc_mb:.0f} MB", flush=True)
+                    self.wandb_run.log({"gpu_peak_mb": peak_mb, "gpu_alloc_mb": alloc_mb})
                 train_meter.update(t_loss, n=batch["fiber_features"].size(0))
                 last_t_batch = batch
                 last_t_output = t_output
