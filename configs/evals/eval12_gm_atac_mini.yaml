@@ -1,8 +1,10 @@
-# GM12878 ATAC-seq, single-cell training
+# GM12878 ATAC-seq, single-cell eval — 500 cCRE subset for mid-training checks
 
 context_length: 5000
 fibers_per_entry: 100
+num_sample_ccres: 500
 bulk_name: ATAC_seq_p
+seed: 919
 assay: atac
 dataset_type: single
 
