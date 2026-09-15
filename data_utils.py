@@ -220,7 +220,13 @@ class SingleCellFiberDataset(IterableDataset):
                                         other_tensor, locus, cell_type_name)
 
         else:  # eval mode: deterministic, no retry
-            ccre_iter = self.ccre_list if self.num_sample_ccres == -1 else self.ccre_list[:self.num_sample_ccres]
+            if self.num_sample_ccres == -1:
+                ccre_iter = self.ccre_list
+            else:
+                rng = np.random.default_rng(self.seed)
+                n = min(self.num_sample_ccres, len(self.ccre_list))
+                idx = np.sort(rng.choice(len(self.ccre_list), size=n, replace=False))
+                ccre_iter = self.ccre_list[idx]
 
             for ccre_entry in ccre_iter:
                 locus = self.expand_ccre_locus(*ccre_entry, jitter_range=0)
@@ -421,7 +427,13 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
                 yield self._build_composite_sample(locus, cell_samples)
 
         else:  # eval mode: deterministic, no retry
-            ccre_iter_list = self.ccre_list if self.num_sample_ccres == -1 else self.ccre_list[:self.num_sample_ccres]
+            if self.num_sample_ccres == -1:
+                ccre_iter_list = self.ccre_list
+            else:
+                rng = np.random.default_rng(self.seed)
+                n = min(self.num_sample_ccres, len(self.ccre_list))
+                idx = np.sort(rng.choice(len(self.ccre_list), size=n, replace=False))
+                ccre_iter_list = self.ccre_list[idx]
 
             for ccre_locus in ccre_iter_list:
                 locus = self.expand_ccre_locus(*ccre_locus, jitter_range=0)
