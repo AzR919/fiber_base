@@ -386,7 +386,7 @@ def plot_evaluator_record(record, input_flags, loss=0.0, ct_losses={}, bulk_name
 
     ax_comp = fig.add_subplot(rhs_gs[0, 0])
     _render_bulk_comparison(ax_comp, target_bulk, pred_bulk, chr_info, instance_loss, mode, bulk_name, loss,
-                            cell_type="Mixed" if len(cell_types) > 1 else cell_types[0])
+                            cell_type="Mixed" if len(cell_types) > 1 else (cell_types[0] if cell_types else "Single Cell"))
 
     ax_heat = fig.add_subplot(rhs_gs[1, 0], sharex=ax_comp)
     _render_fiber_heatmap(ax_heat, processed_fibers)
