@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-09_03_gm12878_atac_uct_mid
+#SBATCH --job-name=2026-09-13_02_gm12878_atac_test
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -9,7 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-4:00:00
+#SBATCH --time=0-1:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -40,8 +40,9 @@ python main.py \
   --data_config configs/data/data12_gm_atac.yaml \
   --model_config configs/models/model10_uct_mid.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config_path configs/evals/eval12_gm_atac.yaml \
-  --name_prefix run
+  --eval_config_path configs/evals/eval12_gm_atac_mini.yaml \
+  --name_prefix test \
+  --epochs 2
 
 # Print job completion time
 echo "Job finished on $(date)"
