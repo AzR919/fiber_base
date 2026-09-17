@@ -37,15 +37,15 @@ def main():
 
     model = model_selector(args.model, args)
 
-    trainer = Trainer(model, train_dataset, val_dataset,
-                          wandb_run=wandb_run, epochs=args.epochs,
-                          batch_size=args.batch_size, config=args)
-
     wandb_run = setup_wandb_run(args, model, with_test_loss=args.eval_config_path is not None)
     if wandb_run is None: return
 
     input_size = (args.batch_size, sum(args.input_flags), args.context_length, args.fibers_per_entry)
     print_model_summary(model, input_size)
+
+    trainer = Trainer(model, train_dataset, val_dataset,
+                          wandb_run=wandb_run, epochs=args.epochs,
+                          batch_size=args.batch_size, config=args)
 
     trainer.train(save_dir=res_dir)
 
