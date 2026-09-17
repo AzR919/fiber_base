@@ -8,10 +8,12 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
+import wandb
 from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 
+from data_utils import make_fiber_dataset
 from metrics import mse_loss
 from utils import *
 from vis_utils import plot_evaluator_record_t
@@ -130,3 +132,62 @@ class Evaluator:
             "locus_records": locus_records,
             "num_locus": valid_locus_count * self.batch_size,
         }
+
+
+def run_final_eval(model, eval_config_path, train_args, wandb_run, device):
+    """Build eval dataset from config, run Evaluator, log results to wandb_run."""
+    print("\n" + "=" * 60)
+    print(" Running Final Model Test & Deconvolution Dashboard...")
+    print("=" * 60)
+
+    eval_cfg = load_config_file(eval_config_path)
+    metapaths = None
+    if hasattr(train_args, "metapaths") and os.path.exists(train_args.metapaths):
+        metapaths = load_metapaths(train_args.metapaths)
+
+    if metapaths and "assay" in eval_cfg:
+        eval_metadata = resolve_config_with_metapaths(eval_cfg, metapaths)
+    else:
+        eval_metadata = eval_cfg.get("metadata", {})
+
+    eval_seed = eval_cfg.get("seed", 919)
+    num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
+    test_set = make_fiber_dataset(
+        eval_cfg.get("dataset_type", "mixed"),
+        mode="eval",
+        metadata=eval_metadata,
+        fibers_per_entry=eval_cfg.get("fibers_per_entry", train_args.fibers_per_entry),
+        context_length=eval_cfg.get("context_length", train_args.context_length),
+        iters_per_epoch=num_sample_ccres,
+        num_sample_ccres=num_sample_ccres,
+        input_flags=model.init_args["input_flags"],
+        dna_type=model.init_args["dna_type"],
+        bulk_name=eval_cfg.get("bulk_name", "N/A"),
+        seed=eval_seed,
+    )
+
+    evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed)
+    eval_results = evaluator.evaluate()
+    test_log_dict = {"test_loss": eval_results["composite"]["loss"]}
+
+    locus_records = eval_results.get("locus_records", [])
+    wandb_image_list = []
+    for idx, record in enumerate(locus_records):
+        fig = plot_evaluator_record_t(
+            record_t=record,
+            input_flags=test_set.input_flags,
+            loss=eval_results["composite"]["loss"],
+            ct_losses=eval_results["per_cell_type"],
+            bulk_name=test_set.bulk_name,
+            mode="Test"
+        )
+        chr_name = record["locus"][0][0]
+        start = record["locus"][1][0]
+        end = record["locus"][2][0]
+        caption = f"Locus {idx}/{eval_results['num_locus']}: {chr_name}:{start}-{end}"
+        wandb_image_list.append(wandb.Image(fig, caption=caption))
+        plt.close(fig)
+
+    test_log_dict["Evaluation/Deconvolution_Dashboards"] = wandb_image_list
+    wandb_run.log(test_log_dict)
+    print(f" Successfully logged {len(wandb_image_list)} evaluation dashboards to WandB!")

@@ -3,7 +3,6 @@ Main training loop and execution manager.
 """
 
 import os
-import sys
 import wandb
 
 import torch
@@ -12,20 +11,17 @@ from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 
-from evaluator import Evaluator
-from data_utils import make_fiber_dataset
 from utils import *
-from vis_utils import plot_evaluation_dashboard_t, plot_loss, plot_evaluator_record_t
+from vis_utils import plot_evaluation_dashboard_t, plot_loss
 
 class Trainer:
-    def __init__(self, model, train_dataset, val_dataset=None, eval_config_path=None,
-                 epochs=10, batch_size=32, lr=1e-4, patience=5,
-                 run_name="debug", config=None):
+    def __init__(self, model, train_dataset, val_dataset=None, wandb_run=None,
+                 epochs=10, batch_size=32, lr=1e-4, patience=5, config=None):
 
         self.model = model
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
-        self.eval_config_path = eval_config_path
+        self.wandb_run = wandb_run
         self.epochs = epochs
         self.batch_size = batch_size
         self.config = config
@@ -40,33 +36,7 @@ class Trainer:
         )
         self.criterion = nn.MSELoss()
 
-        # Initialize Gradient Scaler for Automatic Mixed Precision (AMP)
         self.scaler = torch.amp.GradScaler(self.device)
-
-        if hasattr(config, "input_flags") and sum(config.input_flags) == 0:
-            print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
-            wandb.init(entity="liblab", project="Fiber", name=run_name, config=config)
-            wandb.log({"train_loss": float('inf'), "val_loss": float('inf'), "epoch": 0})
-            sys.exit(0)
-
-        if "sweep" in run_name.lower() and hasattr(config, "input_flags"):
-            run_name += self._build_run_name_suffix(config.input_flags)
-
-        self.wandb_run = wandb.init(
-            entity="liblab",
-            project="fiber",
-            name=run_name,
-            config=config,
-        )
-
-        self.wandb_run.watch(self.model)
-
-        wandb.define_metric("epoch")
-        wandb.define_metric("train_loss", step_metric="epoch")
-        wandb.define_metric("val_loss", step_metric="epoch")
-        if eval_config_path is not None:
-            wandb.define_metric("test_loss")
-        wandb.watch(model, log="all")
 
     def train_step(self, batch):
         self.model.train()
@@ -210,90 +180,6 @@ class Trainer:
         # Final loss summary curve & model save
         plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
         self.model.save_model(save_dir, self.epochs, external_config=self.config)
-
-        if self.eval_config_path is not None:
-            # -------------------------------------------------------------------------
-            # Testing & WandB Logging
-            # -------------------------------------------------------------------------
-            print("\n" + "=" * 60)
-            print(" Running Final Model Test & Deconvolution Dashboard...")
-            print("=" * 60)
-
-            eval_cfg = load_config_file(self.eval_config_path)
-            metapaths = None
-            if hasattr(self.config, "metapaths") and os.path.exists(self.config.metapaths):
-                metapaths = load_metapaths(self.config.metapaths)
-
-            if metapaths and "assay" in eval_cfg:
-                metadata = resolve_config_with_metapaths(eval_cfg, metapaths)
-            else:
-                metadata = eval_cfg.get("metadata", {})
-
-            eval_seed = eval_cfg.get("seed", 919)
-            num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
-            test_set = make_fiber_dataset(
-                eval_cfg.get("dataset_type", "mixed"),
-                mode="eval",
-                metadata=metadata,
-                fibers_per_entry=eval_cfg.get("fibers_per_entry", self.config.fibers_per_entry),
-                context_length=eval_cfg.get("context_length", self.config.context_length),
-                iters_per_epoch=num_sample_ccres,
-                num_sample_ccres=num_sample_ccres,
-                input_flags=self.model.init_args["input_flags"],
-                dna_type=self.model.init_args["dna_type"],
-                bulk_name=eval_cfg.get("bulk_name", "N/A"),
-                seed=eval_seed,
-            )
-
-            evaluator = Evaluator(self.model, test_set, batch_size=1, num_plots_to_log=5, device=self.device, seed=eval_seed)
-
-            eval_results = evaluator.evaluate()
-            test_log_dict = {"test_loss": eval_results["composite"]["loss"]}
-
-            # Select locus records to visualize (e.g., top N samples or first N samples)
-            locus_records = eval_results.get("locus_records", [])
-            wandb_image_list = []
-
-            for idx, record in enumerate(locus_records):
-
-                # Generate the 2-column deconvolution plot
-                fig = plot_evaluator_record_t(
-                    record_t=record,
-                    input_flags=test_set.input_flags,
-                    loss=eval_results["composite"]["loss"],
-                    ct_losses=eval_results["per_cell_type"],
-                    bulk_name=test_set.bulk_name,
-                    mode="Test"
-                )
-
-                # Extract locus info for clean WandB image captioning
-                chr_name = record["locus"][0][0]
-                start = record["locus"][1][0]
-                end = record["locus"][2][0]
-                num_locus = eval_results["num_locus"]
-                caption = f"Locus {idx}/{num_locus}: {chr_name}:{start}-{end}"
-
-                # Convert Matplotlib figure to wandb.Image
-                wandb_image_list.append(
-                    wandb.Image(fig, caption=caption)
-                )
-
-                # Always close local figures to prevent memory leaks in Matplotlib
-                plt.close(fig)
-
-            # Log all dashboard figures under a dedicated gallery panel in WandB
-            test_log_dict["Evaluation/Deconvolution_Dashboards"] = wandb_image_list
-            wandb.log(test_log_dict)
-
-            print(f" Successfully logged {len(wandb_image_list)} evaluation dashboards to WandB!")
-
-    def _build_run_name_suffix(self, input_flags):
-        feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
-        sup_str = ""
-        for name, flag in zip(feature_names, input_flags):
-            if flag:
-                sup_str += f"_{name}"
-        return sup_str
 
 
 #--------------------------------------------------------------------------------------------------

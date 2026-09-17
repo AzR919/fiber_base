@@ -12,6 +12,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import wandb
 
 from torchinfo import summary as torchinfo_summary
 
@@ -210,6 +211,34 @@ def print_gpu_memory(stage=""):
 
         print(f"[{stage}] Allocated: {allocated:.2f} GB | Peak Allocated: {max_allocated:.2f} GB | Reserved: {reserved:.2f} GB")
 
+
+#--------------------------------------------------------------------------------------------------
+# Wandb Setup
+
+def build_run_name(base_name, config):
+    name = base_name
+    if "sweep" in name.lower() and hasattr(config, "input_flags"):
+        feature_names = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
+        name += "".join(f"_{n}" for n, f in zip(feature_names, config.input_flags) if f)
+    return name
+
+def setup_wandb_run(config, model, with_test_loss=False):
+
+    if hasattr(config, "input_flags") and sum(config.input_flags) == 0:
+        print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
+        wandb.init(entity="liblab", project="Fiber", name=get_config_names_str(config), config=config)
+        wandb.log({"train_loss": float('inf'), "val_loss": float('inf'), "epoch": 0})
+        return None
+
+    run_name = build_run_name(get_config_names_str(config), config)
+    run = wandb.init(entity="liblab", project="fiber", name=run_name, config=config)
+    wandb.define_metric("epoch")
+    wandb.define_metric("train_loss", step_metric="epoch")
+    wandb.define_metric("val_loss", step_metric="epoch")
+    if with_test_loss:
+        wandb.define_metric("test_loss")
+    wandb.watch(model, log="all")
+    return run
 
 #--------------------------------------------------------------------------------------------------
 # Testing
