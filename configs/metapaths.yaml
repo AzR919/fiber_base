@@ -10,6 +10,7 @@ assay_base_paths:
   atac:      /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/atac_multi_cell
   h3k4me3:   /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k4me3_multi_cell
   h3k27ac:   /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k27ac_multi_cell
+  h3k27me3:  /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/h3k27me3_multi_cell
 
 # Per-cell-type filenames (signal/p-value variants only)
 # null = file not yet available on cluster; add filename when ready
@@ -21,12 +22,14 @@ cell_types:
     fiber_seq: GM12878-fire-v0.1-filtered.cram
     atac:      GM12878_ENCFF667MDI_ATAC_seq_signal.bigWig
     h3k4me3:   GM12878_ENCFF012DMX_H3K4me3_signal.bigWig
-    h3k27ac:   null
+    h3k27ac:   GM12878_ENCFF798KYP_H3K27ac_signal.bigWig
+    h3k27me3:  GM12878_ENCFF677PYB_H3K27me3_signal.bigWig
   K562_200U:
     fiber_seq: K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram
     atac:      K562_ENCFF357GNC_ATAC_seq_signal.bigWig
     h3k4me3:   K562_ENCFF071GML_H3K4me3_signal.bigWig
-    h3k27ac:   null
+    h3k27ac:   K562_ENCFF465GBD_H3K27ac_signal.bigWig
+    h3k27me3:  K562_ENCFF847BFA_H3K27me3_signal.bigWig
   A549_200U:
     fiber_seq: A549_Fiber_seq_200U_1M_cells_200U_PS01302-fire-v0.1-filtered.cram
     atac: null
@@ -114,9 +117,10 @@ cell_types:
     h3k27ac: null
   HepG2_200U:
     fiber_seq: HepG2_Fiber_seq_200U_1M_cells_200U_PS01308-fire-v0.1-filtered.cram
-    atac: null
-    h3k4me3: null
-    h3k27ac: null
+    atac:      HepG2_ENCFF262URW_ATAC_seq_signal.bigWig
+    h3k4me3:   HepG2_ENCFF699QAQ_H3K4me3_signal.bigWig
+    h3k27ac:   HepG2_ENCFF493VUL_H3K27ac_signal.bigWig
+    h3k27me3:  HepG2_ENCFF896BFP_H3K27me3_signal.bigWig
   HG008_3E4:
     fiber_seq: HG008_3E4_PS01682-fire-v0.1-filtered.cram
     atac: null
