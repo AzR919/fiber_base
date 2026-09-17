@@ -9,7 +9,11 @@ set REMOTE=%TARGET%:/project/def-maxwl/azr/code/fiber_base
 set LOCAL=/mnt/c/Users/azaan/Documents/SFU/Lab/code_base/fiber_base
 
 :: Open SSH socket (2FA happens here if not already alive)
-wsl ssh -fN %TARGET% 2>nul
+wsl ssh -fN %TARGET%
+if %ERRORLEVEL% neq 0 (
+    echo [sync] ERROR: SSH connection to '%TARGET%' failed.
+    exit /b 1
+)
 
 :: Remote is ground truth: pull remote → local before starting Mutagen
 echo [sync] Pulling from remote (remote is ground truth)...

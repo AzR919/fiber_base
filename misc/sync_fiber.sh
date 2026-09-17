@@ -17,6 +17,9 @@ if pgrep -f "sync_watch.py.*${TARGET}" > /dev/null 2>&1; then
 fi
 
 # Open SSH ControlMaster socket (no-op if already open)
-ssh -fN "$TARGET" 2>/dev/null || true
+if ! ssh -fN "$TARGET"; then
+    echo "[sync] ERROR: SSH connection to '$TARGET' failed." >&2
+    exit 1
+fi
 
 exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE" --reverse
