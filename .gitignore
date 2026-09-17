@@ -208,6 +208,7 @@ __marimo__/
 
 
 ignore/
+plots/
 results/
 logs/
 wandb/

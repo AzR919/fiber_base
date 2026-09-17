@@ -5,12 +5,7 @@
 
 set -e
 
-if [[ -z "$1" ]]; then
-    echo "Usage: $(basename "$0") <target>  (e.g. nibi, fir)" >&2
-    exit 1
-fi
-
-TARGET="$1"
+TARGET="${1:-nibi}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL="$(cd "$SCRIPT_DIR/.." && pwd)"
 REMOTE="${TARGET}:/project/def-maxwl/azr/code/fiber_base"
@@ -24,4 +19,4 @@ fi
 # Open SSH ControlMaster socket (no-op if already open)
 ssh -fN "$TARGET" 2>/dev/null || true
 
-exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE"
+exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE" --reverse
