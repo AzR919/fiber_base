@@ -86,6 +86,8 @@ def main():
                         help="Also poll remote→local periodically")
     parser.add_argument("--interval", type=int, default=5,
                         help="Reverse poll interval in seconds (default: 5)")
+    parser.add_argument("--no-pull", action="store_true",
+                        help="Skip the initial remote→local pull on startup")
     args = parser.parse_args()
 
     local_dir = str(Path(args.local_dir).expanduser().resolve())
@@ -101,8 +103,11 @@ def main():
     print("[sync] Press Ctrl+C to stop.\n")
 
     # Remote is ground truth: pull remote → local before starting the watcher
-    print("[sync] Pulling from remote (remote is ground truth)...")
-    run_rsync(args.remote.rstrip("/") + "/", local_dir.rstrip("/") + "/", label="remote→local (init)")
+    if args.no_pull:
+        print("[sync] Skipping initial pull (--no-pull).")
+    else:
+        print("[sync] Pulling from remote (remote is ground truth)...")
+        run_rsync(args.remote.rstrip("/") + "/", local_dir.rstrip("/") + "/", label="remote→local (init)")
 
     handler = DebounceHandler(local_dir, args.remote)
     observer = Observer()

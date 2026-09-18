@@ -1,11 +1,21 @@
 #!/bin/bash
 # Sync fiber_base to a remote cluster (macOS — uses rsync + watchdog).
-# Usage: sync_fiber.sh <target>
-#   target: SSH host name, e.g. nibi or fir
+# Usage: sync_fiber.sh [--no-pull] [target]
+#   target:     SSH host name, e.g. nibi or fir (default: nibi)
+#   --no-pull:  skip the initial remote→local pull
 
 set -e
 
-TARGET="${1:-nibi}"
+TARGET=""
+NO_PULL=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-pull) NO_PULL=1 ;;
+        *) [ -z "$TARGET" ] && TARGET="$arg" ;;
+    esac
+done
+TARGET="${TARGET:-nibi}"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL="$(cd "$SCRIPT_DIR/.." && pwd)"
 REMOTE="${TARGET}:/project/def-maxwl/azr/code/fiber_base"
@@ -22,4 +32,6 @@ if ! ssh -fN "$TARGET"; then
     exit 1
 fi
 
-exec python3 "$SCRIPT_DIR/sync_watch.py" "$LOCAL" "$REMOTE" --reverse
+WATCH_ARGS=("$LOCAL" "$REMOTE" --reverse)
+[ "$NO_PULL" -eq 1 ] && WATCH_ARGS+=(--no-pull)
+exec python3 "$SCRIPT_DIR/sync_watch.py" "${WATCH_ARGS[@]}"
