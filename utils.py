@@ -73,30 +73,31 @@ def load_config_file(config_path):
 def load_metapaths(path: str) -> dict:
     return load_config_file(path)
 
-def resolve_config_with_metapaths(config: dict, metapaths: dict) -> dict:
-    assay = config.get("assay")
-    if assay not in metapaths["assay_base_paths"]:
-        raise ValueError(f"assay '{assay}' not in metapaths.assay_base_paths")
+def resolve_config_with_metapaths(config: dict, metapaths: dict, output_assays: list) -> dict:
+    for assay in output_assays:
+        if assay not in metapaths["assay_base_paths"]:
+            raise ValueError(f"assay '{assay}' not in metapaths.assay_base_paths")
 
     metadata = {
-        "fasta_path":      metapaths["fasta_path"],
-        "ccre_path":       metapaths["ccre_path"],
-        "fiber_base_path": config.get("fiber_base_path") or metapaths["assay_base_paths"]["fiber_seq"],
-        "bulk_base_path":  config.get("bulk_base_path")  or metapaths["assay_base_paths"][assay],
-        "train_chrs":      config.get("train_chrs")      or metapaths["train_chrs"],
-        "val_chrs":        config.get("val_chrs")        or metapaths["val_chrs"],
-        "cell_types":      {},
+        "fasta_path":       metapaths["fasta_path"],
+        "ccre_path":        metapaths["ccre_path"],
+        "fiber_base_path":  config.get("fiber_base_path") or metapaths["assay_base_paths"]["fiber_seq"],
+        "bulk_base_paths":  {a: metapaths["assay_base_paths"][a] for a in output_assays},
+        "train_chrs":       config.get("train_chrs") or metapaths["train_chrs"],
+        "val_chrs":         config.get("val_chrs")   or metapaths["val_chrs"],
+        "cell_types":       {},
     }
 
     mp_cts = metapaths["cell_types"]
     for ct_name, ct_cfg in (config.get("cell_types") or {}).items():
         if ct_name not in mp_cts:
             raise ValueError(f"Cell type '{ct_name}' not in metapaths.cell_types")
-        if mp_cts[ct_name].get(assay) is None:
-            raise ValueError(f"Assay '{assay}' not available for cell type '{ct_name}' in metapaths")
+        for assay in output_assays:
+            if mp_cts[ct_name].get(assay) is None:
+                raise ValueError(f"Assay '{assay}' not available for cell type '{ct_name}' in metapaths")
         entry = {
             "fibers": mp_cts[ct_name]["fiber_seq"],
-            "bulk":   mp_cts[ct_name][assay],
+            "bulk":   {a: mp_cts[ct_name][a] for a in output_assays},
         }
         if ct_cfg and "ratio" in ct_cfg:
             entry["ratio"] = ct_cfg["ratio"]
@@ -109,7 +110,7 @@ def get_config_names_str(args) -> str:
     Extracts filenames (without paths or extensions) from provided config arguments
     and joins them with underscores.
     """
-    config_keys = ["data_config", "model_config", "train_config", "eval_config_path"]
+    config_keys = ["data_config", "model_config", "train_config", "eval_config"]
     config_names = [args.name_prefix] if args.name_prefix is not None else []
 
     for key in config_keys:

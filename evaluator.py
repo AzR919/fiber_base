@@ -33,14 +33,6 @@ class Evaluator:
         self.rng = random.Random(seed)
         self.num_to_save = num_plots_to_log
 
-    def _deconvolve_cell_type_bulk(self, processed_fibers, ct_mask, decoder_type):
-        if decoder_type != "avg_n":
-            raise ValueError(f"Deconvolution only supported for 'avg_n' decoder, got {decoder_type!r}")
-        ct_fibers = processed_fibers[:, :, ct_mask]
-        if ct_fibers.shape[-1] == 0:
-            return torch.zeros((processed_fibers.shape[0], processed_fibers.shape[1]), device=self.device)
-        return torch.mean(ct_fibers, dim=-1)
-
     def evaluate(self, save_path=None):
         self.model.eval()
 
@@ -52,10 +44,10 @@ class Evaluator:
         )
 
         composite_loss_meter = AverageMeter()
-        cell_type_loss_meters = {}
+        output_assays = self.model.init_args.get("output_assays", ["atac"])
+        assay_loss_meters = {a: AverageMeter() for a in output_assays}
         locus_records = []
         valid_locus_count = 0
-        decoder_type = getattr(self.model, "decoder_type", "avg_n")
 
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_loader):
@@ -66,42 +58,22 @@ class Evaluator:
 
                 comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()
                 composite_loss_meter.update(comp_loss)
+                for k, assay in enumerate(output_assays):
+                    assay_loss_meters[assay].update(
+                        self.criterion(pred_composite_bulk[:, k], target_bulk[:, k]).item()
+                    )
 
-                is_mixed = "cell_type_masks" in batch
-                cell_type_preds = {}
-                cell_type_losses = {}
-
-                if is_mixed:
-                    ct_targets = batch["cell_type_targets"]
-                    ct_masks = batch["cell_type_masks"]
-
-                    for ct_name, mask_tensor in ct_masks.items():
-                        if ct_name not in cell_type_loss_meters:
-                            cell_type_loss_meters[ct_name] = AverageMeter()
-
-                        ct_mask = mask_tensor[0] if mask_tensor.dim() > 1 else mask_tensor
-                        ct_mask = ct_mask.to(self.device)
-
-                        pred_ct_bulk = self._deconvolve_cell_type_bulk(processed_fibers, ct_mask, decoder_type)
-                        target_ct_bulk = ct_targets[ct_name].to(self.device)
-
-                        ct_loss = self.criterion(pred_ct_bulk, target_ct_bulk).item()
-                        cell_type_loss_meters[ct_name].update(ct_loss)
-
-                        cell_type_preds[ct_name] = pred_ct_bulk.cpu()
-                        cell_type_losses[ct_name] = ct_loss
+                ct = batch.get("cell_type", ["Unknown"])
+                cell_type_name = ct[0] if isinstance(ct, (list, tuple)) else ct
 
                 locus_record = {
                     "locus": batch["locus"],
+                    "cell_type": cell_type_name,
                     "fiber_features": fiber_features.cpu(),
                     "processed_fibers": processed_fibers.cpu(),
                     "pred_bulk": pred_composite_bulk.cpu(),
                     "target_bulk": target_bulk.cpu(),
-                    "pred_cell_type_bulks": cell_type_preds,
-                    "target_cell_type_bulks": {k: v.cpu() for k, v in ct_targets.items()} if is_mixed else {},
-                    "cell_type_masks": batch.get("cell_type_masks", {}),
                     "loss": comp_loss,
-                    "cell_type_losses": cell_type_losses,
                 }
                 valid_locus_count += 1
 
@@ -113,14 +85,12 @@ class Evaluator:
                         locus_records[j] = locus_record
 
                 if save_path is not None:
-                    ct_losses_fmt = {k: {"loss": v} for k, v in cell_type_losses.items()}
                     print(f"saving idx{batch_idx}")
                     fig = plot_evaluator_record_t(
                         record_t=locus_record,
                         input_flags=self.model.init_args["input_flags"],
-                        loss=comp_loss,
-                        ct_losses=ct_losses_fmt,
-                        bulk_name=self.dataset.bulk_name,
+                        assay_avg_losses=None,
+                        output_assays=output_assays,
                         mode="Test"
                     )
                     plt.savefig(f"{save_path}test_e_{batch_idx}.png")
@@ -128,32 +98,34 @@ class Evaluator:
 
         return {
             "composite": {"loss": composite_loss_meter.avg},
-            "per_cell_type": {ct: {"loss": cell_type_loss_meters[ct].avg} for ct in cell_type_loss_meters},
+            "per_assay": {a: {"loss": assay_loss_meters[a].avg} for a in assay_loss_meters},
             "locus_records": locus_records,
             "num_locus": valid_locus_count * self.batch_size,
         }
 
 
-def run_final_eval(model, eval_config_path, train_args, wandb_run, device):
+def run_final_eval(model, eval_config, train_args, wandb_run, device):
     """Build eval dataset from config, run Evaluator, log results to wandb_run."""
     print("\n" + "=" * 60)
     print(" Running Final Model Test & Deconvolution Dashboard...")
     print("=" * 60)
 
-    eval_cfg = load_config_file(eval_config_path)
+    eval_cfg = load_config_file(eval_config)
     metapaths = None
     if hasattr(train_args, "metapaths") and os.path.exists(train_args.metapaths):
         metapaths = load_metapaths(train_args.metapaths)
 
-    if metapaths and "assay" in eval_cfg:
-        eval_metadata = resolve_config_with_metapaths(eval_cfg, metapaths)
+    output_assays = model.init_args.get("output_assays", ["atac"])
+
+    if metapaths is not None:
+        eval_metadata = resolve_config_with_metapaths(eval_cfg, metapaths, output_assays)
     else:
         eval_metadata = eval_cfg.get("metadata", {})
 
     eval_seed = eval_cfg.get("seed", 919)
     num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
     test_set = make_fiber_dataset(
-        eval_cfg.get("dataset_type", "mixed"),
+        eval_cfg.get("dataset_type", "single"),
         mode="eval",
         metadata=eval_metadata,
         fibers_per_entry=eval_cfg.get("fibers_per_entry", train_args.fibers_per_entry),
@@ -162,23 +134,26 @@ def run_final_eval(model, eval_config_path, train_args, wandb_run, device):
         num_sample_ccres=num_sample_ccres,
         input_flags=model.init_args["input_flags"],
         dna_type=model.init_args["dna_type"],
-        bulk_name=eval_cfg.get("bulk_name", "N/A"),
+        output_assays=output_assays,
         seed=eval_seed,
     )
 
     evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed)
     eval_results = evaluator.evaluate()
-    test_log_dict = {"test_loss": eval_results["composite"]["loss"]}
+    test_log_dict = {
+        "test_loss": eval_results["composite"]["loss"],
+        **{f"test_loss_{assay}": data["loss"] for assay, data in eval_results.get("per_assay", {}).items()}
+    }
 
+    assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
     locus_records = eval_results.get("locus_records", [])
     wandb_image_list = []
     for idx, record in enumerate(locus_records):
         fig = plot_evaluator_record_t(
             record_t=record,
             input_flags=test_set.input_flags,
-            loss=eval_results["composite"]["loss"],
-            ct_losses=eval_results["per_cell_type"],
-            bulk_name=test_set.bulk_name,
+            assay_avg_losses=assay_avg,
+            output_assays=output_assays,
             mode="Test"
         )
         chr_name = record["locus"][0][0]

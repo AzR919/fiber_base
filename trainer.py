@@ -95,8 +95,11 @@ class Trainer:
             if self.val_dataset is not None and hasattr(self.val_dataset, "set_epoch"):
                 self.val_dataset.set_epoch(epoch)
 
+            output_assays = getattr(self.config, "output_assays", ["atac"])
+
             # --- TRAINING PHASE ---
             train_meter = AverageMeter()
+            train_assay_meters = {a: AverageMeter() for a in output_assays}
             last_t_batch, last_t_output, last_t_fibers = None, None, None
 
             for i, batch in enumerate(train_loader):
@@ -106,7 +109,14 @@ class Trainer:
                     alloc_mb = torch.cuda.memory_allocated() / 1024**2
                     print(f"GPU memory after first step — peak: {peak_mb:.0f} MB | current: {alloc_mb:.0f} MB", flush=True)
                     self.wandb_run.log({"gpu_peak_mb": peak_mb, "gpu_alloc_mb": alloc_mb})
-                train_meter.update(t_loss, n=batch["fiber_features"].size(0))
+                n = batch["fiber_features"].size(0)
+                train_meter.update(t_loss, n=n)
+                with torch.no_grad():
+                    tgt = batch["target_bulk"].to(self.device)
+                    for k, assay in enumerate(output_assays):
+                        train_assay_meters[assay].update(
+                            self.criterion(t_output.detach()[:, k], tgt[:, k]).item(), n=n
+                        )
                 last_t_batch = batch
                 last_t_output = t_output
                 last_t_fibers = t_processed_fibers
@@ -116,13 +126,21 @@ class Trainer:
 
             # --- VALIDATION PHASE ---
             avg_val_loss = None
+            val_assay_meters = {a: AverageMeter() for a in output_assays}
             last_v_batch, last_v_output, last_v_fibers = None, None, None
 
             if val_loader is not None:
                 val_meter = AverageMeter()
                 for v_batch in val_loader:
                     v_loss, v_output, v_processed_fibers = self.val_step(v_batch)
-                    val_meter.update(v_loss, n=v_batch["fiber_features"].size(0))
+                    n = v_batch["fiber_features"].size(0)
+                    val_meter.update(v_loss, n=n)
+                    with torch.no_grad():
+                        tgt = v_batch["target_bulk"].to(self.device)
+                        for k, assay in enumerate(output_assays):
+                            val_assay_meters[assay].update(
+                                self.criterion(v_output[:, k], tgt[:, k]).item(), n=n
+                            )
                     last_v_batch = v_batch
                     last_v_output = v_output
                     last_v_fibers = v_processed_fibers
@@ -141,6 +159,14 @@ class Trainer:
             else:
                 print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f}")
 
+            for assay in output_assays:
+                log_dict[f"train_loss_{assay}"] = train_assay_meters[assay].avg
+                if avg_val_loss is not None:
+                    log_dict[f"val_loss_{assay}"] = val_assay_meters[assay].avg
+
+            train_assay_avg = {a: train_assay_meters[a].avg for a in output_assays}
+            val_assay_avg   = {a: val_assay_meters[a].avg  for a in output_assays}
+
             # Generate & Log Train Dashboard Plot
             if last_t_batch is not None:
                 fig_t = plot_evaluation_dashboard_t(
@@ -151,8 +177,8 @@ class Trainer:
                     last_t_batch["target_bulk"],
                     last_t_batch["locus"],
                     last_t_batch["cell_type"],
-                    self.train_dataset.bulk_name,
-                    avg_loss=avg_train_loss,
+                    output_assays,
+                    assay_avg_losses=train_assay_avg,
                     mode="Train"
                 )
                 log_dict["Train_Dashboard"] = wandb.Image(fig_t)
@@ -168,8 +194,8 @@ class Trainer:
                     last_v_batch["target_bulk"],
                     last_v_batch["locus"],
                     last_v_batch["cell_type"],
-                    self.train_dataset.bulk_name,
-                    avg_loss=avg_val_loss,
+                    output_assays,
+                    assay_avg_losses=val_assay_avg,
                     mode="Val"
                 )
                 log_dict["Val_Dashboard"] = wandb.Image(fig_v)
@@ -178,7 +204,7 @@ class Trainer:
             self.wandb_run.log(log_dict)
 
         # Final loss summary curve & model save
-        plot_loss(save_dir, train_losses, self.epochs, self.config.bulk_name)
+        plot_loss(save_dir, train_losses, self.epochs, getattr(self.config, "output_assays", ["atac"]))
         self.model.save_model(save_dir, self.epochs, external_config=self.config)
 
 

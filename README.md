@@ -119,13 +119,13 @@ python main.py \
   --data_config configs/data/data00.yaml \
   --model_config configs/models/model00.yaml \
   --train_config configs/training/train00.yaml \
-  [--eval_config_path configs/evals/eval00.yaml] \
+  [--eval_config configs/evals/eval00.yaml] \
   [--metapaths configs/metapaths.yaml] \
   [--name_prefix myrun] \
   [--name_suffix v1]
 ```
 
-If `--eval_config_path` is provided, the evaluator runs automatically after training and logs results to wandb.
+If `--eval_config` is provided, the evaluator runs automatically after training and logs results to wandb.
 
 **Reproducibility**: set `seed` in the training config. The same seed + same epoch always produces the same data ordering via `set_epoch(epoch)`.
 

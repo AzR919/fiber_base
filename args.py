@@ -25,7 +25,7 @@ def get_args():
                              help="Path to JSON or YAML file containing model configuration")
     config_group.add_argument("--train_config", type=str, default=None,
                              help="Path to JSON or YAML file containing trainer configuration")
-    config_group.add_argument("--eval_config_path", type=str, default=None,
+    config_group.add_argument("--eval_config", type=str, default=None,
                              help="Path to JSON or YAML file containing evaluation configuration")
     config_group.add_argument("--metapaths", type=str, default="configs/metapaths.yaml",
                              help="Path to metapaths YAML file for centralized path resolution")
@@ -39,8 +39,6 @@ def get_args():
     data_group.add_argument("--train_chrs", type=str, nargs="+", default=["chr20"])
     data_group.add_argument("--val_chrs", type=str, nargs="+", default=["chr21"])
     data_group.add_argument("--fiber_base_path", type=str, default="")
-    data_group.add_argument("--bulk_base_path", type=str, default="")
-    data_group.add_argument("--bulk_name", type=str, default="Not_set")
 
     # Dataset Parameters
     data_group.add_argument("--context_length", type=int, default=4096)
@@ -49,18 +47,18 @@ def get_args():
                             choices=["single", "mixed"],
                             help="Dataset mode: 'single' (one cell type per sample) or 'mixed' (composite)")
 
-
     # Model
     model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument("--model", type=str, default="base")
     model_group.add_argument("--d_model", type=int, default=32)
-    model_group.add_argument("--decoder_type", type=str, default="avg_n")
     model_group.add_argument("--kernel_size", type=int, default=15)
     model_group.add_argument("--dilation", type=int, default=1)
     model_group.add_argument("--input_flags", type=int, nargs="+", default=[1, 1, 1, 1, 1],
                                 help="Binary indicators list [m6a, cpg, msp, nuc, fire_msp]")
     model_group.add_argument("--dna_type", type=str, default="none", choices=["none", "ref", "fiber", "both"],
                             help="dna_type to use as input")
+    model_group.add_argument("--output_assays", type=str, nargs="+", default=["atac"],
+                            help="List of assay keys the model predicts (must match metapaths assay_base_paths keys)")
 
     # Individual input feature flags for hyperparameter sweeps
     model_group.add_argument("--use_individual_input_flags", action="store_true",
@@ -116,7 +114,7 @@ def get_args():
         "train_chrs": parsed_args.train_chrs,
         "val_chrs": parsed_args.val_chrs,
         "fiber_base_path": parsed_args.fiber_base_path,
-        "bulk_base_path": parsed_args.bulk_base_path,
+        "bulk_base_paths": {},
         "cell_types": {}
     }
 
@@ -125,14 +123,23 @@ def get_args():
     if os.path.exists(parsed_args.metapaths):
         metapaths = load_metapaths(parsed_args.metapaths)
 
-    # Step 3: Load data config JSON/YAML file if provided
+    # Step 3: Load model config FIRST — output_assays must be known before resolving data paths
+    if parsed_args.model_config:
+        model_cfg = load_config_file(parsed_args.model_config)
+        for key, val in model_cfg.items():
+            if hasattr(parsed_args, key) and key not in cli_args_set:
+                setattr(parsed_args, key, val)
+            elif not hasattr(parsed_args, key):
+                setattr(parsed_args, key, val)
+
+    # Step 4: Load data config JSON/YAML file if provided
     if parsed_args.data_config:
         data_cfg = load_config_file(parsed_args.data_config)
 
-        if "assay" in data_cfg and metapaths is not None:
-            # New-style slim config: resolve paths via metapaths
-            resolved = resolve_config_with_metapaths(data_cfg, metapaths)
-            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_path", "cell_types"]:
+        if metapaths is not None:
+            # Resolve paths via metapaths using output_assays declared by the model config
+            resolved = resolve_config_with_metapaths(data_cfg, metapaths, parsed_args.output_assays)
+            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_paths", "cell_types"]:
                 if key not in cli_args_set:
                     parsed_args.metadata[key] = resolved[key]
                     if hasattr(parsed_args, key):
@@ -140,7 +147,7 @@ def get_args():
         elif "metadata" in data_cfg:
             # Old-style config with explicit metadata block
             meta_cfg = data_cfg["metadata"]
-            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_path", "cell_types"]:
+            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "cell_types"]:
                 if key in meta_cfg and key not in cli_args_set:
                     parsed_args.metadata[key] = meta_cfg[key]
                     if hasattr(parsed_args, key):
@@ -151,17 +158,16 @@ def get_args():
             if key not in ("metadata", "assay", "cell_types") and hasattr(parsed_args, key) and key not in cli_args_set:
                 setattr(parsed_args, key, val)
 
-    # Load model and train config JSON/YAML files if provided
-    for cfg_path in [parsed_args.model_config, parsed_args.train_config]:
-        if cfg_path:
-            cfg_dict = load_config_file(cfg_path)
-            for key, val in cfg_dict.items():
-                if hasattr(parsed_args, key) and key not in cli_args_set:
-                    setattr(parsed_args, key, val)
-                elif not hasattr(parsed_args,key):
-                    setattr(parsed_args, key, val)
+    # Step 5: Load train config JSON/YAML file if provided
+    if parsed_args.train_config:
+        train_cfg = load_config_file(parsed_args.train_config)
+        for key, val in train_cfg.items():
+            if hasattr(parsed_args, key) and key not in cli_args_set:
+                setattr(parsed_args, key, val)
+            elif not hasattr(parsed_args, key):
+                setattr(parsed_args, key, val)
 
-    # Step 4: Reconcile sweep feature flags vs input_flags list
+    # Step 6: Reconcile sweep feature flags vs input_flags list
     indiv_flags = ["m6a", "cpg", "msp", "nuc", "fire_msp"]
     any_indiv_in_cli = any(flag in cli_args_set for flag in indiv_flags)
 
@@ -189,6 +195,7 @@ def tester():
     print(f"Return DNA Tensors      : {args.dna_type}")
     print(f"Active Input Flags      : {args.input_flags}")
     print(f"Num Input Features      : {args.num_input_features}")
+    print(f"Output Assays           : {args.output_assays}")
     print("\n--- Metadata Dict ---")
     for k, v in args.metadata.items():
         print(f"  {k}: {v}")

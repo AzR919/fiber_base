@@ -40,7 +40,7 @@ python main.py \
   --data_config configs/data/data12_gm_atac.yaml \
   --model_config configs/models/model10_uct_mid.yaml \
   --train_config configs/training/train01.yaml \
-  --eval_config_path configs/evals/eval12_gm_atac_mini.yaml \
+  --eval_config configs/evals/eval12_gm_atac_mini.yaml \
   --name_prefix clean_up_test \
   --epochs 2
 

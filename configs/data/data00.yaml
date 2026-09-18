@@ -2,10 +2,9 @@
 
 context_length: 256
 fibers_per_entry: 50
-bulk_name: ATAC_seq_p
-assay: atac
+dataset_type: single
 
 cell_types:
   GM12878:
-  K562:
-dataset_type: mixed
+  K562_200U:
+  HepG2_200U:

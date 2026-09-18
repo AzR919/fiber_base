@@ -163,10 +163,12 @@ def _render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode
     ax.set_ylabel("Signal Intensity")
     ax.legend(loc='upper right', frameon=False)
 
-    title = f"Imputation Results {cell_type} ({mode} Loss: {instance_loss:.6f})\n{chr_info}"
+    title = f"{bulk_name} — {cell_type} | Instance Loss: {instance_loss:.4f}"
     if avg_loss is not None:
-        title += f" (Epoch Avg {mode} Loss: {avg_loss:.6f})"
-    ax.set_title(title, fontsize=13, fontweight='bold')
+        title += f"\nEpoch Avg Loss ({mode}): {avg_loss:.4f} | {chr_info}"
+    else:
+        title += f"\n{chr_info}"
+    ax.set_title(title, fontsize=11, fontweight='bold')
     ax.set_xticklabels([])
 
 
@@ -180,6 +182,23 @@ def _render_fiber_heatmap(ax, out_fibers):
     ax.set_ylabel("Fibers (Imputed)")
     ax.set_xlabel("Genomic Position (bp)")
     return img
+
+
+def _render_assay_pair(fig, col_gs, row_start, out_k, out_fibers_k, tar_k,
+                        assay_name, chr_info, instance_loss, mode, avg_loss, cell_type):
+    """
+    Renders one assay in 2 sub-rows of col_gs:
+      row_start   → bulk comparison (target vs pred)
+      row_start+1 → fiber heatmap for that assay
+    out_k, tar_k: (L,)  out_fibers_k: (L, N)
+    Returns (ax_sig, ax_heat).
+    """
+    ax_sig = fig.add_subplot(col_gs[row_start, 0])
+    _render_bulk_comparison(ax_sig, tar_k, out_k, chr_info, instance_loss, mode,
+                             assay_name, avg_loss, cell_type)
+    ax_heat = fig.add_subplot(col_gs[row_start + 1, 0], sharex=ax_sig)
+    _render_fiber_heatmap(ax_heat, out_fibers_k)
+    return ax_sig, ax_heat
 
 
 def _filter_informative_fibers(inp, input_flags, min_m6a_sum=20, max_fibers=20):
@@ -218,37 +237,42 @@ def plot_evaluation_dashboard(
     tar,
     locus,
     cell_type,
-    bulk_name,
-    avg_loss=None,
+    output_assays,
+    assay_avg_losses=None,
     mode="Train",
 ):
     """
-    Unified evaluation dashboard: input features (left) and predicted outputs (right).
+    3-column evaluation dashboard: input features (col 0), assays 1-2 (col 1), assays 3-4 (col 2).
 
-    inp: (C, L, N), out: (L,), out_fibers: (L, N), tar: (L,) — numpy arrays.
+    inp: (C, L, N), out: (K, L), out_fibers: (K, L, N), tar: (K, L) — numpy arrays.
+    output_assays: list of K assay name strings.
+    assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
     locus: (chrom, start, end). cell_type: str. Returns matplotlib Figure.
     """
     chr_name, start, end = locus
     chr_info = f"{chr_name}:{start}-{end}"
-    num_input_features = sum(input_flags)
+    K = len(output_assays)
 
-    grid_rows = max(2, num_input_features)
-    fig_height = max(10, 2.5 * grid_rows)
-    fig = plt.figure(figsize=(20, fig_height))
-    gs = gridspec.GridSpec(grid_rows, 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.3)
+    num_data_cols = 1 + max(1, (K + 1) // 2)  # col0 + 1 or 2 assay columns
+    fig_width = 10 * num_data_cols
+    fig = plt.figure(figsize=(fig_width, 18))
+    gs = gridspec.GridSpec(5, num_data_cols, figure=fig,
+                           width_ratios=[1] * num_data_cols, wspace=0.3, hspace=0.3)
 
     input_axes = _render_input_channels(fig, gs, inp, input_flags)
     if input_axes:
         input_axes[0].set_title(f"Input Features, {cell_type}\n{chr_info}", fontsize=13, fontweight='bold')
 
-    ax_bulk = fig.add_subplot(gs[0:1, 1])
-    ax_heat = fig.add_subplot(gs[1:3, 1], sharex=ax_bulk)
+    for pair_idx, k_start in enumerate(range(0, K, 2)):
+        col_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1 + pair_idx], hspace=0.4)
+        for local_k, k in enumerate(range(k_start, min(k_start + 2, K))):
+            instance_loss = float(np.mean((tar[k] - out[k]) ** 2))
+            avg_loss_k = assay_avg_losses.get(output_assays[k]) if assay_avg_losses else None
+            _render_assay_pair(fig, col_gs, local_k * 2,
+                               out[k], out_fibers[k], tar[k],
+                               output_assays[k], chr_info, instance_loss, mode, avg_loss_k, cell_type)
 
-    instance_loss = float(np.mean((tar - out) ** 2))
-    _render_bulk_comparison(ax_bulk, tar, out, chr_info, instance_loss, mode, bulk_name, avg_loss, cell_type)
-    _render_fiber_heatmap(ax_heat, out_fibers)
-
-    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
+    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.06, right=0.96)
     return fig
 
 
@@ -337,73 +361,66 @@ def plot_single_column_fiber_stack(
     return fig, last_used_idx
 
 
-def plot_loss(dir_path, losses, epoch, bulk_name):
+def plot_loss(dir_path, losses, epoch, output_assays):
     """Saves a plot of epoch-wise training loss to dir_path."""
     os.makedirs(dir_path, exist_ok=True)
     save_path = os.path.join(dir_path, f"Epoch_{epoch}_loss.png")
+    label = " + ".join(output_assays) if isinstance(output_assays, list) else str(output_assays)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(losses, marker='o', color='tab:blue', lw=2)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title(f"Training Loss Curve for {bulk_name}")
+    ax.set_title(f"Training Loss Curve for {label}")
     ax.grid(True, linestyle='--', alpha=0.5)
 
     fig.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
 
-def plot_evaluator_record(record, input_flags, loss=0.0, ct_losses={}, bulk_name="H3K27ac", mode="Test"):
+def plot_evaluator_record(record, input_flags, assay_avg_losses=None, output_assays=None, mode="Test"):
     """
-    Multi-panel deconvolution dashboard from a single Evaluator locus record.
-    record values: fiber_features (C,L,N), processed_fibers (L,N), pred_bulk (L,),
-    target_bulk (L,), pred/target_cell_type_bulks {ct: (L,)}, locus (chrom,start,end).
+    3-column evaluation dashboard from a single Evaluator locus record.
+    record values: fiber_features (C,L,N), processed_fibers (K,L,N), pred_bulk (K,L),
+    target_bulk (K,L), locus (chrom,start,end).
+    output_assays: list of K assay name strings.
+    assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
     Returns matplotlib Figure.
     """
+    if output_assays is None:
+        output_assays = ["atac"]
+    K = len(output_assays)
+
     chr_name, start, end = record["locus"]
     chr_info = f"{chr_name}:{start}-{end}"
 
     inp = record["fiber_features"]                # (C, L, N)
-    processed_fibers = record["processed_fibers"] # (L, N)
-    pred_bulk = record["pred_bulk"]               # (L,)
-    target_bulk = record["target_bulk"]           # (L,)
-    ct_preds = record["pred_cell_type_bulks"]     # {ct: (L,)}
-    ct_targets = record["target_cell_type_bulks"] # {ct: (L,)}
-    instance_loss = record["loss"]
-    ct_instance_loss = record["cell_type_losses"]
+    processed_fibers = record["processed_fibers"] # (K, L, N)
+    pred_bulk = record["pred_bulk"]               # (K, L)
+    target_bulk = record["target_bulk"]           # (K, L)
 
-    cell_types = list(ct_preds.keys())[:2]
-    num_active_inputs = sum(input_flags)
+    cell_type_label = record.get("cell_type", "Unknown")
 
-    fig = plt.figure(figsize=(22, 14))
-    gs = gridspec.GridSpec(max(4, num_active_inputs), 2, figure=fig, width_ratios=[1, 1], wspace=0.25, hspace=0.35)
+    num_data_cols = 1 + max(1, (K + 1) // 2)
+    fig_width = 10 * num_data_cols
+    fig = plt.figure(figsize=(fig_width, 18))
+    gs = gridspec.GridSpec(5, num_data_cols, figure=fig,
+                           width_ratios=[1] * num_data_cols, wspace=0.3, hspace=0.35)
 
     input_axes = _render_input_channels(fig, gs, inp, input_flags)
     if input_axes:
         input_axes[0].set_title(f"Input Fiber Stack\n{chr_info}", fontsize=12, fontweight='bold')
 
-    rhs_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1], hspace=0.45)
+    for pair_idx, k_start in enumerate(range(0, K, 2)):
+        col_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1 + pair_idx], hspace=0.45)
+        for local_k, k in enumerate(range(k_start, min(k_start + 2, K))):
+            inst_k = float(np.mean((target_bulk[k] - pred_bulk[k]) ** 2))
+            avg_loss_k = assay_avg_losses.get(output_assays[k]) if assay_avg_losses else None
+            _render_assay_pair(fig, col_gs, local_k * 2,
+                               pred_bulk[k], processed_fibers[k], target_bulk[k],
+                               output_assays[k], chr_info, inst_k, mode, avg_loss_k, cell_type_label)
 
-    ax_comp = fig.add_subplot(rhs_gs[0, 0])
-    _render_bulk_comparison(ax_comp, target_bulk, pred_bulk, chr_info, instance_loss, mode, bulk_name, loss,
-                            cell_type="Mixed" if len(cell_types) > 1 else (cell_types[0] if cell_types else "Single Cell"))
-
-    ax_heat = fig.add_subplot(rhs_gs[1, 0], sharex=ax_comp)
-    _render_fiber_heatmap(ax_heat, processed_fibers)
-
-    if len(cell_types) >= 2:
-        ct_a = cell_types[0]
-        ax_cta = fig.add_subplot(rhs_gs[2, 0], sharex=ax_comp)
-        _render_bulk_comparison(ax_cta, ct_targets[ct_a], ct_preds[ct_a], "", ct_instance_loss[ct_a], mode,
-                                bulk_name, ct_losses[ct_a]["loss"], cell_type=ct_a)
-
-        ct_b = cell_types[1]
-        ax_ctb = fig.add_subplot(rhs_gs[3, 0], sharex=ax_comp)
-        _render_bulk_comparison(ax_ctb, ct_targets[ct_b], ct_preds[ct_b], "", ct_instance_loss[ct_a], mode,
-                                bulk_name, ct_losses[ct_b]["loss"], cell_type=ct_b)
-        ax_ctb.set_xlabel("Genomic Position (bp)", fontsize=11)
-
-    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.92)
+    plt.subplots_adjust(top=0.92, bottom=0.08, left=0.06, right=0.96)
     return fig
 
 
@@ -445,26 +462,27 @@ def plot_evaluation_dashboard_t(
     tar_t,
     locus,
     cell_type,
-    bulk_name,
-    avg_loss=None,
+    output_assays,
+    assay_avg_losses=None,
     mode="Train",
 ):
     """
     Torch wrapper for plot_evaluation_dashboard.
-    inp_t: (B, C, L, N), out_t: (B, L), out_fibers_t: (B, L, N), tar_t: (B, L).
+    inp_t: (B, C, L, N), out_t: (B, K, L), out_fibers_t: (B, K, L, N), tar_t: (B, K, L).
+    output_assays: list of K assay name strings.
+    assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
     locus: collated list-of-lists from DataLoader. cell_type: list[str].
     """
     inp = inp_t[0].cpu().detach().float().numpy()
-    out = out_t[0].cpu().detach().float().numpy()
-    out_fibers = out_fibers_t[0].cpu().detach().float().numpy()
-    tar = tar_t[0].cpu().detach().float().numpy()
-    # locus can be a plain (chrom, start, end) tuple or DataLoader-collated ([chroms], tensor, tensor)
+    out = out_t[0].cpu().detach().float().numpy()           # (K, L)
+    out_fibers = out_fibers_t[0].cpu().detach().float().numpy()  # (K, L, N)
+    tar = tar_t[0].cpu().detach().float().numpy()           # (K, L)
     if isinstance(locus[0], (list, tuple)):
         locus_tup = (locus[0][0], int(locus[1][0]), int(locus[2][0]))
     else:
         locus_tup = (locus[0], int(locus[1]), int(locus[2]))
     ct = cell_type[0] if isinstance(cell_type, (list, tuple)) else cell_type
-    return plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus_tup, ct, bulk_name, avg_loss, mode)
+    return plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus_tup, ct, output_assays, assay_avg_losses, mode)
 
 
 def plot_single_column_fiber_stack_t(
@@ -505,28 +523,27 @@ def plot_single_column_fiber_stack_t(
     )
 
 
-def plot_evaluator_record_t(record_t, input_flags, loss=0.0, ct_losses={}, bulk_name="H3K27ac", mode="Test"):
+def plot_evaluator_record_t(record_t, input_flags, assay_avg_losses=None, output_assays=None, mode="Test"):
     """
     Torch wrapper for plot_evaluator_record.
     record_t: dict from Evaluator with batched CPU tensors and collated locus.
     Squeezes batch dim [0] and converts tensors to numpy.
+    output_assays: list of K assay name strings.
+    assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
     """
     record = {}
     squeeze_keys = {"fiber_features", "processed_fibers", "pred_bulk", "target_bulk"}
     for k, v in record_t.items():
         if k in squeeze_keys and isinstance(v, torch.Tensor):
             record[k] = v[0].cpu().detach().float().numpy()
-        elif k in ("pred_cell_type_bulks", "target_cell_type_bulks") and isinstance(v, dict):
-            record[k] = {
-                ct: (t[0].cpu().detach().float().numpy() if isinstance(t, torch.Tensor) else t)
-                for ct, t in v.items()
-            }
         elif k == "locus":
             locus = v
             record[k] = (locus[0][0], int(locus[1][0]), int(locus[2][0]))
+        elif k == "cell_type":
+            record[k] = v[0] if isinstance(v, (list, tuple)) else v
         else:
             record[k] = v
-    return plot_evaluator_record(record, input_flags, loss, ct_losses, bulk_name, mode)
+    return plot_evaluator_record(record, input_flags, assay_avg_losses, output_assays, mode)
 
 
 def plot_dna_tensor_logo_t(dna_tensor_t, region_slice=None, title="Fiber Consensus Sequence Logo"):

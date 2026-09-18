@@ -32,8 +32,6 @@ parameters:
     value: 200
   res_dir:
     value: "./results"
-  decoder_type:
-    value: "avg"
   name_suffix:
     value: "sweep_avg"
   fiber_data_path:

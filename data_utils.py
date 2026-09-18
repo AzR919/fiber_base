@@ -35,25 +35,29 @@ class SingleCellFiberDataset(IterableDataset):
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  mode, input_flags, seed=919,
-                 dna_type="none", bulk_name="N/A",
+                 dna_type="none", output_assays=None,
                  iters_per_epoch=1000, num_sample_ccres=100):
+
+        if output_assays is None:
+            output_assays = ["atac"]
+        self.output_assays = output_assays
 
         self.metadata = metadata
         self.fasta_path = metadata["fasta_path"]
-        self.bulk_name = bulk_name
 
         self.cell_type_names = list(metadata["cell_types"].keys())
         self.fiber_data_paths = []
-        self.other_bw_paths = []
+        self.other_bw_paths = []  # list of lists: [cell_idx][assay_idx] -> path
 
         fiber_base = metadata.get("fiber_base_path", "")
-        bulk_base = metadata.get("bulk_base_path", "")
+        bulk_bases = metadata.get("bulk_base_paths", {})
 
         for cell_name in self.cell_type_names:
             cram_file = metadata["cell_types"][cell_name]["fibers"]
-            bw_file = metadata["cell_types"][cell_name]["bulk"]
+            bw_files = metadata["cell_types"][cell_name]["bulk"]  # {assay: filename}
             self.fiber_data_paths.append(os.path.join(fiber_base, cram_file))
-            self.other_bw_paths.append(os.path.join(bulk_base, bw_file))
+            bw_paths = [os.path.join(bulk_bases[a], bw_files[a]) for a in self.output_assays]
+            self.other_bw_paths.append(bw_paths)
 
         self.num_cell_types = len(self.cell_type_names)
 
@@ -124,7 +128,7 @@ class SingleCellFiberDataset(IterableDataset):
         if self.fiber_bams is None:
             self.fiber_bams = [pyft.Fiberbam(str(Path(p).resolve())) for p in self.fiber_data_paths]
         if self.other_bws is None:
-            self.other_bws = [pyBigWig.open(p) for p in self.other_bw_paths]
+            self.other_bws = [[pyBigWig.open(p) for p in paths] for paths in self.other_bw_paths]
         if self.fasta is None:
             if not os.path.exists(self.fasta_path):
                 raise FileNotFoundError(f"FASTA not found: {self.fasta_path}")
@@ -168,9 +172,12 @@ class SingleCellFiberDataset(IterableDataset):
         return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers, torch.from_numpy(coverage_np)
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
-        raw_vals = np.array(self.other_bws[cell_idx].values(chrom, start, end), dtype=np.float32)
-        raw_vals = np.nan_to_num(raw_vals, nan=0.0, posinf=0.0, neginf=0.0)
-        return torch.asinh(torch.from_numpy(raw_vals))
+        tracks = []
+        for bw in self.other_bws[cell_idx]:
+            raw = np.array(bw.values(chrom, start, end), dtype=np.float32)
+            tracks.append(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0))
+        arr = np.stack(tracks, axis=0)  # (K, L)
+        return torch.asinh(torch.from_numpy(arr))
 
     def _make_sample(self, fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
                      other_tensor, locus, cell_type_name):
@@ -260,7 +267,7 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  input_flags, mode='eval', seed=919,
-                 dna_type="none", bulk_name="N/A",
+                 dna_type="none", output_assays=None,
                  iters_per_epoch=1000, num_sample_ccres=100):
 
         super().__init__(
@@ -273,7 +280,7 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             mode=mode,
             seed=seed,
             dna_type=dna_type,
-            bulk_name=bulk_name,
+            output_assays=output_assays,
         )
 
         try:

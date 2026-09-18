@@ -19,11 +19,14 @@ class BaseModel(nn.Module):
     Abstract base class providing unified save and load functionality
     for all fiber-seq models.
     """
-    def __init__(self, input_flags, dna_type):
+    def __init__(self, input_flags, dna_type, output_assays=None):
         super().__init__()
+        if output_assays is None:
+            output_assays = ["atac"]
         self.init_args = {
             "input_flags": input_flags,
             "dna_type": dna_type,
+            "output_assays": output_assays,
         }
 
     def save_model(self, dir_name, epoch, external_config=None):
@@ -99,7 +102,6 @@ class BaseModel(nn.Module):
         model.load_state_dict(state_dict)
         print(f"Model successfully reconstituted from: {filepath}")
         return model, config
-
 
 #--------------------------------------------------------------------------------------------------
 # Model Components
@@ -196,392 +198,35 @@ class SinusoidalPositionalEncoding(nn.Module):
         return x + self.pe[:, :seq_len, :]
 
 #--------------------------------------------------------------------------------------------------
-# Concrete Model Implementation
+# Complete Model Implementations
 
 class Base01DebugModel(BaseModel):
 
-    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
-        super().__init__(input_flags, dna_type)
+    def __init__(self, input_flags, dna_type, kernel_size=15, output_assays=None):
+        super().__init__(input_flags, dna_type, output_assays)
 
-        # Store init args for automatic saving/loading in BaseModel
         self.init_args["kernel_size"] = kernel_size
 
-        self.num_input_features = sum(input_flags)
-        self.decoder_type = decoder_type
-        self.kernel_size = kernel_size
+        num_input_features = sum(input_flags)
+        K = len(self.init_args["output_assays"])
 
-        channels = [self.num_input_features, 2, 1]
-        dilations = [1, 2]
-
-        layers = []
-        for i in range(2):
-            layers.append(
-                ResidualBlock1D(
-                    in_channels=channels[i],
-                    out_channels=channels[i+1],
-                    kernel_size=kernel_size,
-                    dilation=dilations[i]
-                )
-            )
-        self.fiber_conv = nn.Sequential(*layers)
-
-        implemented_decoders = ["avg", "sum", "avg_n"]
-        if decoder_type not in implemented_decoders:
-            raise NotImplementedError(f"decoder_type not implemented: {decoder_type}")
-
-        self.final_layer = nn.Sequential(nn.GELU())
-
-    def forward(self, x, *args, **kwargs):
-        B, C, L, N = x.shape
-
-        # Flatten batch and fiber dimensions: (B * N, C, L)
-        x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
-
-        # Process through the residual bottleneck
-        out_flat = self.fiber_conv(x_flat)
-
-        # Reshape back to original dimensions: (B, L, N)
-        processed_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
-
-        if self.decoder_type == "sum":
-            y = torch.sum(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg":
-            y = torch.mean(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg_n":
-            y = torch.sum(processed_fibers, dim=-1) / kwargs["fiber_coverage"].float().clamp(min=1)
-        else:
-            raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
-
-        y_final = self.final_layer(y)
-        return y_final, processed_fibers
-
-class Deep01ResConv1dBlock(BaseModel):
-
-    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
-        super().__init__(input_flags, dna_type)
-
-        # Store init args for automatic saving/loading in BaseModel
-        self.init_args["kernel_size"] = kernel_size
-
-        self.num_input_features = sum(input_flags)
-        self.decoder_type = decoder_type
-        self.kernel_size = kernel_size
-
-        channels = [self.num_input_features, 32, 64, 64, 32, 1]
-        dilations = [1, 2, 4, 8, 16]
-
-        layers = []
-        for i in range(5):
-            layers.append(
-                ResidualBlock1D(
-                    in_channels=channels[i],
-                    out_channels=channels[i+1],
-                    kernel_size=kernel_size,
-                    dilation=dilations[i]
-                )
-            )
-        self.fiber_conv = nn.Sequential(*layers)
-
-        implemented_decoders = ["avg", "sum", "avg_n"]
-        if decoder_type not in implemented_decoders:
-            raise NotImplementedError(f"decoder_type not implemented: {decoder_type}")
-
-        self.final_layer = nn.Sequential(nn.GELU())
-
-    def forward(self, x, *args, **kwargs):
-        B, C, L, N = x.shape
-
-        # Flatten batch and fiber dimensions: (B * N, C, L)
-        x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
-
-        # Process through the residual bottleneck
-        out_flat = self.fiber_conv(x_flat)
-
-        # Reshape back to original dimensions: (B, L, N)
-        processed_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
-
-        if self.decoder_type == "sum":
-            y = torch.sum(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg":
-            y = torch.mean(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg_n":
-            y = torch.sum(processed_fibers, dim=-1) / kwargs["fiber_coverage"].float().clamp(min=1)
-        else:
-            raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
-
-        y_final = self.final_layer(y)
-        return y_final, processed_fibers
-
-class TransformerFiber1DModel(BaseModel):
-    """
-    A Transformer Encoder model for high-context window genomic sequence imputation.
-    Flattens single-cell tracks and computes dependencies globally across sequence lengths.
-    """
-    def __init__(self, input_flags, dna_type, decoder_type="avg_n", d_model=64, n_head=4, num_layers=4, dim_feedforward=128, max_len=6000):
-        super().__init__(input_flags, dna_type)
-
-        # Save structural parameters for checkpoint serialization blueprinting
-        self.init_args.update({
-            "d_model": d_model,
-            "nhead": n_head,
-            "num_layers": num_layers,
-            "dim_feedforward": dim_feedforward,
-            "max_len": max_len
-        })
-
-        self.num_input_features = sum(input_flags)
-        self.decoder_type = decoder_type
-
-        # 1. Feature Map Projection Input Layer
-        self.input_projection = nn.Linear(self.num_input_features, d_model)
-        self.pos_encoder = PositionalEncoding1D(d_model, max_len=max_len)
-
-        # 2. Transformer Encoder Engine
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_head,
-            dim_feedforward=dim_feedforward,
-            dropout=0.1,
-            activation="gelu",
-            batch_first=True
+        self.fiber_conv = nn.Sequential(
+            ResidualBlock1D(num_input_features, 2, kernel_size, dilation=1)
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        # 3. Output Projection Layer back to a 1D probability/signal stream
-        self.output_projection = nn.Linear(d_model, 1)
-
-        implemented_decoders = ["avg", "sum", "avg_n"]
-        if decoder_type not in implemented_decoders:
-            raise NotImplementedError(f"decoder_type not implemented: {decoder_type}")
-
-        self.final_layer = nn.Sequential(nn.GELU())
-
-    def forward(self, x, *args, **kwargs):
-        B, C, L, N = x.shape
-
-        # 1. Standard structural rearrangement to process context length elementwise
-        # [B, C, L, N] -> permute -> [B * N, L, C]
-        x_flat = x.permute(0, 3, 2, 1).reshape(B * N, L, C)
-
-        # 2. Project channel configurations into embedding tracks & add positional information
-        x_proj = self.input_projection(x_flat)
-        x_encoded = self.pos_encoder(x_proj)
-
-        # 3. Evaluate transformer contextual weights sequence-wide
-        transformer_out = self.transformer_encoder(x_encoded) # [B * N, L, d_model]
-
-        # 4. Collapse dimension mappings back to single accessibility vectors
-        out_flat = self.output_projection(transformer_out).squeeze(-1) # [B * N, L]
-
-        # 5. Map directly back to expected canonical workspace orientation: [B, L, N]
-        processed_fibers = out_flat.view(B, N, L).permute(0, 2, 1)
-
-        # 6. Apply backward-compatible resolution decoders
-        if self.decoder_type == "sum":
-            y = torch.sum(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg":
-            y = torch.mean(processed_fibers, dim=-1)
-        elif self.decoder_type == "avg_n":
-            fiber_coverage = kwargs.get("fiber_coverage")
-            if fiber_coverage is None:
-                raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
-            y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
-        else:
-            raise NotImplementedError(f"decoder_type not implemented in forward pass: {self.decoder_type}")
-
-        y_final = self.final_layer(y)
-        return y_final, processed_fibers
-
-class UNet01Conv1d(BaseModel):
-    """
-    1D U-Net Model for Single-Molecule Genomic Sequence Processing.
-    Compresses spatial resolution to capture multi-scale context while
-    dramatically reducing memory footprint for long context windows (5000 bp).
-    """
-    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15):
-        super().__init__(input_flags, dna_type)
-
-        assert decoder_type == "avg_n", f"UNet01Conv1d only supports 'avg_n' decoder, got '{decoder_type}'."
-
-        self.init_args["kernel_size"] = kernel_size
-        self.num_input_features = sum(input_flags)
-        self.kernel_size = kernel_size
-
-        # --- U-Net Architecture Backbone ---
-        # Encoder (Downsampling)
-        self.enc1 = DoubleConv1D(self.num_input_features, 32, kernel_size=kernel_size)
-        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)  # L -> L/2
-
-        self.enc2 = DoubleConv1D(32, 64, kernel_size=kernel_size)
-        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/2 -> L/4
-
-        # Bottleneck
-        self.bottleneck = DoubleConv1D(64, 128, kernel_size=kernel_size)
-
-        # Decoder (Upsampling & Skip Connections)
-        self.up2 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = DoubleConv1D(128, 64, kernel_size=kernel_size)
-
-        self.up1 = nn.ConvTranspose1d(64, 32, kernel_size=2, stride=2)
-        self.dec1 = DoubleConv1D(64, 32, kernel_size=kernel_size)
-
-        # Output projection back to 1 channel (1D signal)
-        self.out_conv = nn.Conv1d(32, 1, kernel_size=1)
-
-        # Non-negative activation applied to individual fiber predictions
+        self.out_conv = nn.Conv1d(2, K, kernel_size=1)
         self.fiber_act = nn.Softplus()
 
     def forward(self, x, fiber_coverage=None, *args, **kwargs):
-        if fiber_coverage is None:
-            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
-
         B, C, L, N = x.shape
+        K = self.out_conv.out_channels
 
-        # 1. Flatten batch and fiber dimensions: [B * N, C, L]
         x_flat = x.permute(0, 3, 1, 2).reshape(B * N, C, L)
-
-        # 2. Encoder Pass
-        e1 = self.enc1(x_flat)      # [B*N, 32, L]
-        p1 = self.pool1(e1)         # [B*N, 32, L/2]
-
-        e2 = self.enc2(p1)          # [B*N, 64, L/2]
-        p2 = self.pool2(e2)         # [B*N, 64, L/4]
-
-        # 3. Bottleneck
-        b = self.bottleneck(p2)     # [B*N, 128, L/4]
-
-        # 4. Decoder Pass with Skip Connections
-        u2 = self.up2(b)            # [B*N, 64, L/2]
-        if u2.shape[-1] != e2.shape[-1]:
-            u2 = F.pad(u2, (0, e2.shape[-1] - u2.shape[-1]))
-        d2 = self.dec2(torch.cat([u2, e2], dim=1))  # [B*N, 64, L/2]
-
-        u1 = self.up1(d2)           # [B*N, 32, L]
-        if u1.shape[-1] != e1.shape[-1]:
-            u1 = F.pad(u1, (0, e1.shape[-1] - u1.shape[-1]))
-        d1 = self.dec1(torch.cat([u1, e1], dim=1))  # [B*N, 32, L]
-
-        # 5. Output projection: [B*N, 1, L]
-        out_flat = self.out_conv(d1)
-
-        # 6. Reshape back to expected workspace orientation: [B, L, N]
-        raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
-
-        # 7. Apply Softplus FIRST to guarantee individual fiber accessibility is strictly >= 0
-        processed_fibers = self.fiber_act(raw_fibers)
-
-        # 8. Aggregate fibers to compute non-negative bulk prediction
-        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
-
-        return y, processed_fibers
-
-class UNet02Conv1dWithDNA(BaseModel):
-    """
-    1D U-Net Model incorporating both Single-Molecule Fiber Features and Reference DNA.
-
-    DNA is processed through a sequence encoder, broadcast across all fibers,
-    and concatenated with fiber features prior to spatial downsampling.
-    """
-    def __init__(self, input_flags, dna_type, decoder_type="avg_n", kernel_size=15, dna_emb_dim=8):
-        super().__init__(input_flags, dna_type)
-
-        assert decoder_type == "avg_n", f"UNet01Conv1dWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
-        assert dna_type in ("both", "ref"), f"dna_type must be 'both' or 'ref', got '{dna_type}'."
-
-        self.init_args["kernel_size"] = kernel_size
-        self.init_args["dna_emb_dim"] = dna_emb_dim
-        self.num_input_features = sum(input_flags)
-        self.kernel_size = kernel_size
-        self.dna_emb_dim = dna_emb_dim
-
-        # --- Reference DNA Encoder ---
-        # Maps [B, 4, L] -> [B, dna_emb_dim, L]
-        self.dna_encoder = DoubleConv1D(4, dna_emb_dim, kernel_size=kernel_size)
-
-        # Fused channels = Fiber features + DNA embedding channels
-        total_in_channels = self.num_input_features + self.dna_emb_dim
-
-        # --- U-Net Backbone ---
-        # Adjusted enc1 channels from 32 to 28 to keep parameter budget balanced
-        self.enc1 = DoubleConv1D(total_in_channels, 28, kernel_size=kernel_size)
-        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)  # L -> L/2
-
-        self.enc2 = DoubleConv1D(28, 64, kernel_size=kernel_size)
-        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)  # L/2 -> L/4
-
-        # Bottleneck
-        self.bottleneck = DoubleConv1D(64, 128, kernel_size=kernel_size)
-
-        # Decoder (Upsampling & Skip Connections)
-        self.up2 = nn.ConvTranspose1d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = DoubleConv1D(128, 64, kernel_size=kernel_size)
-
-        self.up1 = nn.ConvTranspose1d(64, 28, kernel_size=2, stride=2)
-        self.dec1 = DoubleConv1D(56, 28, kernel_size=kernel_size)
-
-        # Output projection
-        self.out_conv = nn.Conv1d(28, 1, kernel_size=1)
-
-        # Activation for non-negative individual fiber predictions
-        self.fiber_act = nn.Softplus()
-
-    def forward(self, x, ref_dna=None, fiber_coverage=None, *args, **kwargs):
-        """
-        Args:
-            x: Fiber features tensor of shape [B, C_fiber, L, N]
-            ref_dna: One-hot encoded reference sequence tensor of shape [B, 4, L]
-            fiber_coverage: Per-position fiber count tensor of shape [B, L]
-        """
-        if fiber_coverage is None:
-            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
-        if ref_dna is None:
-            raise ValueError("Forward pass requires 'ref_dna' tensor.")
-
-        B, C, L, N = x.shape
-
-        # 1. Process Reference DNA: [B, 4, L] -> [B, dna_emb_dim, L]
-        dna_feats = self.dna_encoder(ref_dna)
-
-        # 2. Broadcast DNA features across all N fibers: [B, dna_emb_dim, L, 1] -> [B, dna_emb_dim, L, N]
-        dna_feats_expanded = dna_feats.unsqueeze(-1).expand(-1, -1, -1, N)
-
-        # 3. Concatenate fiber features and DNA features along channel dimension: [B, C + dna_emb_dim, L, N]
-        fused_x = torch.cat([x, dna_feats_expanded], dim=1)
-
-        # 4. Flatten batch and fiber dimensions: [B * N, C + dna_emb_dim, L]
-        x_flat = fused_x.permute(0, 3, 1, 2).reshape(B * N, C + self.dna_emb_dim, L)
-
-        # 5. Encoder Pass
-        e1 = self.enc1(x_flat)      # [B*N, 28, L]
-        p1 = self.pool1(e1)         # [B*N, 28, L/2]
-
-        e2 = self.enc2(p1)          # [B*N, 64, L/2]
-        p2 = self.pool2(e2)         # [B*N, 64, L/4]
-
-        # 6. Bottleneck
-        b = self.bottleneck(p2)     # [B*N, 128, L/4]
-
-        # 7. Decoder Pass
-        u2 = self.up2(b)            # [B*N, 64, L/2]
-        if u2.shape[-1] != e2.shape[-1]:
-            u2 = F.pad(u2, (0, e2.shape[-1] - u2.shape[-1]))
-        d2 = self.dec2(torch.cat([u2, e2], dim=1))  # [B*N, 64, L/2]
-
-        u1 = self.up1(d2)           # [B*N, 28, L]
-        if u1.shape[-1] != e1.shape[-1]:
-            u1 = F.pad(u1, (0, e1.shape[-1] - u1.shape[-1]))
-        d1 = self.dec1(torch.cat([u1, e1], dim=1))  # [B*N, 28, L]
-
-        # 8. Output projection: [B*N, 1, L]
-        out_flat = self.out_conv(d1)
-
-        # 9. Reshape back to workspace orientation: [B, L, N]
-        raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
-
-        # 10. Non-negative activation & fiber averaging
-        processed_fibers = self.fiber_act(raw_fibers)
-        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
-
+        feat = self.fiber_conv(x_flat)                                   # [B*N, 2, L]
+        out_flat = self.out_conv(feat)                                   # [B*N, K, L]
+        raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)       # [B, K, L, N]
+        processed_fibers = self.fiber_act(raw_fibers)                    # [B, K, L, N]
+        cov = fiber_coverage.float().clamp(min=1).unsqueeze(1)           # [B, 1, L]
+        y = processed_fibers.sum(-1) / cov                               # [B, K, L]
         return y, processed_fibers
 
 class UNet03ConvTransformerWithDNA(BaseModel):
@@ -592,14 +237,14 @@ class UNet03ConvTransformerWithDNA(BaseModel):
     - 3-level 1D Conv Encoder: compresses spatial context down to L / 8.
     - Sinusoidal Positional Encoding + Transformer Bottleneck: global spatial attention on L / 8 tokens.
     - 3-level 1D Conv Decoder: upsamples features back to L.
-    - Output projection + Softplus non-negativity + Fiber averaging (decoder_type='avg_n').
+    - Output projection + Softplus non-negativity + coverage-normalized fiber averaging.
     """
 
-    def __init__(self, input_flags, dna_type="none", decoder_type="avg_n",
-                 kernel_size=15, emb_dims=[8, 32, 64, 128], tf_heads=4, tf_layers=2, max_len=1000):
-        super().__init__(input_flags, dna_type)
+    def __init__(self, input_flags, dna_type="none",
+                 kernel_size=15, emb_dims=[8, 32, 64, 128], tf_heads=4,
+                 tf_layers=2, max_len=1000, output_assays=None):
+        super().__init__(input_flags, dna_type, output_assays)
 
-        assert decoder_type == "avg_n", f"UNetTransformerSinusoidalWithDNA only supports 'avg_n' decoder, got '{decoder_type}'."
         assert dna_type in ("none", "ref"), f"dna_type must be 'none' or 'ref', got '{dna_type}'."
 
         self.init_args["kernel_size"] = kernel_size
@@ -655,8 +300,9 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         self.up1 = nn.ConvTranspose1d(self.emb_dims[1], self.emb_dims[1], kernel_size=2, stride=2)  # Output: 24 channels
         self.dec1 = DoubleConv1D(self.emb_dims[1] + self.emb_dims[1], self.emb_dims[1], kernel_size=kernel_size)   # 24 (up1) + 24 (enc1) = 48 channels
 
-        # Output projection
-        self.out_conv = nn.Conv1d(self.emb_dims[1], 1, kernel_size=1)
+        # Output projection — K channels, one per assay
+        K = len(self.init_args["output_assays"])
+        self.out_conv = nn.Conv1d(self.emb_dims[1], K, kernel_size=1)
 
         # Non-negative activation for single-molecule accessibility
         self.fiber_act = nn.Softplus()
@@ -734,11 +380,13 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         d1 = self.dec1(torch.cat([u1, e1], dim=1))
 
         # 6. Output Projection & Fiber Averaging
-        out_flat = self.out_conv(d1)  # [B*N, 1, L]
-        raw_fibers = out_flat.view(B, N, 1, L).permute(0, 2, 3, 1).squeeze(1)
+        K = self.out_conv.out_channels
+        out_flat = self.out_conv(d1)               # [B*N, K, L]
+        raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)  # [B, K, L, N]
 
-        processed_fibers = self.fiber_act(raw_fibers)
-        y = torch.sum(processed_fibers, dim=-1) / fiber_coverage.float().clamp(min=1)
+        processed_fibers = self.fiber_act(raw_fibers)               # [B, K, L, N]
+        cov = fiber_coverage.float().clamp(min=1).unsqueeze(1)      # [B, 1, L]
+        y = processed_fibers.sum(-1) / cov                          # [B, K, L]
 
         return y, processed_fibers
 
@@ -748,48 +396,15 @@ class UNet03ConvTransformerWithDNA(BaseModel):
 def model_selector(model_arg, args):
     model_name = model_arg.lower()
 
-    if model_name=="base01":
+    if model_name == "base01":
         return Base01DebugModel(
                     input_flags=args.input_flags,
                     dna_type=args.dna_type,
-                    decoder_type=args.decoder_type,
-                    kernel_size=args.kernel_size
-                )
-    elif model_name=="deep01":
-        return Deep01ResConv1dBlock(
-                    input_flags=args.input_flags,
-                    dna_type=args.dna_type,
-                    decoder_type=args.decoder_type,
-                    kernel_size=args.kernel_size
+                    kernel_size=args.kernel_size,
+                    output_assays=args.output_assays,
                 )
 
-    elif model_name == "trans01":
-        return TransformerFiber1DModel(
-                    input_flags=args.input_flags,
-                    dna_type=args.dna_type,
-                    decoder_type=args.decoder_type,
-                    d_model=args.d_model,
-                    n_head=args.n_head,
-                    num_layers=args.num_layers,
-                    dim_feedforward=args.dim_feedforward,
-                    max_len=args.context_length
-                )
-
-    elif model_name=="unet01":
-        return UNet01Conv1d(
-                    input_flags=args.input_flags,
-                    dna_type=args.dna_type,
-                    kernel_size=args.kernel_size
-                )
-
-    elif model_name=="unet02":
-        return UNet02Conv1dWithDNA(
-                    input_flags=args.input_flags,
-                    dna_type=args.dna_type,
-                    kernel_size=args.kernel_size
-                )
-
-    elif model_name=="unet03":
+    elif model_name == "unet03":
         return UNet03ConvTransformerWithDNA(
                     input_flags=args.input_flags,
                     dna_type=args.dna_type,
@@ -797,7 +412,8 @@ def model_selector(model_arg, args):
                     max_len=args.context_length,
                     emb_dims=args.emb_dims,
                     tf_heads=args.tf_heads,
-                    tf_layers=args.tf_layers
+                    tf_layers=args.tf_layers,
+                    output_assays=args.output_assays,
                 )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
@@ -807,39 +423,7 @@ def model_selector(model_arg, args):
 # Testing
 
 def tester():
-    B, C_in, L, N = 16, 5, 2048, 200
-    decoder_type = "sum"
-    kernel_size = 15
-    input_flags = [1, 1, 1, 1, 1]
-
-    test_model = Deep01ResConv1dBlock(
-        input_flags=input_flags,
-        dna_type="none",
-        decoder_type=decoder_type,
-        kernel_size=kernel_size
-    )
-
-    test_inp = torch.rand((B, C_in, L, N))
-    fiber_coverage = torch.full((B, L), 15, dtype=torch.float32)
-    test_out, processed = test_model(test_inp, fiber_coverage=fiber_coverage)
-
-    print(f"Output shape: {test_out.shape}")
-    print(f"Processed fibers shape: {processed.shape}")
-
-    # Test Save & Load functionality
-    save_dir = "./test_checkpoints"
-    test_model.save_model(save_dir, epoch=1, external_config={"lr": 1e-3})
-
-    ckpt_path = os.path.join(save_dir, "Model_epoch_1.pt")
-    loaded_model, cfg = Deep01ResConv1dBlock.load_model(ckpt_path)
-
-    print("Successfully tested model save and load!")
-
-    # Cleanup test output
-    if os.path.exists(ckpt_path):
-        os.remove(ckpt_path)
-    if os.path.exists(save_dir):
-        os.rmdir(save_dir)
+    pass
 
 if __name__ == "__main__":
     tester()
