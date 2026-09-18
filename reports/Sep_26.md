@@ -17,7 +17,7 @@ Fill up this table
 <table>
   <thead>
     <tr>
-      <th rowspan="3", style="text-align: center, vertical-align: bottom">Models Trained on</th>
+      <th rowspan="3", style="text-align: center, vertical-align: bottom">Model Trained on</th>
       <th colspan="9", style="text-align: center">Cell types</th>
     </tr>
     <tr>
@@ -26,15 +26,15 @@ Fill up this table
       <th colspan="3", style="text-align: center">HepG2_200U</th>
     </tr>
     <tr>
-      <th>H3K4me3</th>
+      <th style="border-left: 1px solid #ccc">H3K4me3</th>
       <th>H3K27ac</th>
       <th>H3K27me3</th>
-      <th>H3K4me3</th>
+      <th style="border-left: 1px solid #ccc">H3K4me3</th>
       <th>H3K27ac</th>
       <th>H3K27me3</th>
-      <th>H3K4me3</th>
+      <th style="border-left: 1px solid #ccc">H3K4me3</th>
       <th>H3K27ac</th>
-      <th>H3K27me3</th>
+      <th style="border-right: 1px solid #ccc">H3K27me3</th>
     </tr>
   </thead>
   <tbody>
