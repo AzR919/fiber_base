@@ -33,7 +33,7 @@ pillow==11.1.0+computecanada
 Pillow_SIMD==9.5.0.post2+computecanada
 platformdirs==4.6.0
 polars==1.35.1
-polars-runtime-32==1.41.1
+polars-runtime-32==1.35.1
 protobuf==6.33.0+computecanada
 psutil==7.0.0+computecanada
 pyBigWig==0.3.23+computecanada
