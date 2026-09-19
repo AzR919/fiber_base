@@ -104,65 +104,96 @@ class Evaluator:
         }
 
 
-def run_final_eval(model, eval_config, train_args, wandb_run, device):
-    """Build eval dataset from config, run Evaluator, log results to wandb_run."""
+def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_output_dir=None):
+    """
+    Run evaluation over a list of eval config paths.
+    Logs to wandb_run immediately after each config (if wandb_run is not None).
+    Returns a summary dict keyed by cell type.
+    """
     print("\n" + "=" * 60)
-    print(" Running Final Model Test & Deconvolution Dashboard...")
+    print(f" Running Final Evaluation ({len(eval_configs)} config(s))...")
     print("=" * 60)
 
-    eval_cfg = load_config_file(eval_config)
     metapaths = None
     if hasattr(train_args, "metapaths") and os.path.exists(train_args.metapaths):
         metapaths = load_metapaths(train_args.metapaths)
 
     output_assays = model.init_args.get("output_assays", ["atac"])
+    summary = {}
 
-    if metapaths is not None:
-        eval_metadata = resolve_config_with_metapaths(eval_cfg, metapaths, output_assays)
-    else:
-        eval_metadata = eval_cfg.get("metadata", {})
+    for eval_config_path in eval_configs:
+        eval_cfg = load_config_file(eval_config_path)
 
-    eval_seed = eval_cfg.get("seed", 919)
-    num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
-    test_set = make_fiber_dataset(
-        eval_cfg.get("dataset_type", "single"),
-        mode="eval",
-        metadata=eval_metadata,
-        fibers_per_entry=eval_cfg.get("fibers_per_entry", train_args.fibers_per_entry),
-        context_length=eval_cfg.get("context_length", train_args.context_length),
-        iters_per_epoch=num_sample_ccres,
-        num_sample_ccres=num_sample_ccres,
-        input_flags=model.init_args["input_flags"],
-        dna_type=model.init_args["dna_type"],
-        output_assays=output_assays,
-        seed=eval_seed,
-    )
+        cell_types_dict = eval_cfg.get("cell_types", {})
+        cell_type = next(iter(cell_types_dict)) if cell_types_dict else "unknown"
 
-    evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed)
-    eval_results = evaluator.evaluate()
-    test_log_dict = {
-        "test_loss": eval_results["composite"]["loss"],
-        **{f"test_loss_{assay}": data["loss"] for assay, data in eval_results.get("per_assay", {}).items()}
-    }
+        print(f"\n[eval] Cell type: {cell_type} | Config: {eval_config_path}")
 
-    assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
-    locus_records = eval_results.get("locus_records", [])
-    wandb_image_list = []
-    for idx, record in enumerate(locus_records):
-        fig = plot_evaluator_record_t(
-            record_t=record,
-            input_flags=test_set.input_flags,
-            assay_avg_losses=assay_avg,
+        if metapaths is not None:
+            eval_metadata = resolve_config_with_metapaths(eval_cfg, metapaths, output_assays)
+        else:
+            eval_metadata = eval_cfg.get("metadata", {})
+
+        eval_seed = eval_cfg.get("seed", 919)
+        num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
+        test_set = make_fiber_dataset(
+            eval_cfg.get("dataset_type", "single"),
+            mode="eval",
+            metadata=eval_metadata,
+            fibers_per_entry=eval_cfg.get("fibers_per_entry", getattr(train_args, "fibers_per_entry", 200)),
+            context_length=eval_cfg.get("context_length", getattr(train_args, "context_length", 4096)),
+            iters_per_epoch=num_sample_ccres,
+            num_sample_ccres=num_sample_ccres,
+            input_flags=model.init_args["input_flags"],
+            dna_type=model.init_args["dna_type"],
             output_assays=output_assays,
-            mode="Test"
+            seed=eval_seed,
         )
-        chr_name = record["locus"][0][0]
-        start = record["locus"][1][0]
-        end = record["locus"][2][0]
-        caption = f"Locus {idx}/{eval_results['num_locus']}: {chr_name}:{start}-{end}"
-        wandb_image_list.append(wandb.Image(fig, caption=caption))
-        plt.close(fig)
 
-    test_log_dict["Evaluation/Deconvolution_Dashboards"] = wandb_image_list
-    wandb_run.log(test_log_dict)
-    print(f" Successfully logged {len(wandb_image_list)} evaluation dashboards to WandB!")
+        save_path = None
+        if plots_output_dir is not None:
+            save_path = os.path.join(plots_output_dir, cell_type) + "/"
+            os.makedirs(save_path, exist_ok=True)
+
+        evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed)
+        eval_results = evaluator.evaluate(save_path=save_path)
+
+        composite_loss = eval_results["composite"]["loss"]
+        print(f"[eval] {cell_type} composite loss: {composite_loss:.6f}")
+
+        summary[cell_type] = {
+            "eval_config": eval_config_path,
+            "composite_loss": composite_loss,
+            "per_assay_loss": {a: eval_results["per_assay"][a]["loss"] for a in output_assays},
+            "num_loci": eval_results["num_locus"],
+        }
+
+        if wandb_run is not None:
+            prefix = f"test/{cell_type}"
+            ct_log_dict = {f"{prefix}/loss": composite_loss}
+            for assay, data in eval_results.get("per_assay", {}).items():
+                ct_log_dict[f"{prefix}/loss_{assay}"] = data["loss"]
+
+            assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
+            wandb_image_list = []
+            for idx, record in enumerate(eval_results.get("locus_records", [])):
+                fig = plot_evaluator_record_t(
+                    record_t=record,
+                    input_flags=test_set.input_flags,
+                    assay_avg_losses=assay_avg,
+                    output_assays=output_assays,
+                    mode="Test"
+                )
+                chr_name = record["locus"][0][0]
+                start = record["locus"][1][0]
+                end = record["locus"][2][0]
+                caption = f"[{cell_type}] Locus {idx}/{eval_results['num_locus']}: {chr_name}:{start}-{end}"
+                wandb_image_list.append(wandb.Image(fig, caption=caption))
+                plt.close(fig)
+
+            ct_log_dict[f"Evaluation/{cell_type}_Dashboards"] = wandb_image_list
+            wandb_run.log(ct_log_dict)
+            print(f"[eval] Logged {len(wandb_image_list)} dashboards for {cell_type} to WandB.")
+
+    print(f"\n Evaluation complete for {len(eval_configs)} cell type(s).")
+    return summary

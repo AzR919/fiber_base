@@ -25,8 +25,8 @@ def get_args():
                              help="Path to JSON or YAML file containing model configuration")
     config_group.add_argument("--train_config", type=str, default=None,
                              help="Path to JSON or YAML file containing trainer configuration")
-    config_group.add_argument("--eval_config", type=str, default=None,
-                             help="Path to JSON or YAML file containing evaluation configuration")
+    config_group.add_argument("--eval_configs", type=str, nargs="+", default=None,
+                             help="One or more eval YAML config paths, one per cell type")
     config_group.add_argument("--metapaths", type=str, default="configs/metapaths.yaml",
                              help="Path to metapaths YAML file for centralized path resolution")
 

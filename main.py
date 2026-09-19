@@ -37,7 +37,7 @@ def main():
 
     model = model_selector(args.model, args)
 
-    wandb_run = setup_wandb_run(args, model, with_test_loss=args.eval_config is not None)
+    wandb_run = setup_wandb_run(args, model, with_test_loss=args.eval_configs is not None)
     if wandb_run is None: return
 
     input_size = (args.batch_size, sum(args.input_flags), args.context_length, args.fibers_per_entry)
@@ -49,8 +49,8 @@ def main():
 
     trainer.train(save_dir=res_dir)
 
-    if args.eval_config is not None:
-        run_final_eval(model, args.eval_config, args, wandb_run, trainer.device)
+    if args.eval_configs is not None:
+        run_final_eval(model, args.eval_configs, args, wandb_run, trainer.device)
 
 
 if __name__ == "__main__":

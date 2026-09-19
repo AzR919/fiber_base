@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-16_00_gm12878_atac_test
+#SBATCH --job-name=2026-09-19_00_eval
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -27,14 +27,11 @@ echo "Working directory is $(pwd)"
 # Activate virtual environment
 source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
-# Run the training
-python main.py \
-  --data_config configs/data/data12_gm_atac.yaml \
-  --model_config configs/models/model10_uct_mid.yaml \
-  --train_config configs/training/train01.yaml \
-  --eval_configs configs/evals/eval12_gm_atac_mini.yaml \
-  --name_prefix clean_up_test \
-  --epochs 2
+# Run evaluation — fill in --checkpoint before submitting
+python eval.py \
+  --checkpoint results/FILL_IN/Model_epoch_N.pt \
+  --eval_configs configs/evals/eval12_gm_atac.yaml \
+  --wandb
 
 # Print job completion time
 echo "Job finished on $(date)"
