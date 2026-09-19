@@ -30,9 +30,9 @@ if !ERRORLEVEL! neq 0 (
 
 :: Remote is ground truth: pull remote -> local before starting Mutagen (skip with --no-pull)
 if !NO_PULL!==0 (
-    echo [sync] Pulling from remote (remote is ground truth)...
+    echo [sync] Pulling from remote (remote is ground truth)
     wsl rsync -avz --delete ^
-      --exclude="wandb/" --exclude="results/" --exclude="ignore/" ^
+      --exclude="wandb/" --exclude="results/" --exclude="ignore/" --exclude="misc/sync_fiber.bat" ^
       --exclude="__pycache__/" --exclude="*.pyc" --exclude="*.pyo" --exclude=".git/" ^
       !REMOTE!/ !LOCAL!/
 ) else (
