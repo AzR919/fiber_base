@@ -12,8 +12,10 @@ Usage:
 """
 
 import os
+import re
 import json
 import argparse
+import datetime
 from types import SimpleNamespace
 
 import torch
@@ -60,7 +62,11 @@ def main():
     model.to(args.device)
     model.eval()
 
-    run_name = os.path.basename(os.path.dirname(os.path.abspath(args.checkpoint))) + "_eval"
+    run_dir = os.path.basename(os.path.dirname(os.path.abspath(args.checkpoint)))
+    base_name = re.sub(r'^\d{2}-\d{2}-\d{2}_T\d{2}-\d{2}-\d{2}_?', '', run_dir)
+    wandb_run_name = f"{base_name}_eval"
+    now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
+    run_name = f"{now}_{base_name}_eval"
 
     # Minimal namespace so run_final_eval has fallback values for context_length / fibers_per_entry
     train_args_ns = SimpleNamespace(
@@ -75,7 +81,7 @@ def main():
             project="fiber",
             entity="liblab",
             job_type="eval",
-            name=run_name,
+            name=wandb_run_name,
             config={"checkpoint": args.checkpoint, "eval_configs": args.eval_configs},
         )
 
