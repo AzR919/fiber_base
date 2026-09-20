@@ -37,9 +37,9 @@ def parse_args():
                         help="Path to metapaths YAML for path resolution.")
     parser.add_argument("--device", type=str,
                         default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default="./results")
     parser.add_argument("--save_plots", action="store_true",
-                        help="Save per-locus dashboard plots to output_dir/{cell_type}/.")
+                        help="Save per-locus dashboard plots to output_dir/{runname}/{cell_type}/.")
     parser.add_argument("--wandb", action="store_true",
                         help="Log results to a new Weights & Biases run.")
     return parser.parse_args()
@@ -85,7 +85,7 @@ def main():
             config={"checkpoint": args.checkpoint, "eval_configs": args.eval_configs},
         )
 
-    output_dir = args.output_dir if args.output_dir is not None else run_name
+    output_dir = os.path.join(args.output_dir, run_name)
     plots_dir = output_dir if args.save_plots else None
     summary = run_final_eval(
         model, args.eval_configs, train_args_ns, wandb_run, args.device,
