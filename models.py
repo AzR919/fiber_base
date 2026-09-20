@@ -4,6 +4,7 @@ Main model file
 import os
 import math
 import inspect
+from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
@@ -78,27 +79,17 @@ class BaseModel(nn.Module):
         state_dict = checkpoint["state_dict"]
         config = checkpoint.get("config", {})
 
-        # Robustly extract input_flags
-        input_flags = init_args.get("input_flags")
-
-        if input_flags is None:
+        # Sanity check
+        if not init_args.get("input_flags"):
             raise ValueError(f"Checkpoint at {filepath} does not contain 'input_flags'.")
 
-        # DYNAMIC ARGUMENT FILTERING
-        # Get the signature of the current class's __init__ method
-        sig = inspect.signature(cls.__init__)
-        valid_params = set(sig.parameters.keys()) - {"self", "args", "kwargs"}
+        model_name = config.get("model") if isinstance(config, dict) else None
+        if not model_name:
+            raise ValueError(
+                f"Checkpoint at {filepath} has no 'model' key in config — cannot determine architecture."
+            )
 
-        # Filter config to only include arguments that the constructor actually accepts
-        init_kwargs = {k: v for k, v in init_args.items() if k in valid_params}
-
-        # Instantiate the model
-        try:
-            model = cls(**init_kwargs)
-        except TypeError as e:
-            raise TypeError(f"Failed to instantiate {cls.__name__}. Missing required args? "
-                            f"Expected: {list(valid_params)}, Got: {list(init_kwargs.keys())}. Error: {e}")
-
+        model = model_selector(model_name, config)
         model.load_state_dict(state_dict)
         print(f"Model successfully reconstituted from: {filepath}")
         return model, config
@@ -394,6 +385,8 @@ class UNet03ConvTransformerWithDNA(BaseModel):
 # Model Selection Factory
 
 def model_selector(model_arg, args):
+    if isinstance(args, dict):
+        args = SimpleNamespace(**args)
     model_name = model_arg.lower()
 
     if model_name == "base01":
