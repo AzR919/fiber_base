@@ -24,7 +24,7 @@ Fill up this table
     </tr>
     <tr>
       <th colspan="4", style="text-align: center">GM12878</th>
-      <th colspan="4", style="text-align: center">K562</th>
+      <th colspan="4", style="text-align: center">K562_200U</th>
       <th colspan="4", style="text-align: center">HepG2_200U</th>
     </tr>
     <tr>
