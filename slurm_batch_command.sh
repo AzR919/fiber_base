@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-19_00_gm12878_full
+#SBATCH --job-name=2026-09-19_01_gm12878_all_assays
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -30,10 +30,10 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Run the training
 python main.py \
   --data_config configs/data/data12_gm_atac.yaml \
-  --model_config configs/models/model10_uct_mid.yaml \
+  --model_config configs/models/model11_uct_mid_all_A.yaml \
   --train_config configs/training/train01.yaml \
   --eval_configs configs/evals/eval12_gm_atac_mini.yaml \
-  --name_prefix full_GM_run
+  --name_prefix All_A_GM_run
 
 # Print job completion time
 echo "Job finished on $(date)"
