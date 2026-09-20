@@ -1,0 +1,10 @@
+# GM12878 ATAC-seq, single-cell training
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+cell_types:
+  GM12878:
+  K562_200U:
+  HepG2_200U:
