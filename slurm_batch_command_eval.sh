@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-19_02_gm12878_eval_full
+#SBATCH --job-name=2026-09-20_03_HepG2_eval_full
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --output=logs/%x.out
@@ -29,7 +29,7 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
 # Run evaluation — fill in --checkpoint before submitting
 python eval.py \
-  --checkpoint results/26-09-19_T16-40-19_All_A_GM_run_data12_gm_atac_model11_uct_mid_all_A_train01/Model_epoch_25.pt \
+  --checkpoint results/26-09-21_T01-05-06_All_A_Hep_run_data15_HepG2_200U_model11_uct_mid_all_A_train01_eval/Model_epoch_25.pt \
   --eval_configs configs/evals/eval13_GM12878.yaml configs/evals/eval14_K562_200U.yaml configs/evals/eval15_HepG2_200U.yaml \
   --wandb
 
