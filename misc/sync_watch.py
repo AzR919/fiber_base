@@ -3,16 +3,19 @@
 Event-driven local→remote sync using rsync + watchdog.
 Usage: sync_watch.py <local_dir> <remote:path>
 
-Pushes local saves to remote. logs/ and plots/ are excluded entirely.
+On each save, syncs only the changed file(s) to remote.
+logs/ and plots/ are excluded entirely.
 """
 
+import os
 import sys
+import fnmatch
 import threading
 import subprocess
 import argparse
 from pathlib import Path
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEventHandler, FileDeletedEvent, FileMovedEvent
 
 EXCLUDES = [
     "wandb/", "results/", "ignore/",
@@ -23,39 +26,53 @@ EXCLUDES = [
 DEBOUNCE_SECS = 0.5
 
 
-def build_rsync_cmd(src, dst, extra_flags=None):
-    exclude_args = []
+def is_excluded(rel_path):
+    """Return True if rel_path matches any EXCLUDES pattern."""
     for pattern in EXCLUDES:
-        exclude_args += ["--exclude", pattern]
-    flags = ["-avz", "--delete"] + (extra_flags or [])
-    return ["rsync"] + flags + exclude_args + [src, dst]
+        if pattern.endswith("/"):
+            # directory prefix: rel_path starts with this dir
+            if rel_path.startswith(pattern) or rel_path == pattern.rstrip("/"):
+                return True
+        else:
+            # glob pattern: match against the filename or full rel path
+            if fnmatch.fnmatch(os.path.basename(rel_path), pattern) or \
+               fnmatch.fnmatch(rel_path, pattern):
+                return True
+    return False
 
 
-def run_rsync(src, dst, label="→"):
-    cmd = build_rsync_cmd(src, dst)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
-        changed = [l for l in result.stdout.splitlines()
-                   if l and not l.startswith(("sending", "sent", "total", "receiving", "recv", "./"))]
-        if changed:
-            print(f"[sync {label}] " + ", ".join(changed[:5]) +
-                  (f" (+{len(changed)-5} more)" if len(changed) > 5 else ""))
-    else:
-        print(f"[sync {label}] ERROR: {result.stderr.strip()}", file=sys.stderr)
+def print_synced(files, label="local→remote"):
+    names = [os.path.basename(f) for f in files]
+    msg = ", ".join(names[:5])
+    if len(names) > 5:
+        msg += f" (+{len(names)-5} more)"
+    print(f"[sync {label}] {msg}")
 
 
 class DebounceHandler(FileSystemEventHandler):
     def __init__(self, local_dir, remote):
         super().__init__()
-        self._local = local_dir.rstrip("/") + "/"
-        self._remote = remote.rstrip("/") + "/"
+        self._local = local_dir.rstrip("/")
+        host, remote_path = remote.split(":", 1)
+        self._host = host
+        self._remote_path = remote_path.rstrip("/")
+        self._remote = remote
         self._timer = None
         self._lock = threading.Lock()
+        self._pending = set()         # paths to rsync (modified/created)
+        self._pending_deletes = set() # paths to delete on remote
 
     def on_any_event(self, event):
         if event.is_directory:
             return
+        rel = os.path.relpath(event.src_path, self._local)
+        if is_excluded(rel):
+            return
         with self._lock:
+            if isinstance(event, (FileDeletedEvent, FileMovedEvent)):
+                self._pending_deletes.add(event.src_path)
+            else:
+                self._pending.add(event.src_path)
             if self._timer is not None:
                 self._timer.cancel()
             self._timer = threading.Timer(DEBOUNCE_SECS, self._do_sync)
@@ -63,11 +80,43 @@ class DebounceHandler(FileSystemEventHandler):
             self._timer.start()
 
     def _do_sync(self):
-        run_rsync(self._local, self._remote, label="local→remote")
+        with self._lock:
+            changes = set(self._pending)
+            deletes = set(self._pending_deletes)
+            self._pending.clear()
+            self._pending_deletes.clear()
+
+        if changes:
+            # rsync -avzR with /. anchor preserves relative paths
+            anchored = [
+                os.path.join(self._local, ".", os.path.relpath(p, self._local))
+                for p in changes
+            ]
+            cmd = ["rsync", "-avzR"] + anchored + [self._remote.rstrip("/") + "/"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                synced = [l for l in result.stdout.splitlines()
+                          if l and not l.startswith(("sending", "sent", "total", "receiving", "recv", "./"))]
+                if synced:
+                    print_synced(synced)
+            else:
+                print(f"[sync] ERROR: {result.stderr.strip()}", file=sys.stderr)
+
+        for path in deletes:
+            rel = os.path.relpath(path, self._local)
+            remote_path = f"{self._remote_path}/{rel}"
+            result = subprocess.run(
+                ["ssh", self._host, f"rm -rf '{remote_path}'"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                print(f"[sync local→remote] deleted {rel}")
+            else:
+                print(f"[sync] ERROR deleting {rel}: {result.stderr.strip()}", file=sys.stderr)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Watch local dir and sync to remote via rsync.")
+    parser = argparse.ArgumentParser(description="Watch local dir and sync changed files to remote.")
     parser.add_argument("local_dir", help="Local directory to watch")
     parser.add_argument("remote", help="Remote destination, e.g. nibi:/project/.../fiber_base")
     args = parser.parse_args()
