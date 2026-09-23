@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-09-21_00_GM_K5_eval_full
+#SBATCH --job-name=2026-09-22_00_GM_K5_Hep_eval_full
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --output=logs/%x.out
@@ -29,7 +29,7 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
 # Run evaluation — fill in --checkpoint before submitting
 python eval.py \
-  --checkpoint results/26-09-21_T05-57-36_All_A_GM_K5_run_data16_GM12878_K562_200U_model11_uct_mid_all_A_train01/Model_epoch_25.pt \
+  --checkpoint results/26-09-22_T11-37-41_All_A_GM_K5_Hep_run_data17_GM12878_K562_200U_HepG2_200U_model11_uct_mid_all_A_train01/Model_epoch_25.pt \
   --eval_configs configs/evals/eval13_GM12878.yaml configs/evals/eval14_K562_200U.yaml configs/evals/eval15_HepG2_200U.yaml \
   --wandb
 
