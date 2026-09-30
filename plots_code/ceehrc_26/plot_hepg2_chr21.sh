@@ -24,7 +24,8 @@ echo "Working directory is $(pwd)"
 
 source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
-# One-off plotting job: every HepG2_200U chr21 cCRE, 3 models.
+# One-off plotting job: pre-filters HepG2_200U chr21 cCREs to those with
+# ATAC & H3K4me3 & H3K27ac signal > 1.5, then plots that set for 3 models.
 # Rerunning after a timeout is safe — already-plotted loci are skipped.
 python plots_code/ceehrc_26/plotter.py
 

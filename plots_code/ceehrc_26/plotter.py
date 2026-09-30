@@ -1,15 +1,24 @@
 """
 One-off script for the ceehrc_26 poster/talk.
 
-Plots every HepG2_200U cCRE on chr21 (the full eval15_HepG2_200U.yaml set,
-~11,373 loci) once per model, for three models:
+Rather than plotting all ~11,373 HepG2_200U chr21 cCREs (too slow to run, too
+many images to sift through), this first does a cheap pre-filter over the
+ground-truth bulk signal alone (bigWig lookup only, no fiber-read gathering)
+and keeps only loci where ATAC, H3K4me3, AND H3K27ac all peak above 1.5
+(asinh-space, same units shown in the dashboards; H3K27me3 ignored — rarely
+present in cCREs). Only the much smaller filtered set then gets the expensive
+fiber-gathering + model inference, once per model, for three models:
   - hep_only:  trained only on HepG2_200U
   - gm_k5:     trained on GM12878 + K562_200U (never saw HepG2_200U)
   - all_three: trained on GM12878 + K562_200U + HepG2_200U
 
+The filter pass is independent of any checkpoint (it only reads HepG2_200U's
+own ground-truth bigWigs), so it runs once and the same locus set is reused
+for all three models — meaning the three model directories end up with
+directly comparable plots of the exact same loci.
+
 Output goes to ignore/ceehrc_26/<model_label>/, one PNG dashboard per locus,
-named "<index>_<chrom>_<start>-<end>.png" so the same locus can be compared
-across the three model directories and files sort in genomic order.
+named "<index>_<chrom>_<start>-<end>.png".
 
 Usage (from anywhere, paths are resolved relative to the repo root):
     python plots_code/ceehrc_26/plotter.py
@@ -58,6 +67,15 @@ MODELS = {
     ),
 }
 
+# Filter-pass config. These match model11_uct_mid_all_A.yaml (used by all 3
+# checkpoints above) — only used to construct the probe dataset that reads
+# ground-truth bigWigs; irrelevant to the (skipped) fiber-gathering step.
+SIGNAL_THRESHOLD = 1.5
+FILTER_ASSAYS = ["atac", "h3k4me3", "h3k27ac"]
+OUTPUT_ASSAYS = ["atac", "h3k4me3", "h3k27ac", "h3k27me3"]
+PROBE_INPUT_FLAGS = [1, 1, 1, 1, 1]
+PROBE_DNA_TYPE = "ref"
+
 
 def build_dataset(output_assays, input_flags, dna_type):
     eval_cfg = load_config_file(EVAL_CONFIG_PATH)
@@ -83,7 +101,40 @@ def build_dataset(output_assays, input_flags, dna_type):
     )
 
 
-def plot_model(label, checkpoint_path):
+def build_filtered_ccres():
+    """
+    Cheap pre-filter over ground-truth bulk signal only (no fiber gathering).
+    Keeps a raw (chrom, start, end) cCRE entry iff ATAC, H3K4me3, and H3K27ac
+    all peak above SIGNAL_THRESHOLD somewhere in the expanded context window.
+    Independent of model checkpoint — HepG2_200U ground truth is fixed.
+    """
+    dataset = build_dataset(OUTPUT_ASSAYS, PROBE_INPUT_FLAGS, PROBE_DNA_TYPE)
+    dataset.init_worker_resources()
+
+    assay_idx = {a: OUTPUT_ASSAYS.index(a) for a in FILTER_ASSAYS}
+    total = len(dataset.ccre_list)
+    kept = []
+
+    start_time = time.time()
+    for i, entry in enumerate(dataset.ccre_list):
+        locus = dataset.expand_ccre_locus(*entry, jitter_range=0)
+        sig = dataset.get_other_bw_data(0, *locus)
+        if torch.isnan(sig).any():
+            continue
+        if all(sig[assay_idx[a]].max().item() > SIGNAL_THRESHOLD for a in FILTER_ASSAYS):
+            kept.append(tuple(entry))
+
+        if (i + 1) % 2000 == 0:
+            print(f"  filter: scanned {i + 1}/{total}, {len(kept)} passing so far "
+                  f"({time.time() - start_time:.0f}s elapsed)", flush=True)
+
+    print(f"Filter pass: {len(kept)} / {total} cCREs passed "
+          f"({' & '.join(FILTER_ASSAYS)} > {SIGNAL_THRESHOLD}), "
+          f"{time.time() - start_time:.0f}s total", flush=True)
+    return kept
+
+
+def plot_model(label, checkpoint_path, filtered_ccres):
     print(f"\n=== [{label}] loading {checkpoint_path} ===", flush=True)
     model, _ = BaseModel.load_model(checkpoint_path, map_location=DEVICE)
     model.to(DEVICE)
@@ -94,6 +145,9 @@ def plot_model(label, checkpoint_path):
     dna_type = model.init_args["dna_type"]
 
     dataset = build_dataset(output_assays, input_flags, dna_type)
+    # Restrict iteration to the pre-filtered loci (shared across all models).
+    dataset.ccre_list = filtered_ccres
+    dataset.num_sample_ccres = -1
 
     out_dir = os.path.join(OUT_ROOT, label)
     os.makedirs(out_dir, exist_ok=True)
@@ -144,11 +198,6 @@ def plot_model(label, checkpoint_path):
             plt.close(fig)
             plotted += 1
 
-            if plotted % 200 == 0:
-                elapsed = time.time() - start_time
-                print(f"  [{label}] plotted {plotted} (skipped {skipped}) — "
-                      f"{elapsed / plotted:.2f}s/plot avg, {elapsed / 60:.1f} min elapsed", flush=True)
-
     total_time = time.time() - start_time
     print(f"=== [{label}] done: {plotted} plotted, {skipped} already existed, "
           f"{total_time / 60:.1f} min — saved to {out_dir} ===", flush=True)
@@ -159,7 +208,9 @@ if __name__ == "__main__":
     print(f"Output root: {OUT_ROOT}")
     os.makedirs(OUT_ROOT, exist_ok=True)
 
+    filtered_ccres = build_filtered_ccres()
+
     for label, ckpt in MODELS.items():
-        plot_model(label, ckpt)
+        plot_model(label, ckpt, filtered_ccres)
 
     print("\nAll models done.", flush=True)
