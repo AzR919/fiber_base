@@ -290,15 +290,28 @@ def plot_single_column_fiber_stack(
     mode="Test",
 ):
     """
-    Bulk signal and individual fiber predictions stacked vertically in a single column.
+    Bulk signal and individual fiber predictions stacked vertically.
 
-    Layout: [Bulk comparison] then per-fiber [Input features | Accessibility signal].
-    true_bulk, pred_bulk: (L,) numpy arrays.
-    fiber_seq_inp: (C, L, N) numpy array.
-    processed_fibers: (L, N) numpy array.
+    Layout: [Bulk comparison] then per-fiber [Input features | Accessibility signal],
+    in a single column. Pass lists instead of single values for true_bulk,
+    pred_bulk, processed_fibers, and bulk_name to render multiple assays as
+    side-by-side columns (same selected fibers, same fiber_seq_inp, shared
+    across every column) instead of just one.
+
+    true_bulk, pred_bulk: (L,) numpy array, or list of K (L,) arrays.
+    fiber_seq_inp: (C, L, N) numpy array — shared across columns.
+    processed_fibers: (L, N) numpy array, or list of K (L, N) arrays.
+    bulk_name: str, or list of K strings — must match true_bulk/pred_bulk/processed_fibers.
     filter_fn: callable(fiber_idx, fiber_seq_inp) -> bool, or None.
     Returns (Figure, last_used_idx) or (None, last_used_idx).
     """
+    is_multi_col = isinstance(true_bulk, (list, tuple))
+    true_bulks = list(true_bulk) if is_multi_col else [true_bulk]
+    pred_bulks = list(pred_bulk) if is_multi_col else [pred_bulk]
+    processed_fibers_list = list(processed_fibers) if is_multi_col else [processed_fibers]
+    bulk_names = list(bulk_name) if isinstance(bulk_name, (list, tuple)) else [bulk_name] * len(true_bulks)
+    K = len(true_bulks)
+
     total_fibers = fiber_seq_inp.shape[-1]
     seq_len = fiber_seq_inp.shape[1]
 
@@ -316,48 +329,56 @@ def plot_single_column_fiber_stack(
         return None, last_used_idx
 
     num_selected = len(selected_indices)
-    fig = plt.figure(figsize=(16, 2.2 * (1 + num_selected)))
-    gs = gridspec.GridSpec(1 + num_selected, 1, figure=fig, hspace=0.45)
-
-    ax_bulk_row = fig.add_subplot(gs[0, 0])
-    ax_bulk_row.plot(true_bulk, color='dimgray', lw=1.5, label=bulk_name)
-    ax_bulk_row.plot(pred_bulk, color='darkorange', lw=1.5, label='Predicted', alpha=0.85)
-    ax_bulk_row.set_ylabel("Bulk Intensity", fontsize=10, fontweight='bold')
-    ax_bulk_row.legend(loc='upper right', frameon=False)
-    ax_bulk_row.set_xlim(0, seq_len)
-
-    title_str = f"Bulk & Single Fiber Stack Overview ({mode})"
-    if locus is not None:
-        chr_name, s, e = locus
-        title_str += f"\n{chr_name}:{s}-{e}"
-    ax_bulk_row.set_title(title_str, fontsize=12, fontweight='bold', pad=10)
+    fig = plt.figure(figsize=(16 * K, 2.2 * (1 + num_selected)))
+    gs = gridspec.GridSpec(1 + num_selected, K, figure=fig, hspace=0.45, wspace=0.25)
 
     x_coords = np.arange(seq_len)
-    global_max_y = max(1.0, float(processed_fibers[:, selected_indices].max()))
 
-    for i, fiber_idx in enumerate(selected_indices):
-        fiber_gs = gridspec.GridSpecFromSubplotSpec(
-            2, 1, subplot_spec=gs[i + 1, 0], hspace=0.0, height_ratios=[1, 1.2]
-        )
+    for col in range(K):
+        true_bulk_c, pred_bulk_c = true_bulks[col], pred_bulks[col]
+        proc_c, name_c = processed_fibers_list[col], bulk_names[col]
 
-        ax_inp = fig.add_subplot(fiber_gs[0, 0], sharex=ax_bulk_row)
-        _render_single_fiber_features(ax_inp, fiber_seq_inp[:, :, fiber_idx], input_flags)
-        ax_inp.set_title(f"Fiber #{fiber_idx}", fontsize=9, fontweight='bold', loc='left', pad=2)
-        ax_inp.set_xticklabels([])
+        ax_bulk_row = fig.add_subplot(gs[0, col])
+        ax_bulk_row.plot(true_bulk_c, color='dimgray', lw=1.5, label=name_c)
+        ax_bulk_row.plot(pred_bulk_c, color='darkorange', lw=1.5, label='Predicted', alpha=0.85)
+        ax_bulk_row.set_ylabel("Bulk Intensity", fontsize=10, fontweight='bold')
+        ax_bulk_row.legend(loc='upper right', frameon=False)
+        ax_bulk_row.set_xlim(0, seq_len)
 
-        ax_proc = fig.add_subplot(fiber_gs[1, 0], sharex=ax_bulk_row)
-        proc_signal = processed_fibers[:, fiber_idx]
-        ax_proc.plot(x_coords, proc_signal, color='firebrick', lw=1.2)
-        ax_proc.fill_between(x_coords, 0, proc_signal, color='crimson', alpha=0.45)
-        ax_proc.set_ylim(0, global_max_y * 1.05)
-        ax_proc.set_ylabel("Accessibility", fontsize=8, fontweight='bold')
-
-        if i < num_selected - 1:
-            ax_proc.set_xticklabels([])
+        if K == 1:
+            title_str = f"Bulk & Single Fiber Stack Overview ({mode})"
         else:
-            ax_proc.set_xlabel("Genomic Position (bp)", fontsize=10, fontweight='bold')
+            title_str = f"{name_c} — Bulk & Single Fiber Stack ({mode})"
+        if locus is not None:
+            chr_name, s, e = locus
+            title_str += f"\n{chr_name}:{s}-{e}"
+        ax_bulk_row.set_title(title_str, fontsize=12, fontweight='bold', pad=10)
 
-    plt.subplots_adjust(top=0.95, bottom=0.05, left=0.08, right=0.92)
+        global_max_y = max(1.0, float(proc_c[:, selected_indices].max()))
+
+        for i, fiber_idx in enumerate(selected_indices):
+            fiber_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, subplot_spec=gs[i + 1, col], hspace=0.0, height_ratios=[1, 1.2]
+            )
+
+            ax_inp = fig.add_subplot(fiber_gs[0, 0], sharex=ax_bulk_row)
+            _render_single_fiber_features(ax_inp, fiber_seq_inp[:, :, fiber_idx], input_flags)
+            ax_inp.set_title(f"Fiber #{fiber_idx}", fontsize=9, fontweight='bold', loc='left', pad=2)
+            ax_inp.set_xticklabels([])
+
+            ax_proc = fig.add_subplot(fiber_gs[1, 0], sharex=ax_bulk_row)
+            proc_signal = proc_c[:, fiber_idx]
+            ax_proc.plot(x_coords, proc_signal, color='firebrick', lw=1.2)
+            ax_proc.fill_between(x_coords, 0, proc_signal, color='crimson', alpha=0.45)
+            ax_proc.set_ylim(0, global_max_y * 1.05)
+            ax_proc.set_ylabel("Accessibility", fontsize=8, fontweight='bold')
+
+            if i < num_selected - 1:
+                ax_proc.set_xticklabels([])
+            else:
+                ax_proc.set_xlabel("Genomic Position (bp)", fontsize=10, fontweight='bold')
+
+    plt.subplots_adjust(top=0.95, bottom=0.05, left=0.06, right=0.98)
     return fig, last_used_idx
 
 
@@ -500,20 +521,33 @@ def plot_single_column_fiber_stack_t(
 ):
     """
     Torch wrapper for plot_single_column_fiber_stack.
-    true_bulk_t, pred_bulk_t: (L,) or (1, L). fiber_seq_inp_t: (C,L,N) or (1,C,L,N).
-    processed_fibers_t: (L,N) or (1,L,N).
+    true_bulk_t, pred_bulk_t: (L,) or (1, L) [or a list of these, one per assay column].
+    fiber_seq_inp_t: (C,L,N) or (1,C,L,N) — shared across columns.
+    processed_fibers_t: (L,N) or (1,L,N) [or a list of these, one per assay column].
+    Pass lists (matching length, one per assay) for true_bulk_t/pred_bulk_t/
+    processed_fibers_t/bulk_name to render multiple side-by-side columns.
     filter_fn receives (fiber_idx, fiber_seq_inp_np) where fiber_seq_inp_np is (C,L,N) numpy.
     """
-    true_bulk = true_bulk_t.squeeze().cpu().detach().float().numpy()
-    pred_bulk = pred_bulk_t.squeeze().cpu().detach().float().numpy()
+    def _bulk_to_np(t):
+        return t.squeeze().cpu().detach().float().numpy()
+
+    def _fibers_to_np(t):
+        if t.dim() == 3:
+            t = t[0]
+        return t.cpu().detach().float().numpy()
+
+    if isinstance(true_bulk_t, (list, tuple)):
+        true_bulk = [_bulk_to_np(t) for t in true_bulk_t]
+        pred_bulk = [_bulk_to_np(t) for t in pred_bulk_t]
+        processed_fibers = [_fibers_to_np(t) for t in processed_fibers_t]
+    else:
+        true_bulk = _bulk_to_np(true_bulk_t)
+        pred_bulk = _bulk_to_np(pred_bulk_t)
+        processed_fibers = _fibers_to_np(processed_fibers_t)
 
     if fiber_seq_inp_t.dim() == 4:
         fiber_seq_inp_t = fiber_seq_inp_t[0]
     fiber_seq_inp = fiber_seq_inp_t.cpu().detach().float().numpy()
-
-    if processed_fibers_t.dim() == 3:
-        processed_fibers_t = processed_fibers_t[0]
-    processed_fibers = processed_fibers_t.cpu().detach().float().numpy()
 
     return plot_single_column_fiber_stack(
         true_bulk, pred_bulk, fiber_seq_inp, processed_fibers,
