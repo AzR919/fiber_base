@@ -4,10 +4,10 @@ One-off script for the ceehrc_26 poster/talk.
 Rather than plotting all ~11,373 HepG2_200U chr21 cCREs (too slow to run, too
 many images to sift through), this first does a cheap pre-filter over the
 ground-truth bulk signal alone (bigWig lookup only, no fiber-read gathering)
-and keeps only loci where ATAC, H3K4me3, AND H3K27ac all peak above 1.5
+and keeps only loci where ATAC, H3K4me3, AND H3K27ac all peak above 1.7
 (asinh-space, same units shown in the dashboards; H3K27me3 ignored — rarely
 present in cCREs). Only the much smaller filtered set then gets the expensive
-fiber-gathering + model inference, once per model, for three models:
+fiber-gathering + model inference, for three models:
   - hep_only:  trained only on HepG2_200U
   - gm_k5:     trained on GM12878 + K562_200U (never saw HepG2_200U)
   - all_three: trained on GM12878 + K562_200U + HepG2_200U
@@ -16,6 +16,12 @@ The filter pass is independent of any checkpoint (it only reads HepG2_200U's
 own ground-truth bigWigs), so it runs once and the same locus set is reused
 for all three models — meaning the three model directories end up with
 directly comparable plots of the exact same loci.
+
+All three checkpoints share the same preprocessing config (input_flags,
+dna_type, output_assays — verified at runtime), so per locus the fiber
+tensor (the actual bottleneck: CRAM decoding + per-fiber feature extraction)
+is built ONCE and reused across all three models' forward passes, instead of
+rebuilding it redundantly per model.
 
 Output goes to ignore/ceehrc_26/<model_label>/, one PNG dashboard per locus,
 named "<index>_<chrom>_<start>-<end>.png".
@@ -70,7 +76,7 @@ MODELS = {
 # Filter-pass config. These match model11_uct_mid_all_A.yaml (used by all 3
 # checkpoints above) — only used to construct the probe dataset that reads
 # ground-truth bigWigs; irrelevant to the (skipped) fiber-gathering step.
-SIGNAL_THRESHOLD = 1.5
+SIGNAL_THRESHOLD = 1.7
 FILTER_ASSAYS = ["atac", "h3k4me3", "h3k27ac"]
 OUTPUT_ASSAYS = ["atac", "h3k4me3", "h3k27ac", "h3k27me3"]
 PROBE_INPUT_FLAGS = [1, 1, 1, 1, 1]
@@ -134,30 +140,58 @@ def build_filtered_ccres():
     return kept
 
 
-def plot_model(label, checkpoint_path, filtered_ccres):
-    print(f"\n=== [{label}] loading {checkpoint_path} ===", flush=True)
-    model, _ = BaseModel.load_model(checkpoint_path, map_location=DEVICE)
-    model.to(DEVICE)
-    model.eval()
+def load_models():
+    """Load all 3 checkpoints and verify they share the preprocessing config
+    the shared-fiber-tensor optimization below depends on."""
+    models = {}
+    for label, ckpt in MODELS.items():
+        print(f"Loading [{label}] {ckpt}", flush=True)
+        model, _ = BaseModel.load_model(ckpt, map_location=DEVICE)
+        model.to(DEVICE)
+        model.eval()
+        models[label] = model
 
-    output_assays = model.init_args.get("output_assays", ["atac"])
-    input_flags = model.init_args["input_flags"]
-    dna_type = model.init_args["dna_type"]
+    ref_label = next(iter(models))
+    ref = models[ref_label]
+    for label, model in models.items():
+        assert model.init_args["input_flags"] == ref.init_args["input_flags"], \
+            f"input_flags mismatch: [{label}] vs [{ref_label}] — can't share fiber tensors"
+        assert model.init_args["dna_type"] == ref.init_args["dna_type"], \
+            f"dna_type mismatch: [{label}] vs [{ref_label}] — can't share fiber tensors"
+        assert model.init_args.get("output_assays") == ref.init_args.get("output_assays"), \
+            f"output_assays mismatch: [{label}] vs [{ref_label}] — can't share target_bulk"
+
+    return models
+
+
+def plot_all_models(models, filtered_ccres):
+    """
+    Single pass over the filtered loci. Per locus, the fiber tensor is built
+    once (the bottleneck: CRAM decoding + per-fiber feature extraction) and
+    reused across all 3 models' forward passes, instead of rebuilding it
+    redundantly once per model.
+    """
+    ref_model = next(iter(models.values()))
+    output_assays = ref_model.init_args.get("output_assays", ["atac"])
+    input_flags = ref_model.init_args["input_flags"]
+    dna_type = ref_model.init_args["dna_type"]
 
     dataset = build_dataset(output_assays, input_flags, dna_type)
-    # Restrict iteration to the pre-filtered loci (shared across all models).
     dataset.ccre_list = filtered_ccres
     dataset.num_sample_ccres = -1
 
-    out_dir = os.path.join(OUT_ROOT, label)
-    os.makedirs(out_dir, exist_ok=True)
+    out_dirs = {}
+    for label in models:
+        out_dirs[label] = os.path.join(OUT_ROOT, label)
+        os.makedirs(out_dirs[label], exist_ok=True)
 
     loader = DataLoader(dataset, batch_size=1, drop_last=False)
     criterion = torch.nn.MSELoss()
 
+    total_loci = len(filtered_ccres)
+    plotted = {label: 0 for label in models}
+    skipped = {label: 0 for label in models}
     start_time = time.time()
-    plotted = 0
-    skipped = 0
 
     with torch.no_grad():
         for i, batch in enumerate(loader):
@@ -165,42 +199,57 @@ def plot_model(label, checkpoint_path, filtered_ccres):
             start0 = int(batch["locus"][1][0])
             end0 = int(batch["locus"][2][0])
             fname = f"{i:05d}_{chrom0}_{start0}-{end0}.png"
-            out_path = os.path.join(out_dir, fname)
+            out_paths = {label: os.path.join(out_dirs[label], fname) for label in models}
 
-            # Skip loci already plotted so a timed-out job can be resubmitted safely.
-            if os.path.exists(out_path):
-                skipped += 1
+            # Skip building the fiber tensor entirely if every model already has this locus.
+            if all(os.path.exists(p) for p in out_paths.values()):
+                for label in models:
+                    skipped[label] += 1
                 continue
 
             fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, DEVICE)
-            with torch.amp.autocast(DEVICE_TYPE, dtype=torch.float16):
-                pred_bulk, processed_fibers = model(fiber_features, **forward_kwargs)
-            loss = criterion(pred_bulk, target_bulk).item()
 
-            record_t = {
-                "locus": batch["locus"],
-                "cell_type": batch.get("cell_type", ["HepG2_200U"]),
-                "fiber_features": fiber_features.cpu(),
-                "processed_fibers": processed_fibers.cpu(),
-                "pred_bulk": pred_bulk.cpu(),
-                "target_bulk": target_bulk.cpu(),
-                "loss": loss,
-            }
+            for label, model in models.items():
+                out_path = out_paths[label]
+                if os.path.exists(out_path):
+                    skipped[label] += 1
+                    continue
 
-            fig = plot_evaluator_record_t(
-                record_t=record_t,
-                input_flags=input_flags,
-                assay_avg_losses=None,
-                output_assays=output_assays,
-                mode="Test",
-            )
-            fig.savefig(out_path, dpi=150)
-            plt.close(fig)
-            plotted += 1
+                with torch.amp.autocast(DEVICE_TYPE, dtype=torch.float16):
+                    pred_bulk, processed_fibers = model(fiber_features, **forward_kwargs)
+                loss = criterion(pred_bulk, target_bulk).item()
+
+                record_t = {
+                    "locus": batch["locus"],
+                    "cell_type": batch.get("cell_type", ["HepG2_200U"]),
+                    "fiber_features": fiber_features.cpu(),
+                    "processed_fibers": processed_fibers.cpu(),
+                    "pred_bulk": pred_bulk.cpu(),
+                    "target_bulk": target_bulk.cpu(),
+                    "loss": loss,
+                }
+
+                fig = plot_evaluator_record_t(
+                    record_t=record_t,
+                    input_flags=input_flags,
+                    assay_avg_losses=None,
+                    output_assays=output_assays,
+                    mode="Test",
+                )
+                fig.savefig(out_path, dpi=150)
+                plt.close(fig)
+                plotted[label] += 1
+
+            if (i + 1) % 50 == 0:
+                elapsed = time.time() - start_time
+                print(f"  locus {i + 1}/{total_loci} — {elapsed / (i + 1):.2f}s/locus avg, "
+                      f"{elapsed / 60:.1f} min elapsed", flush=True)
 
     total_time = time.time() - start_time
-    print(f"=== [{label}] done: {plotted} plotted, {skipped} already existed, "
-          f"{total_time / 60:.1f} min — saved to {out_dir} ===", flush=True)
+    for label in models:
+        print(f"=== [{label}] done: {plotted[label]} plotted, {skipped[label]} already existed, "
+              f"saved to {out_dirs[label]} ===", flush=True)
+    print(f"Total: {total_time / 60:.1f} min for {total_loci} loci x {len(models)} models", flush=True)
 
 
 if __name__ == "__main__":
@@ -209,8 +258,7 @@ if __name__ == "__main__":
     os.makedirs(OUT_ROOT, exist_ok=True)
 
     filtered_ccres = build_filtered_ccres()
-
-    for label, ckpt in MODELS.items():
-        plot_model(label, ckpt, filtered_ccres)
+    models = load_models()
+    plot_all_models(models, filtered_ccres)
 
     print("\nAll models done.", flush=True)
