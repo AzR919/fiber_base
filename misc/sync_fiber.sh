@@ -17,9 +17,17 @@ if pgrep -f "sync_watch.py.*${TARGET}" > /dev/null 2>&1; then
     exit 0
 fi
 
-# Open SSH ControlMaster socket (no-op if already open)
-if ! ssh -fN "$TARGET" 2>/dev/null; then
-    echo "[sync] ERROR: SSH connection to '$TARGET' failed." >&2
+# Open SSH ControlMaster socket only if one isn't already up
+# (running "ssh -fN" against a live master leaves a stray background ssh each time)
+if ! ssh -O check "$TARGET" >/dev/null 2>&1; then
+    if ! ssh -fN "$TARGET"; then
+        echo "[sync] ERROR: SSH connection to '$TARGET' failed." >&2
+        exit 1
+    fi
+fi
+
+if ! python3 -c "import watchdog" 2>/dev/null; then
+    echo "[sync] ERROR: python3 can't import watchdog. Install it with: python3 -m pip install watchdog" >&2
     exit 1
 fi
 
