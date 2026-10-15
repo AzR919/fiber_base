@@ -1,4 +1,4 @@
-# test config, acts as the base template
+# Debug/test training config (base template): 2 epochs x 10 iters, batch size 2.
 
 epochs: 2
 iters_per_epoch: 10

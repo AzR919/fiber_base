@@ -1,4 +1,5 @@
-# test config, acts as the base template
+# Debug/test data config (base template): tiny windows (256bp, 50 fibers), single-cell mode, GM12878 + K562_200U + HepG2_200U.
+# Use with model00 / train00 / eval00 for quick smoke tests.
 
 context_length: 256
 fibers_per_entry: 50

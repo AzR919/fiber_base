@@ -1,4 +1,4 @@
-# Standard train hyper params
+# Standard training run: 25 epochs x 1000 iters, batch size 8, lr 1e-4, seed 919.
 
 epochs: 25
 iters_per_epoch: 1000

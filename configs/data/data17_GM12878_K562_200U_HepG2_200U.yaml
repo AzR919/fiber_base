@@ -1,4 +1,5 @@
-# GM12878 ATAC-seq, single-cell training
+# GM12878 + K562_200U + HepG2_200U, single-cell training (each sample drawn from one randomly chosen cell type).
+# 5kb context, 100 fibers per sample. Target assays come from the model config's output_assays.
 
 context_length: 5000
 fibers_per_entry: 100

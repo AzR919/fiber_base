@@ -1,4 +1,4 @@
-# GM12878 ATAC-seq, single-cell eval
+# HepG2_200U full eval: all val-chromosome cCREs (chr21, ~11.4k). 5kb context, 100 fibers. Single-cell mode.
 
 context_length: 5000
 fibers_per_entry: 100

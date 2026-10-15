@@ -1,7 +1,5 @@
-# UNet03 conv-transformer, mid-size — identical to model11_uct_mid_all_A except fire_msp is NOT an input
-# (ablation: how much does fire_msp contribute to the predictions?)
-# input_flags order: [m6a, cpg, msp, nuc, fire_msp]
-# kernel_size=15, tf_layers=2 — fits in 20GB MIG slice
+# fire_msp ablation: identical to model11_uct_mid_all_A but without the fire_msp input.
+# UNet03 conv-transformer, mid-size, all 4 assays. Inputs [m6a, cpg, msp, nuc] + reference DNA. Fits in a 20GB MIG slice.
 
 model: "unet03"
 input_flags: [1, 1, 1, 1, 0]

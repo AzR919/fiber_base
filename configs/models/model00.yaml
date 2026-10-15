@@ -1,4 +1,4 @@
-# test config, acts as the base template
+# Debug/test model config (base template): Base01DebugModel, all 5 fiber inputs + reference DNA, predicts all 4 assays.
 
 model: "base01"
 input_flags: [1, 1, 1, 1, 1]

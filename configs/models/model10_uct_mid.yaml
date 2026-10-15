@@ -1,5 +1,5 @@
-# UNet03 conv-transformer, mid-size
-# kernel_size=15, tf_layers=2 — fits in 20GB MIG slice
+# UNet03 conv-transformer, mid-size (emb_dims 8/24/48/96, 2 transformer layers). ATAC only.
+# All 5 fiber inputs + reference DNA. Fits in a 20GB MIG slice.
 
 model: "unet03"
 input_flags: [1, 1, 1, 1, 1]

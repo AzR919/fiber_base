@@ -1,114 +1,145 @@
 # fiber_base
 
-Base repository for single-molecule epigenomics imputation using Fiber-seq data. The model takes single-molecule fiber reads (m6A, CpG, MSP, NUC, FIRE signals) as input and predicts bulk chromatin accessibility or histone modification profiles.
+Base repository for single-molecule imputation using Fiber-seq.
+
+**End goal: impute histone modifications at single-molecule resolution** — Given chromatin accessibility on an individual molecule (Fiber-seq), impute histone modifications on that molecule.
+
+No ground truth exists at that resolution, so the model is trained with **weak supervision**: it takes a stack of single-molecule fiber reads at a genomic locus, predicts a per-fiber signal for each assay, and only the average of those per-fiber predictions is compared against bulk tracks (currently ATAC-seq, H3K4me3, H3K27ac and H3K27me3, all at once). The bulk prediction is the training signal; the per-fiber predictions are the actual product.
 
 ---
 
 ## Overview
 
-**What it learns**: given a stack of single-molecule fiber reads at a genomic locus, predict the aggregate bulk signal (e.g., ATAC-seq, H3K4me3) at that locus.
+**What it learns**: given N fibers overlapping a window of length L around a cCRE, predict per-fiber, per-assay signal whose coverage-normalized average matches the bulk signal track(s) over that window.
 
-**Two training modes**:
-- **Single-cell** (`dataset_type: single`): each training sample is fibers from one cell type predicting the bulk signal of that same cell type. Tests whether the model can learn the fiber→bulk relationship within a cell type.
-- **Mixed-cell** (`dataset_type: mixed`): each training sample is a composite fiber stack from multiple cell types at a shared locus, with a ratio-weighted bulk target. Closer to the evaluation distribution when mixed eval is used.
+**How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the sum over fibers divided by fiber coverage at each position — i.e. "predict each fiber's contribution, then average". The model returns both: `y` (bulk, `(B, K, L)`, used for the loss) and `processed_fibers` (single-molecule predictions, `(B, K, L, N)`, the imputation we ultimately care about).
 
-**Two evaluation modes** (same `dataset_type` flag):
-- **Single-cell eval**: iterates loci deterministically, yields one (locus, cell_type) sample per cell type per locus. Computes composite MSE only.
-- **Mixed-cell eval**: iterates loci deterministically, builds a composite fiber stack from all cell types, computes composite MSE and per-cell-type deconvolution MSE.
+**Validating the single-molecule output**: low bulk MSE is necessary but not sufficient — a model can match the bulk average while spreading signal uniformly across fibers. Mixed-cell deconvolution (below) is one indirect check that per-fiber predictions carry molecule-specific information.
 
-Eval is **fully deterministic**: same model + same eval config → identical results every run.
+**Two dataset modes** (`dataset_type`):
+- **Single-cell** (`single`): each sample is fibers from one cell type predicting that cell type's bulk signal. With several cell types listed, each training sample picks one cell type at random.
+- **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target. Eval in this mode also reports per-cell-type deconvolution MSE.
+
+**Train / validation split**: by chromosome — train on `chr20` cCREs (~25k), validate and evaluate on `chr21` cCREs (~11.4k). Set in `configs/metapaths.yaml`.
+
+Eval is **fully deterministic**: same checkpoint + same eval config → identical results.
 
 ---
 
 ## Repository Structure
 
-| File | Description |
+| Path | Description |
 |---|---|
-| `main.py` | Entry point — parses args, builds datasets, trains model |
-| `args.py` | Argument parsing and config file loading (CLI > config > defaults) |
-| `trainer.py` | Training loop, validation, wandb logging, post-training eval trigger |
-| `evaluator.py` | Independent evaluator: takes model + dataset, runs inference, returns metrics |
-| `eval.py` | Standalone CLI for evaluating a saved checkpoint |
+| `main.py` | Training entry point — parses args, builds datasets and model, trains, optionally runs eval |
+| `eval.py` | Standalone evaluation of a saved checkpoint |
+| `args.py` | Argument parsing and config loading (CLI > config files > defaults) |
+| `trainer.py` | Training loop, validation, checkpointing, wandb logging |
+| `evaluator.py` | `Evaluator` (inference + metrics) and `run_final_eval` (loops over eval configs) |
 | `data_utils.py` | `SingleCellFiberDataset`, `MixedCellFiberDataset`, `make_fiber_dataset()` |
-| `models.py` | `BaseModel` and all concrete model classes |
-| `metrics.py` | Loss functions (MSE only for now) |
-| `utils.py` | Shared utilities: seeding, config loading, metapaths resolution, meters |
-| `vis_utils.py` | Visualization functions for fiber stacks and evaluation dashboards |
-| `fiber_utils.py` | Low-level fiber data extraction from CRAM/BAM files |
-| `args.py` | Argument parsing and config file loading |
-| `configs/` | YAML config files for data, models, training, and evaluation |
+| `fiber_utils.py` | Low-level per-fiber feature extraction from CRAM files |
+| `models.py` | `BaseModel` (save/load), `Base01DebugModel`, `UNet03ConvTransformerWithDNA`, `model_selector()` |
+| `metrics.py` | Loss functions (MSE) |
+| `utils.py` | Seeding, config + metapaths resolution, run naming, wandb setup, meters |
+| `vis_utils.py` | Fiber-stack and evaluation dashboard plots |
+| `configs/` | YAML configs: `data/`, `models/`, `training/`, `evals/`, `metapaths.yaml`; retired ones in `old_configs/` |
+| `slurm_batch_command.sh` | Slurm script for training runs |
+| `slurm_batch_command_eval.sh` | Slurm script for evaluating a checkpoint |
+| `logs/` | Slurm `.out` / `.err` files, named by job name |
+| `reports/` | Dated write-ups of results |
+| `plots_code/` | Figure scripts (e.g. `ceehrc_26/`) |
+| `misc/` | Sync scripts (macOS + Windows), handy commands (`misc.txt`), data-prep and sweep scripts |
 
 ---
 
 ## Tensor Shape Contract
 
-- Fiber features: `(C, L, N)` — Channels × context_Length × N_fibers
-- Batched fiber features: `(B, C, L, N)`
-- Bulk target: `(L,)` per sample, `(B, L)` batched
+- Fiber features: `(C, L, N)` — Channels × context Length × N fibers; batched `(B, C, L, N)`
+- Bulk target: `(K, L)` per sample, `(B, K, L)` batched — one row per output assay, `asinh`-transformed bigWig signal (NaN → 0)
 - Fiber coverage: `(L,)` per sample, `(B, L)` batched
-- DNA one-hot: `(4, L)` per sample
+- Reference DNA one-hot: `(4, L)` per sample
 
-Channel order (controlled by `input_flags`): `[m6a, cpg, msp, nuc, fire_msp]`
+Channel order (selected by `input_flags`): `[m6a, cpg, msp, nuc, fire_msp]`
+Assay order follows the model's `output_assays`.
 
 ---
 
-## Config Schema
+## Configs
+
+A run combines one data config, one model config, one training config and (optionally) one or more eval configs. File paths are not written in these configs — they are resolved from `configs/metapaths.yaml` using the cell type names and the model's `output_assays`.
+
+### Metapaths (`configs/metapaths.yaml`)
+
+Single source of truth for paths on the cluster: hg38 FASTA, cCRE BED, train/val chromosomes, a base directory per assay, and per-cell-type filenames for the fiber CRAM and each bulk bigWig. `null` means that file isn't available yet. To add a cell type, add a block here — no code changes needed.
+
+Cell types with fiber + all four bulk assays: **GM12878, K562_200U, HepG2_200U**. Others (A549, Caco-2, H1, H9, several LCL/fibroblast/iPSC lines) have fiber data only so far.
 
 ### Data Config (`configs/data/`)
 
 ```yaml
+context_length: 5000       # window size in bp
+fibers_per_entry: 100      # fibers per sample
 dataset_type: single       # 'single' or 'mixed'
-context_length: 2048       # window size in base pairs
-fibers_per_entry: 200      # total fibers per sample
-bulk_name: ATAC_seq_fcc    # label for target bulk signal
-assay: atac                # assay key — resolves paths via metapaths.yaml
 
 cell_types:
-  GM12878:                 # single-cell: no ratio needed
-  K562:                    # for mixed: optionally add ratio:
-    # ratio: 0.5
+  GM12878:                 # single: no ratio needed
+  K562_200U:               # mixed: optionally add  ratio: 0.5
+  HepG2_200U:
 ```
-
-### Eval Config (`configs/evals/`)
-
-```yaml
-dataset_type: mixed        # 'single' or 'mixed'
-context_length: 2048
-fibers_per_entry: 200
-num_sample_ccres: 1000     # number of cCREs to evaluate (-1 = all)
-bulk_name: ATAC_seq_fcc
-seed: 919
-assay: atac
-
-cell_types:
-  GM12878:
-    ratio: 0.5
-  K562:
-    ratio: 0.5
-```
-
-> `input_flags` and `dna_type` are **not** read from eval configs — they are always loaded from the model checkpoint (`model.init_args`).
 
 ### Model Config (`configs/models/`)
 
 ```yaml
-model: base
-d_model: 64
-decoder_type: avg_n
+model: "unet03"                    # 'unet03' or 'base01' (debug)
+input_flags: [1, 1, 1, 1, 1]       # [m6a, cpg, msp, nuc, fire_msp]
+dna_type: "ref"                    # 'none' | 'ref'
 kernel_size: 15
-input_flags: [1, 1, 1, 1, 1]   # [m6a, cpg, msp, nuc, fire_msp]
-dna_type: none                  # 'none' | 'ref' | 'fiber' | 'both'
+tf_heads: 4
+tf_layers: 2
+emb_dims: [8, 24, 48, 96]
+output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3"]   # keys from metapaths
 ```
 
 ### Training Config (`configs/training/`)
 
 ```yaml
-epochs: 50
+epochs: 25
 iters_per_epoch: 1000
-batch_size: 16
-lr: 1e-4
+batch_size: 8
+lr: 0.0001
+res_dir: "./results"
 seed: 919
 ```
+
+### Eval Config (`configs/evals/`)
+
+One config per cell type. `_mini` variants use a 500-cCRE subset for quick checks; full variants use every val cCRE.
+
+```yaml
+context_length: 5000
+fibers_per_entry: 100
+num_sample_ccres: -1       # -1 = all val cCREs; otherwise a seeded subset
+seed: 919
+dataset_type: single
+
+cell_types:
+  GM12878:
+```
+
+> `input_flags`, `dna_type` and `output_assays` are **not** read from eval configs — they always come from the checkpoint (`model.init_args`).
+
+### Current configs
+
+| Config | What it is |
+|---|---|
+| `data00`, `model00`, `train00`, `eval00` | Tiny debug/smoke-test setup |
+| `data13` / `data14` / `data15` | Single cell type: GM12878 / K562_200U / HepG2_200U |
+| `data16` / `data18` / `data19` | Two cell types (one held out): GM+K562 / GM+HepG2 / K562+HepG2 |
+| `data17` | All three cell types |
+| `model10` | UNet03 mid, ATAC only |
+| `model11` | UNet03 mid, all 4 assays, all 5 inputs |
+| `model12` | Same as model11 without `fire_msp` (ablation) |
+| `train01` | Standard run (25 × 1000 iters, bs 8) |
+| `eval13` / `eval14` / `eval15` (+ `_mini`) | Eval on GM12878 / K562_200U / HepG2_200U |
 
 ---
 
@@ -116,18 +147,19 @@ seed: 919
 
 ```bash
 python main.py \
-  --data_config configs/data/data00.yaml \
-  --model_config configs/models/model00.yaml \
-  --train_config configs/training/train00.yaml \
-  [--eval_config configs/evals/eval00.yaml] \
+  --data_config  configs/data/data17_GM12878_K562_200U_HepG2_200U.yaml \
+  --model_config configs/models/model11_uct_mid_all_A.yaml \
+  --train_config configs/training/train01.yaml \
+  [--eval_configs configs/evals/eval13_GM12878_mini.yaml configs/evals/eval15_HepG2_200U_mini.yaml] \
   [--metapaths configs/metapaths.yaml] \
-  [--name_prefix myrun] \
-  [--name_suffix v1]
+  [--name_prefix myrun] [--name_suffix v1] [-D]
 ```
 
-If `--eval_config` is provided, the evaluator runs automatically after training and logs results to wandb.
+- Results go to `results/<YY-MM-DD_THH-MM-SS>_<prefix>_<data>_<model>_<train>_<suffix>/` (checkpoints `Model_epoch_N.pt`).
+- If `--eval_configs` is given, each eval config runs after training and is logged to wandb.
+- Any config value can be overridden on the CLI (e.g. `--lr 3e-4`).
 
-**Reproducibility**: set `seed` in the training config. The same seed + same epoch always produces the same data ordering via `set_epoch(epoch)`.
+**Reproducibility**: the same `seed` + same epoch always gives the same training data order (`set_epoch(epoch)`); validation uses a fixed cCRE iteration.
 
 ---
 
@@ -135,51 +167,33 @@ If `--eval_config` is provided, the evaluator runs automatically after training 
 
 ```bash
 python eval.py \
-  --checkpoint results/26-09-09_T20-12-27_.../Model_epoch_50.pt \
-  --eval_config configs/evals/eval00.yaml \
-  [--metapaths configs/metapaths.yaml] \
-  [--device cuda] \
-  [--output_dir ./eval_results] \
-  [--save_plots]
+  --checkpoint results/<run_dir>/Model_epoch_25.pt \
+  --eval_configs configs/evals/eval13_GM12878.yaml configs/evals/eval14_K562_200U.yaml configs/evals/eval15_HepG2_200U.yaml \
+  [--metapaths configs/metapaths.yaml] [--device cuda] \
+  [--output_dir ./results] [--save_plots] [--wandb]
 ```
-
-`input_flags` and `dna_type` are extracted from the checkpoint automatically — do not put them in the eval config.
 
 ---
 
-## Cluster Setup (DRAC Nibi)
+## Cluster Setup (DRAC nibi)
 
-**Code**: `/project/def-maxwl/azr/code/fiber_base`
+- **Code**: `/project/def-maxwl/azr/code/fiber_base`
+- **Venv**: `source /project/def-maxwl/azr/misc/menv/bin/activate`
+- **WandB**: entity `liblab`, project `fiber`. Run `wandb login` once before submitting GPU jobs.
+- **Submit**: `sbatch slurm_batch_command.sh` (training) or `sbatch slurm_batch_command_eval.sh` (eval). Logs land in `logs/<job-name>.out/.err`.
+- **Job naming**: `YYYY-MM-DD_NN_description`, e.g. `2026-10-14_00_no_fire`. `NN` is a two-digit index that increments with each job submitted that day.
+- **GPUs**: H100 MIG slices — `nvidia_h100_80gb_hbm3_{1g.10gb,2g.20gb,3g.40gb}`. The mid-size UNet03 fits in `2g.20gb`; full evals fit in `1g.10gb`.
 
-**Virtualenv**: `source /project/def-maxwl/azr/misc/menv/bin/activate`
+### Syncing local ↔ nibi
 
-**Slurm job naming**: `YYYY-MM-DD_NN_description` — increment `NN` for each new run on the same day.
+Code is edited locally and synced to nibi over an SSH ControlMaster socket (2FA when the socket opens). `wandb/`, `results/`, `ignore/`, caches and `.git/` are never synced.
 
-**Slurm template** (`slurm_batch_command.sh`):
+| | macOS | Windows (WSL) |
+|---|---|---|
+| Start | `misc/sync_fiber.sh [nibi\|fir]` — rsync + watchdog, pushes each saved file | `misc\sync_fiber.bat [nibi\|fir] [--no-pull]` — pulls remote first, then Mutagen two-way-safe |
+| Stop | `misc/sync_fiber_stop.sh` | `misc\sync_fiber_stop.bat` |
 
-```bash
-#SBATCH --job-name=2026-09-09_00_description
-#SBATCH --account=def-maxwl_gpu
-#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_3g.40gb:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-4:00:00
-
-source /project/def-maxwl/azr/misc/menv/bin/activate
-python main.py --data_config configs/data/data00.yaml ...
-```
-
-**WandB**: project `fiber` under entity `liblab`. Login with `wandb login` before submitting GPU jobs.
-
----
-
-## Reproducibility Guarantees
-
-| Context | Guarantee |
-|---|---|
-| Eval (any mode) | Fully deterministic: same checkpoint + same eval config = identical results |
-| Training data ordering | Seeded-deterministic: same `seed` + same `epoch` = same data sequence |
-| Val loss during training | Consistent across epochs (uses `mode='eval'` with fixed cCRE iteration) |
+Run the stop script before closing the laptop to avoid fail2ban bans from dangling connections. See `misc/misc.txt` for other cluster commands.
 
 ---
 
@@ -187,7 +201,7 @@ python main.py --data_config configs/data/data00.yaml ...
 
 | Training mode | Eval mode | Scientific question |
 |---|---|---|
-| `single` | `mixed` | Can the model generalize from single-cell training to mixed inputs? (zero-shot test) |
+| `single` | `single` | Standard fiber → bulk learning |
+| `single` | `mixed` | Does a single-cell-trained model generalize to mixed inputs? (zero-shot) |
 | `mixed` | `mixed` | Does training on mixed inputs improve mixed-input eval? |
-| `single` | `single` | Standard single-cell fiber→bulk learning |
 | `mixed` | `single` | Can a mixed-trained model handle single-cell inference? |

@@ -1,4 +1,4 @@
-# GM12878 ATAC-seq, single-cell eval — 500 cCRE subset for mid-training checks
+# GM12878 mini eval: 500 val cCREs (seeded subset), for quick checks after training. 5kb context, 100 fibers.
 
 context_length: 5000
 fibers_per_entry: 100

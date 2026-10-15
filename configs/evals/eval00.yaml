@@ -1,4 +1,4 @@
-# test config, acts as the base template
+# Debug/test eval config (base template): GM12878, 256bp, 50 fibers, 5 cCREs.
 
 context_length: 256
 fibers_per_entry: 50

@@ -1,4 +1,5 @@
-# GM12878 ATAC-seq, single-cell training
+# GM12878 only, single-cell training. 5kb context, 100 fibers per sample.
+# Originally for ATAC-only runs (assays are set by the model config's output_assays). Same as data13.
 
 context_length: 5000
 fibers_per_entry: 100
