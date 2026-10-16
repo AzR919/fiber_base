@@ -26,3 +26,56 @@ def per_assay_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor):
     counts = mask.sum(dim=0)                                          # (K,)
     losses = (per_sample * mask).sum(dim=0) / counts.clamp(min=1)
     return losses, counts
+
+
+def per_window_pearson(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, eps: float = 1e-6):
+    """Pearson r across the positions of each window (profile shape), (B, K).
+    NaN where the sample has no data for the assay or either profile is flat (std < eps)."""
+    x, y = pred.detach().double(), target.detach().double()
+    xc, yc = x - x.mean(dim=-1, keepdim=True), y - y.mean(dim=-1, keepdim=True)
+    sx, sy = xc.pow(2).mean(dim=-1).sqrt(), yc.pow(2).mean(dim=-1).sqrt()
+    r = (xc * yc).mean(dim=-1) / (sx * sy)
+    invalid = (mask == 0) | (sx < eps) | (sy < eps)
+    return r.masked_fill(invalid, float("nan")).float()
+
+
+class PearsonMeter:
+    """
+    Streaming Pearson r per assay, pooled over every position of every window that has the assay —
+    the correlation counterpart of the MSE we report. Batch statistics are merged with Chan et al.'s
+    parallel update in float64, so it is exact (no catastrophic cancellation) over tens of millions of
+    positions without storing them.
+    """
+    def __init__(self, num_assays: int):
+        zeros = lambda: torch.zeros(num_assays, dtype=torch.float64)
+        self.n, self.mean_x, self.mean_y = zeros(), zeros(), zeros()
+        self.m2_x, self.m2_y, self.c_xy = zeros(), zeros(), zeros()
+
+    def update(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor):
+        """pred/target: (B, K, L); mask: (B, K), 1 where the sample has data for the assay."""
+        x = pred.detach().double()
+        y = target.detach().to(x.device).double()
+        w = mask.detach().to(x.device).double()[:, :, None].expand_as(x)
+        n_b = w.sum(dim=(0, 2))
+        mean_x_b = (w * x).sum(dim=(0, 2)) / n_b.clamp(min=1)
+        mean_y_b = (w * y).sum(dim=(0, 2)) / n_b.clamp(min=1)
+        dx, dy = x - mean_x_b[None, :, None], y - mean_y_b[None, :, None]
+        m2_x_b, m2_y_b, c_xy_b = (w * dx * dx).sum(dim=(0, 2)), (w * dy * dy).sum(dim=(0, 2)), (w * dx * dy).sum(dim=(0, 2))
+        n_b, mean_x_b, mean_y_b, m2_x_b, m2_y_b, c_xy_b = (t.cpu() for t in (n_b, mean_x_b, mean_y_b, m2_x_b, m2_y_b, c_xy_b))
+
+        n = self.n + n_b
+        delta_x, delta_y = mean_x_b - self.mean_x, mean_y_b - self.mean_y
+        cross = self.n * n_b / n.clamp(min=1)
+        self.mean_x += delta_x * n_b / n.clamp(min=1)
+        self.mean_y += delta_y * n_b / n.clamp(min=1)
+        self.m2_x += m2_x_b + delta_x * delta_x * cross
+        self.m2_y += m2_y_b + delta_y * delta_y * cross
+        self.c_xy += c_xy_b + delta_x * delta_y * cross
+        self.n = n
+
+    @property
+    def value(self) -> torch.Tensor:
+        """(K,) pooled Pearson r; NaN for assays never seen or with zero variance."""
+        denom = torch.sqrt(self.m2_x * self.m2_y)
+        r = self.c_xy / denom
+        return r.masked_fill((self.n == 0) | (denom == 0), float("nan")).float()

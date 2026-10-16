@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from utils import *
-from metrics import masked_mse, per_assay_mse
+from metrics import masked_mse, per_assay_mse, PearsonMeter
 from vis_utils import plot_evaluation_dashboard_t, plot_loss
 
 class Trainer:
@@ -135,6 +135,7 @@ class Trainer:
             # --- VALIDATION PHASE ---
             avg_val_loss = None
             val_assay_meters = {a: AverageMeter() for a in output_assays}
+            val_pearson = PearsonMeter(len(output_assays))
             last_v_batch, last_v_output, last_v_fibers = None, None, None
 
             if val_loader is not None:
@@ -144,6 +145,7 @@ class Trainer:
                     n = v_batch["fiber_features"].size(0)
                     val_meter.update(v_loss, n=n)
                     self._update_assay_meters(val_assay_meters, output_assays, v_output, v_batch, self.device)
+                    val_pearson.update(v_output, v_batch["target_bulk"], v_batch["assay_mask"])
                     last_v_batch = v_batch
                     last_v_output = v_output
                     last_v_fibers = v_processed_fibers
@@ -155,21 +157,30 @@ class Trainer:
                 self.scheduler.step(avg_train_loss)
 
             # --- LOGGING & DASHBOARDS ---
+            # Only assays some sample actually had data for this epoch (r is NaN otherwise)
+            train_assay_avg = {a: m.avg for a, m in train_assay_meters.items() if m.count > 0}
+            val_assay_avg   = {a: m.avg for a, m in val_assay_meters.items() if m.count > 0}
+            val_r = val_pearson.value.tolist()
+            val_assay_r = {a: r for a, r in zip(output_assays, val_r) if r == r}
+            mean_val_r = sum(val_assay_r.values()) / len(val_assay_r) if val_assay_r else None
+
             log_dict = {"train_loss": avg_train_loss, "epoch": epoch}
             if avg_val_loss is not None:
                 log_dict["val_loss"] = avg_val_loss
-                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}")
+                r_str = f" | Val Pearson: {mean_val_r:.4f}" if mean_val_r is not None else ""
+                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}{r_str}")
             else:
                 print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f}")
 
-            # Only assays some sample actually had data for this epoch
-            train_assay_avg = {a: m.avg for a, m in train_assay_meters.items() if m.count > 0}
-            val_assay_avg   = {a: m.avg for a, m in val_assay_meters.items() if m.count > 0}
             for assay, value in train_assay_avg.items():
                 log_dict[f"train_loss_{assay}"] = value
             if avg_val_loss is not None:
                 for assay, value in val_assay_avg.items():
                     log_dict[f"val_loss_{assay}"] = value
+                for assay, value in val_assay_r.items():
+                    log_dict[f"val_pearson_{assay}"] = value
+                if mean_val_r is not None:
+                    log_dict["val_pearson"] = mean_val_r
 
             # Generate & Log Train Dashboard Plot
             if last_t_batch is not None:
@@ -203,6 +214,7 @@ class Trainer:
                     assay_avg_losses=val_assay_avg,
                     mode="Val",
                     assay_mask=last_v_batch["assay_mask"],
+                    assay_avg_pearson=val_assay_r,
                 )
                 log_dict["Val_Dashboard"] = wandb.Image(fig_v)
                 plt.close(fig_v)

@@ -14,9 +14,13 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from data_utils import make_fiber_dataset
-from metrics import masked_mse, per_assay_mse
+from metrics import masked_mse, per_assay_mse, PearsonMeter
 from utils import *
 from vis_utils import plot_evaluator_record_t
+
+
+def _nan_to_none(x):
+    return None if x is None or np.isnan(x) else float(x)
 
 
 class Evaluator:
@@ -45,6 +49,7 @@ class Evaluator:
         composite_loss_meter = AverageMeter()
         output_assays = self.model.init_args.get("output_assays", ["atac"])
         assay_loss_meters = {a: AverageMeter() for a in output_assays}
+        pearson_meter = PearsonMeter(len(output_assays))   # pooled bp-level r over the same windows as the MSE
         locus_records = []
         valid_locus_count = 0
 
@@ -63,6 +68,7 @@ class Evaluator:
                 for k, assay in enumerate(output_assays):
                     if counts[k] > 0:
                         assay_loss_meters[assay].update(losses[k].item(), n=int(counts[k].item()))
+                pearson_meter.update(pred_composite_bulk, target_bulk, assay_mask)
 
                 ct = batch.get("cell_type", ["Unknown"])
                 cell_type_name = ct[0] if isinstance(ct, (list, tuple)) else ct
@@ -98,10 +104,16 @@ class Evaluator:
                     plt.savefig(f"{save_path}test_e_{batch_idx}.png")
                     plt.close()
 
+        # None = the evaluated cell type has no bulk data for that assay (or r undefined: flat signal)
+        r = pearson_meter.value.tolist()
+        per_assay = {a: {"loss": assay_loss_meters[a].avg if assay_loss_meters[a].count > 0 else None,
+                         "pearson": _nan_to_none(r[k])} for k, a in enumerate(output_assays)}
+        available_r = [v["pearson"] for v in per_assay.values() if v["pearson"] is not None]
         return {
-            "composite": {"loss": composite_loss_meter.avg},
-            # None = the evaluated cell type has no bulk data for that assay
-            "per_assay": {a: {"loss": m.avg if m.count > 0 else None} for a, m in assay_loss_meters.items()},
+            # composite pearson = mean of the per-assay r over assays with data
+            "composite": {"loss": composite_loss_meter.avg,
+                          "pearson": float(np.mean(available_r)) if available_r else None},
+            "per_assay": per_assay,
             "locus_records": locus_records,
             "num_locus": valid_locus_count * self.batch_size,
         }
@@ -162,23 +174,32 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
         eval_results = evaluator.evaluate(save_path=save_path)
 
         composite_loss = eval_results["composite"]["loss"]
-        print(f"[eval] {cell_type} composite loss: {composite_loss:.6f}")
+        composite_r = eval_results["composite"]["pearson"]
+        r_str = f"{composite_r:.4f}" if composite_r is not None else "n/a"
+        print(f"[eval] {cell_type} composite loss: {composite_loss:.6f} | pearson: {r_str}")
 
+        assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
+        assay_avg_r = {a: eval_results["per_assay"][a]["pearson"] for a in output_assays}
         summary[cell_type] = {
             "eval_config": eval_config_path,
             "composite_loss": composite_loss,
-            "per_assay_loss": {a: eval_results["per_assay"][a]["loss"] for a in output_assays},
+            "pearson": composite_r,
+            "per_assay_loss": assay_avg,
+            "per_assay_pearson": assay_avg_r,
             "num_loci": eval_results["num_locus"],
         }
 
         if wandb_run is not None:
             prefix = f"test/{cell_type}"
             ct_log_dict = {f"{prefix}/loss": composite_loss}
+            if composite_r is not None:
+                ct_log_dict[f"{prefix}/pearson"] = composite_r
             for assay, data in eval_results.get("per_assay", {}).items():
                 if data["loss"] is not None:
                     ct_log_dict[f"{prefix}/loss_{assay}"] = data["loss"]
+                if data["pearson"] is not None:
+                    ct_log_dict[f"{prefix}/pearson_{assay}"] = data["pearson"]
 
-            assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
             wandb_image_list = []
             for idx, record in enumerate(eval_results.get("locus_records", [])):
                 fig = plot_evaluator_record_t(
@@ -186,7 +207,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
                     input_flags=test_set.input_flags,
                     assay_avg_losses=assay_avg,
                     output_assays=output_assays,
-                    mode="Test"
+                    mode="Test",
+                    assay_avg_pearson=assay_avg_r,
                 )
                 chr_name = record["locus"][0][0]
                 start = record["locus"][1][0]
