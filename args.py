@@ -58,7 +58,7 @@ def get_args():
     model_group.add_argument("--dna_type", type=str, default="none", choices=["none", "ref", "fiber", "both"],
                             help="dna_type to use as input")
     model_group.add_argument("--output_assays", type=str, nargs="+", default=["atac"],
-                            help="List of assay keys the model predicts (must match metapaths assay_base_paths keys)")
+                            help="List of assay keys the model predicts (keys of 'assays' in data_prep/encode_spec.yaml)")
 
     # Individual input feature flags for hyperparameter sweeps
     model_group.add_argument("--use_individual_input_flags", action="store_true",
@@ -139,7 +139,7 @@ def get_args():
         if metapaths is not None:
             # Resolve paths via metapaths using output_assays declared by the model config
             resolved = resolve_config_with_metapaths(data_cfg, metapaths, parsed_args.output_assays)
-            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "bulk_base_paths", "cell_types"]:
+            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "cell_types"]:
                 if key not in cli_args_set:
                     parsed_args.metadata[key] = resolved[key]
                     if hasattr(parsed_args, key):

@@ -53,11 +53,16 @@ class SingleCellFiberDataset(IterableDataset):
         bulk_bases = metadata.get("bulk_base_paths", {})
 
         for cell_name in self.cell_type_names:
-            cram_file = metadata["cell_types"][cell_name]["fibers"]
-            bw_files = metadata["cell_types"][cell_name]["bulk"]  # {assay: filename}
-            self.fiber_data_paths.append(os.path.join(fiber_base, cram_file))
-            bw_paths = [os.path.join(bulk_bases[a], bw_files[a]) for a in self.output_assays]
+            cell = metadata["cell_types"][cell_name]
+            self.fiber_data_paths.append(os.path.join(fiber_base, cell["fibers"]))
+            # None = this cell has no bulk data for that assay (masked out of the loss)
+            bw_paths = [None if cell["bulk"].get(a) is None else os.path.join(bulk_bases.get(a, ""), cell["bulk"][a])
+                        for a in self.output_assays]
             self.other_bw_paths.append(bw_paths)
+
+        # Per cell type: (K,) float mask, 1 where the assay has bulk data
+        self.assay_masks = [torch.tensor([p is not None for p in paths], dtype=torch.float32)
+                            for paths in self.other_bw_paths]
 
         self.num_cell_types = len(self.cell_type_names)
 
@@ -128,7 +133,7 @@ class SingleCellFiberDataset(IterableDataset):
         if self.fiber_bams is None:
             self.fiber_bams = [pyft.Fiberbam(str(Path(p).resolve())) for p in self.fiber_data_paths]
         if self.other_bws is None:
-            self.other_bws = [[pyBigWig.open(p) for p in paths] for paths in self.other_bw_paths]
+            self.other_bws = [[None if p is None else pyBigWig.open(p) for p in paths] for paths in self.other_bw_paths]
         if self.fasta is None:
             if not os.path.exists(self.fasta_path):
                 raise FileNotFoundError(f"FASTA not found: {self.fasta_path}")
@@ -172,18 +177,23 @@ class SingleCellFiberDataset(IterableDataset):
         return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers, torch.from_numpy(coverage_np)
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
+        """(K, L) asinh bulk signal; assays this cell has no data for are zeros (see self.assay_masks)."""
         tracks = []
         for bw in self.other_bws[cell_idx]:
+            if bw is None:
+                tracks.append(np.zeros(end - start, dtype=np.float32))
+                continue
             raw = np.array(bw.values(chrom, start, end), dtype=np.float32)
             tracks.append(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0))
         arr = np.stack(tracks, axis=0)  # (K, L)
         return torch.asinh(torch.from_numpy(arr))
 
     def _make_sample(self, fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                     other_tensor, locus, cell_type_name):
+                     other_tensor, locus, cell_type_name, assay_mask):
         out_dict = {
             "fiber_features": fiber_tensor,
             "target_bulk": other_tensor,
+            "assay_mask": assay_mask,
             "n_fibers": n_fibers,
             "fiber_coverage": fiber_coverage,
             "locus": locus,
@@ -224,7 +234,7 @@ class SingleCellFiberDataset(IterableDataset):
                     found = True
 
                 yield self._make_sample(fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                                        other_tensor, locus, cell_type_name)
+                                        other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
 
         else:  # eval mode: deterministic, no retry
             if self.num_sample_ccres == -1:
@@ -250,7 +260,7 @@ class SingleCellFiberDataset(IterableDataset):
                         continue
 
                     yield self._make_sample(fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                                            other_tensor, locus, cell_type_name)
+                                            other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
 
 
 #--------------------------------------------------------------------------------------------------
@@ -339,6 +349,7 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             "cell_type": ct,
             "fiber_features": trimmed_fiber_tensor,
             "target_bulk": bw_tensor,
+            "assay_mask": self.assay_masks[cell_idx],
             "fiber_dna_tensor": trimmed_dna_tensor,
             "n_fibers": n_fibers_needed,
             "fiber_coverage": fiber_coverage,
@@ -386,6 +397,8 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
         out_dict = {
             "fiber_features": torch.from_numpy(mixed_fiber_tensors),
             "target_bulk": composite_bulk,
+            # A mixed target is only valid for assays every contributing cell type has
+            "assay_mask": torch.stack([s["assay_mask"] for s in cell_samples]).prod(dim=0),
             "cell_type": "mixed",
             "cell_type_targets": individual_bulk_targets,
             "cell_type_masks": cell_type_masks,

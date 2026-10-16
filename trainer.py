@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from utils import *
+from metrics import masked_mse, per_assay_mse
 from vis_utils import plot_evaluation_dashboard_t, plot_loss
 
 class Trainer:
@@ -34,20 +35,21 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', patience=patience
         )
-        self.criterion = nn.MSELoss()
+        self.criterion = masked_mse  # assays a cell type has no bulk data for contribute no loss/gradient
 
         self.scaler = torch.amp.GradScaler(self.device)
 
     def train_step(self, batch):
         self.model.train()
         fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
+        assay_mask = batch["assay_mask"].to(self.device)
 
         self.optimizer.zero_grad()
 
         # Execute forward pass under mixed precision context
         with torch.amp.autocast(self.device_type):
             output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-            loss = self.criterion(output, target)
+        loss = self.criterion(output, target, assay_mask)
 
         # Scale loss and backpropagate using the Gradient Scaler
         self.scaler.scale(loss).backward()
@@ -59,14 +61,25 @@ class Trainer:
     def val_step(self, batch):
         self.model.eval()
         fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
+        assay_mask = batch["assay_mask"].to(self.device)
 
         with torch.no_grad():
             # Run validation evaluation under mixed precision context
             with torch.amp.autocast(self.device_type):
                 output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-                loss = self.criterion(output, target)
+            loss = self.criterion(output, target, assay_mask)
 
         return loss.item(), output, processed_fibers
+
+    @staticmethod
+    def _update_assay_meters(meters, output_assays, output, batch, device):
+        """Per-assay epoch meters, counting only samples whose cell type has that assay."""
+        with torch.no_grad():
+            losses, counts = per_assay_mse(output.detach(), batch["target_bulk"].to(device),
+                                           batch["assay_mask"].to(device))
+        for k, assay in enumerate(output_assays):
+            if counts[k] > 0:
+                meters[assay].update(losses[k].item(), n=int(counts[k].item()))
 
     def train(self, save_dir):
         train_loader = DataLoader(
@@ -111,12 +124,7 @@ class Trainer:
                     self.wandb_run.log({"gpu_peak_mb": peak_mb, "gpu_alloc_mb": alloc_mb})
                 n = batch["fiber_features"].size(0)
                 train_meter.update(t_loss, n=n)
-                with torch.no_grad():
-                    tgt = batch["target_bulk"].to(self.device)
-                    for k, assay in enumerate(output_assays):
-                        train_assay_meters[assay].update(
-                            self.criterion(t_output.detach()[:, k], tgt[:, k]).item(), n=n
-                        )
+                self._update_assay_meters(train_assay_meters, output_assays, t_output, batch, self.device)
                 last_t_batch = batch
                 last_t_output = t_output
                 last_t_fibers = t_processed_fibers
@@ -135,12 +143,7 @@ class Trainer:
                     v_loss, v_output, v_processed_fibers = self.val_step(v_batch)
                     n = v_batch["fiber_features"].size(0)
                     val_meter.update(v_loss, n=n)
-                    with torch.no_grad():
-                        tgt = v_batch["target_bulk"].to(self.device)
-                        for k, assay in enumerate(output_assays):
-                            val_assay_meters[assay].update(
-                                self.criterion(v_output[:, k], tgt[:, k]).item(), n=n
-                            )
+                    self._update_assay_meters(val_assay_meters, output_assays, v_output, v_batch, self.device)
                     last_v_batch = v_batch
                     last_v_output = v_output
                     last_v_fibers = v_processed_fibers
@@ -159,13 +162,14 @@ class Trainer:
             else:
                 print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f}")
 
-            for assay in output_assays:
-                log_dict[f"train_loss_{assay}"] = train_assay_meters[assay].avg
-                if avg_val_loss is not None:
-                    log_dict[f"val_loss_{assay}"] = val_assay_meters[assay].avg
-
-            train_assay_avg = {a: train_assay_meters[a].avg for a in output_assays}
-            val_assay_avg   = {a: val_assay_meters[a].avg  for a in output_assays}
+            # Only assays some sample actually had data for this epoch
+            train_assay_avg = {a: m.avg for a, m in train_assay_meters.items() if m.count > 0}
+            val_assay_avg   = {a: m.avg for a, m in val_assay_meters.items() if m.count > 0}
+            for assay, value in train_assay_avg.items():
+                log_dict[f"train_loss_{assay}"] = value
+            if avg_val_loss is not None:
+                for assay, value in val_assay_avg.items():
+                    log_dict[f"val_loss_{assay}"] = value
 
             # Generate & Log Train Dashboard Plot
             if last_t_batch is not None:
@@ -179,7 +183,8 @@ class Trainer:
                     last_t_batch["cell_type"],
                     output_assays,
                     assay_avg_losses=train_assay_avg,
-                    mode="Train"
+                    mode="Train",
+                    assay_mask=last_t_batch["assay_mask"],
                 )
                 log_dict["Train_Dashboard"] = wandb.Image(fig_t)
                 plt.close(fig_t)
@@ -196,7 +201,8 @@ class Trainer:
                     last_v_batch["cell_type"],
                     output_assays,
                     assay_avg_losses=val_assay_avg,
-                    mode="Val"
+                    mode="Val",
+                    assay_mask=last_v_batch["assay_mask"],
                 )
                 log_dict["Val_Dashboard"] = wandb.Image(fig_v)
                 plt.close(fig_v)

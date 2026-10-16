@@ -1,0 +1,54 @@
+# Data setup spec: which ENCODE bulk tracks to download for which cell lines, and where the fiber-seq
+# and ENCODE data live. data_prep/setup_data.py reads this, downloads the tracks into <encode_root>/<cell>/,
+# and regenerates configs/metapaths.yaml. Edit this file (not metapaths.yaml) to add cell lines, assays, or
+# fiber samples. (Reference genome / cCREs / train-val chromosomes live in configs/reference.yaml.)
+
+# --- Data locations ---
+fiber_dir:   /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell
+encode_root: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/ENCODE
+
+# --- ENCODE track selection ---
+assembly: GRCh38
+output_type: fold change over control
+
+# Assay name (as used in model configs' output_assays) -> ENCODE assay title (+ target for ChIP-seq).
+assays:
+  atac:     {assay_title: ATAC-seq}
+  h3k4me3:  {assay_title: Histone ChIP-seq, target: H3K4me3}
+  h3k27ac:  {assay_title: Histone ChIP-seq, target: H3K27ac}
+  h3k27me3: {assay_title: Histone ChIP-seq, target: H3K27me3}
+  h3k4me1:  {assay_title: Histone ChIP-seq, target: H3K4me1}
+  h3k36me3: {assay_title: Histone ChIP-seq, target: H3K36me3}
+  h3k9me3:  {assay_title: Histone ChIP-seq, target: H3K9me3}
+  ctcf:     {assay_title: TF ChIP-seq, target: CTCF}
+
+# Cell lines to fetch ENCODE data for. Key = folder name under encode_root.
+#   term_name:     exact ENCODE biosample term name
+#   fiber_samples: fiber-seq samples (keys of fiber_samples below) that share this line's ENCODE tracks
+encode_cells:
+  GM12878: {term_name: GM12878, fiber_samples: [GM12878]}
+  K562:    {term_name: K562,    fiber_samples: [K562_100U, K562_200U]}
+  HepG2:   {term_name: HepG2,   fiber_samples: [HepG2_100U, HepG2_200U]}
+  HCT116:  {term_name: HCT116,  fiber_samples: [HCT116_200U]}
+  MCF-7:   {term_name: MCF-7,   fiber_samples: [MCF_7_200U]}
+  Panc1:   {term_name: Panc1,   fiber_samples: [Panc1_100U, Panc1_200U]}
+  H1:      {term_name: H1,      fiber_samples: [H1_100U, H1_200U]}
+  H9:      {term_name: H9,      fiber_samples: [H9_100U, H9_200U]}
+
+# Every fiber-seq sample on disk: sample name -> CRAM filename in fiber_dir. All are listed in
+# metapaths.yaml (fiber_paths). Samples for other cell lines were removed from disk on 2026-10-16;
+# their CRAMs are in data/misc/google-filtered-crams.tar (stored there under the bare PS run ID).
+fiber_samples:
+  GM12878:            GM12878-fire-v0.1-filtered.cram
+  K562_100U:          K562_Fiber_seq_100U_1M_cells_100U_PS01369-fire-v0.1-filtered.cram
+  K562_200U:          K562_Fiber_seq_200U_1M_cells_200U_PS01370-fire-v0.1-filtered.cram
+  HepG2_100U:         HepG2_Fiber_seq_100U_1M_cells_100U_PS01307-fire-v0.1-filtered.cram
+  HepG2_200U:         HepG2_Fiber_seq_200U_1M_cells_200U_PS01308-fire-v0.1-filtered.cram
+  HCT116_200U:        HCT116_Fiber_seq_200U_1M_cells_200U_PS01314-fire-v0.1-filtered.cram
+  MCF_7_200U:         MCF_7_Fiber_seq_200U_1M_cells_200U_PS01305-fire-v0.1-filtered.cram
+  Panc1_100U:         Panc1_Fiber_seq_100U_1M_cells_100U_PS01316-fire-v0.1-filtered.cram
+  Panc1_200U:         Panc1_Fiber_seq_200U_1M_cells_200U_PS01317-fire-v0.1-filtered.cram
+  H1_100U:            H1_Fiber_seq_100U_1M_cells_100U_PS01372-fire-v0.1-filtered.cram
+  H1_200U:            H1_Fiber_seq_200U_1M_cells_200U_PS01373-fire-v0.1-filtered.cram
+  H9_100U:            H9_Fiber_seq_100U_1M_cells_100U_PS01375-fire-v0.1-filtered.cram
+  H9_200U:            H9_Fiber_seq_200U_1M_cells_200U_PS01376-fire-v0.1-filtered.cram

@@ -156,14 +156,20 @@ def _render_single_fiber_features(ax, fiber_inp, input_flags):
     ax.set_yticks([])
 
 
-def _render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None, cell_type=None):
-    """Sub-renderer for target vs predicted bulk signal. target, pred_bulk: (L,) numpy arrays."""
-    ax.plot(target, color='dimgray', lw=1.5, label=bulk_name)
+def _render_bulk_comparison(ax, target, pred_bulk, chr_info, instance_loss, mode, bulk_name, avg_loss=None,
+                            cell_type=None, has_target=True):
+    """Sub-renderer for target vs predicted bulk signal. target, pred_bulk: (L,) numpy arrays.
+    has_target=False: the cell type has no bulk data for this assay, so only the prediction is drawn."""
+    if has_target:
+        ax.plot(target, color='dimgray', lw=1.5, label=bulk_name)
     ax.plot(pred_bulk, color='darkorange', lw=1.5, label='Predicted', alpha=0.8)
     ax.set_ylabel("Signal Intensity")
     ax.legend(loc='upper right', frameon=False)
 
-    title = f"{bulk_name} — {cell_type} | Instance Loss: {instance_loss:.4f}"
+    if has_target:
+        title = f"{bulk_name} — {cell_type} | Instance Loss: {instance_loss:.4f}"
+    else:
+        title = f"{bulk_name} — {cell_type} | no ENCODE data (prediction only)"
     if avg_loss is not None:
         title += f"\nEpoch Avg Loss ({mode}): {avg_loss:.4f} | {chr_info}"
     else:
@@ -185,7 +191,7 @@ def _render_fiber_heatmap(ax, out_fibers):
 
 
 def _render_assay_pair(fig, col_gs, row_start, out_k, out_fibers_k, tar_k,
-                        assay_name, chr_info, instance_loss, mode, avg_loss, cell_type):
+                        assay_name, chr_info, instance_loss, mode, avg_loss, cell_type, has_target=True):
     """
     Renders one assay in 2 sub-rows of col_gs:
       row_start   → bulk comparison (target vs pred)
@@ -195,7 +201,7 @@ def _render_assay_pair(fig, col_gs, row_start, out_k, out_fibers_k, tar_k,
     """
     ax_sig = fig.add_subplot(col_gs[row_start, 0])
     _render_bulk_comparison(ax_sig, tar_k, out_k, chr_info, instance_loss, mode,
-                             assay_name, avg_loss, cell_type)
+                             assay_name, avg_loss, cell_type, has_target)
     ax_heat = fig.add_subplot(col_gs[row_start + 1, 0], sharex=ax_sig)
     _render_fiber_heatmap(ax_heat, out_fibers_k)
     return ax_sig, ax_heat
@@ -240,6 +246,7 @@ def plot_evaluation_dashboard(
     output_assays,
     assay_avg_losses=None,
     mode="Train",
+    assay_mask=None,
 ):
     """
     3-column evaluation dashboard: input features (col 0), assays 1-2 (col 1), assays 3-4 (col 2).
@@ -247,6 +254,7 @@ def plot_evaluation_dashboard(
     inp: (C, L, N), out: (K, L), out_fibers: (K, L, N), tar: (K, L) — numpy arrays.
     output_assays: list of K assay name strings.
     assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
+    assay_mask: (K,) bools, False where the cell type has no bulk data for that assay; None = all present.
     locus: (chrom, start, end). cell_type: str. Returns matplotlib Figure.
     """
     chr_name, start, end = locus
@@ -266,11 +274,12 @@ def plot_evaluation_dashboard(
     for pair_idx, k_start in enumerate(range(0, K, 2)):
         col_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1 + pair_idx], hspace=0.4)
         for local_k, k in enumerate(range(k_start, min(k_start + 2, K))):
-            instance_loss = float(np.mean((tar[k] - out[k]) ** 2))
+            has_target = True if assay_mask is None else bool(assay_mask[k])
+            instance_loss = float(np.mean((tar[k] - out[k]) ** 2)) if has_target else None
             avg_loss_k = assay_avg_losses.get(output_assays[k]) if assay_avg_losses else None
             _render_assay_pair(fig, col_gs, local_k * 2,
                                out[k], out_fibers[k], tar[k],
-                               output_assays[k], chr_info, instance_loss, mode, avg_loss_k, cell_type)
+                               output_assays[k], chr_info, instance_loss, mode, avg_loss_k, cell_type, has_target)
 
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.06, right=0.96)
     return fig
@@ -421,6 +430,7 @@ def plot_evaluator_record(record, input_flags, assay_avg_losses=None, output_ass
     target_bulk = record["target_bulk"]           # (K, L)
 
     cell_type_label = record.get("cell_type", "Unknown")
+    assay_mask = record.get("assay_mask")         # (K,) or None = all assays present
 
     num_data_cols = 1 + max(1, (K + 1) // 2)
     fig_width = 10 * num_data_cols
@@ -435,11 +445,12 @@ def plot_evaluator_record(record, input_flags, assay_avg_losses=None, output_ass
     for pair_idx, k_start in enumerate(range(0, K, 2)):
         col_gs = gridspec.GridSpecFromSubplotSpec(4, 1, subplot_spec=gs[:, 1 + pair_idx], hspace=0.45)
         for local_k, k in enumerate(range(k_start, min(k_start + 2, K))):
-            inst_k = float(np.mean((target_bulk[k] - pred_bulk[k]) ** 2))
+            has_target = True if assay_mask is None else bool(assay_mask[k])
+            inst_k = float(np.mean((target_bulk[k] - pred_bulk[k]) ** 2)) if has_target else None
             avg_loss_k = assay_avg_losses.get(output_assays[k]) if assay_avg_losses else None
             _render_assay_pair(fig, col_gs, local_k * 2,
                                pred_bulk[k], processed_fibers[k], target_bulk[k],
-                               output_assays[k], chr_info, inst_k, mode, avg_loss_k, cell_type_label)
+                               output_assays[k], chr_info, inst_k, mode, avg_loss_k, cell_type_label, has_target)
 
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.06, right=0.96)
     return fig
@@ -486,14 +497,17 @@ def plot_evaluation_dashboard_t(
     output_assays,
     assay_avg_losses=None,
     mode="Train",
+    assay_mask=None,
 ):
     """
     Torch wrapper for plot_evaluation_dashboard.
     inp_t: (B, C, L, N), out_t: (B, K, L), out_fibers_t: (B, K, L, N), tar_t: (B, K, L).
     output_assays: list of K assay name strings.
     assay_avg_losses: dict {assay: float} of epoch-average losses per assay, or None.
+    assay_mask: (B, K) tensor (1 = cell type has bulk data for the assay), or None = all present.
     locus: collated list-of-lists from DataLoader. cell_type: list[str].
     """
+    mask = None if assay_mask is None else assay_mask[0].cpu().numpy().astype(bool)
     inp = inp_t[0].cpu().detach().float().numpy()
     out = out_t[0].cpu().detach().float().numpy()           # (K, L)
     out_fibers = out_fibers_t[0].cpu().detach().float().numpy()  # (K, L, N)
@@ -503,7 +517,8 @@ def plot_evaluation_dashboard_t(
     else:
         locus_tup = (locus[0], int(locus[1]), int(locus[2]))
     ct = cell_type[0] if isinstance(cell_type, (list, tuple)) else cell_type
-    return plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus_tup, ct, output_assays, assay_avg_losses, mode)
+    return plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus_tup, ct, output_assays,
+                                     assay_avg_losses, mode, mask)
 
 
 def plot_single_column_fiber_stack_t(
@@ -570,6 +585,8 @@ def plot_evaluator_record_t(record_t, input_flags, assay_avg_losses=None, output
     for k, v in record_t.items():
         if k in squeeze_keys and isinstance(v, torch.Tensor):
             record[k] = v[0].cpu().detach().float().numpy()
+        elif k == "assay_mask" and isinstance(v, torch.Tensor):
+            record[k] = v[0].cpu().numpy().astype(bool)
         elif k == "locus":
             locus = v
             record[k] = (locus[0][0], int(locus[1][0]), int(locus[2][0]))

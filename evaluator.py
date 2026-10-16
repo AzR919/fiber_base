@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from data_utils import make_fiber_dataset
-from metrics import mse_loss
+from metrics import masked_mse, per_assay_mse
 from utils import *
 from vis_utils import plot_evaluator_record_t
 
@@ -28,7 +28,6 @@ class Evaluator:
         self.model.to(self.device)
         self.dataset = dataset
         self.batch_size = batch_size
-        self.criterion = nn.MSELoss()
 
         self.rng = random.Random(seed)
         self.num_to_save = num_plots_to_log
@@ -52,16 +51,18 @@ class Evaluator:
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_loader):
                 fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, self.device)
+                assay_mask = batch["assay_mask"].to(self.device)
 
                 with torch.amp.autocast(self.device_type, dtype=torch.float16):
                     pred_composite_bulk, processed_fibers = self.model(fiber_features, **forward_kwargs)
 
-                comp_loss = self.criterion(pred_composite_bulk, target_bulk).item()
+                # Assays the cell type has no bulk data for are excluded from every loss
+                comp_loss = masked_mse(pred_composite_bulk, target_bulk, assay_mask).item()
                 composite_loss_meter.update(comp_loss)
+                losses, counts = per_assay_mse(pred_composite_bulk, target_bulk, assay_mask)
                 for k, assay in enumerate(output_assays):
-                    assay_loss_meters[assay].update(
-                        self.criterion(pred_composite_bulk[:, k], target_bulk[:, k]).item()
-                    )
+                    if counts[k] > 0:
+                        assay_loss_meters[assay].update(losses[k].item(), n=int(counts[k].item()))
 
                 ct = batch.get("cell_type", ["Unknown"])
                 cell_type_name = ct[0] if isinstance(ct, (list, tuple)) else ct
@@ -73,6 +74,7 @@ class Evaluator:
                     "processed_fibers": processed_fibers.cpu(),
                     "pred_bulk": pred_composite_bulk.cpu(),
                     "target_bulk": target_bulk.cpu(),
+                    "assay_mask": assay_mask.cpu(),
                     "loss": comp_loss,
                 }
                 valid_locus_count += 1
@@ -98,7 +100,8 @@ class Evaluator:
 
         return {
             "composite": {"loss": composite_loss_meter.avg},
-            "per_assay": {a: {"loss": assay_loss_meters[a].avg} for a in assay_loss_meters},
+            # None = the evaluated cell type has no bulk data for that assay
+            "per_assay": {a: {"loss": m.avg if m.count > 0 else None} for a, m in assay_loss_meters.items()},
             "locus_records": locus_records,
             "num_locus": valid_locus_count * self.batch_size,
         }
@@ -172,7 +175,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
             prefix = f"test/{cell_type}"
             ct_log_dict = {f"{prefix}/loss": composite_loss}
             for assay, data in eval_results.get("per_assay", {}).items():
-                ct_log_dict[f"{prefix}/loss_{assay}"] = data["loss"]
+                if data["loss"] is not None:
+                    ct_log_dict[f"{prefix}/loss_{assay}"] = data["loss"]
 
             assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
             wandb_image_list = []

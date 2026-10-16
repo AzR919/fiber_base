@@ -1,0 +1,8 @@
+# Reference genome, cCRE list, and default train/val chromosomes. Hand-edited (not generated).
+# load_metapaths() merges this into metapaths.yaml (which data_prep/setup_data.py generates).
+# Data/eval configs can still override train_chrs / val_chrs.
+
+fasta_path: /home/azr/projects/def-maxwl/azr/data/misc/hg38.fa
+ccre_path:  /home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed
+train_chrs: [chr20]
+val_chrs:   [chr21]
