@@ -1,0 +1,11 @@
+# Panc1_200U full eval: all val-chromosome cCREs (chr21, ~11.4k). 5kb context, 100 fibers. Single-cell mode.
+# Dev cell type (split v1, see configs/README.md).
+
+context_length: 5000
+fibers_per_entry: 100
+num_sample_ccres: -1
+seed: 919
+dataset_type: single
+
+cell_types:
+  Panc1_200U:

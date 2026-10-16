@@ -138,6 +138,9 @@ cell_types:
 | `model10` | UNet03 mid, ATAC only |
 | `model11` | UNet03 mid, all 4 assays, all 5 inputs |
 | `model12` | Same as model11 without `fire_msp` (ablation) |
+| `model13` / `model14` | UNet03 small (8/16/32/64), all 8 assays, with / without `fire_msp`; 1g.10gb slice (tight) |
+| `model15` / `model16` | UNet03 mid (8/24/48/96), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
+| `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `train01` | Standard run (25 × 1000 iters, bs 8) |
 | `eval13` / `eval14` / `eval15` (+ `_mini`) | Eval on GM12878 / K562_200U / HepG2_200U |
 

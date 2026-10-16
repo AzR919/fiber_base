@@ -1,0 +1,13 @@
+# Dev leave-one-out fold (split v1, see configs/README.md): the dev set minus K562_200U.
+# Train on the other 4, then evaluate on K562_200U with its eval config.
+# Single-cell training, 5kb context, 100 fibers per sample. Target assays come from the model config's output_assays.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+cell_types:
+  GM12878:
+  HepG2_200U:
+  Panc1_200U:
+  H1_200U:

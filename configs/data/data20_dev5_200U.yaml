@@ -1,0 +1,15 @@
+# Dev set (split v1, see configs/README.md): all 5 dev cell types, 200U samples where available
+# (GM12878 has a single sample). Train this to get the final models that are tested on the held-out 3.
+# Single-cell training (each sample drawn from one randomly chosen cell type). 5kb context, 100 fibers per sample.
+# Target assays come from the model config's output_assays; H1 has no ATAC, so its ATAC loss is masked.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+cell_types:
+  GM12878:
+  K562_200U:
+  HepG2_200U:
+  Panc1_200U:
+  H1_200U:

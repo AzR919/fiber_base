@@ -1,0 +1,11 @@
+# HCT116_200U mini eval: 500 val cCREs (seeded subset), for quick checks after training. 5kb context, 100 fibers.
+# HELD-OUT cell type: never train on it or use it for model selection (split v1, see configs/README.md).
+
+context_length: 5000
+fibers_per_entry: 100
+num_sample_ccres: 500
+seed: 919
+dataset_type: single
+
+cell_types:
+  HCT116_200U:

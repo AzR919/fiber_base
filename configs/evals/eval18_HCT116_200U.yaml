@@ -1,0 +1,11 @@
+# HCT116_200U full eval: all val-chromosome cCREs (chr21, ~11.4k). 5kb context, 100 fibers. Single-cell mode.
+# HELD-OUT cell type: never train on it or use it for model selection (split v1, see configs/README.md).
+
+context_length: 5000
+fibers_per_entry: 100
+num_sample_ccres: -1
+seed: 919
+dataset_type: single
+
+cell_types:
+  HCT116_200U:

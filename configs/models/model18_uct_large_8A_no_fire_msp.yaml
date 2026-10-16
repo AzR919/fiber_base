@@ -1,0 +1,11 @@
+# fire_msp ablation: identical to model17_uct_large_8A but without the fire_msp input.
+# UNet03 conv-transformer, LARGE, all 8 assays. Inputs [m6a, cpg, msp, nuc] + reference DNA. Fits in a 2g.20gb MIG slice.
+
+model: "unet03"
+input_flags: [1, 1, 1, 1, 0]
+kernel_size: 15
+dna_type: "ref"
+tf_heads: 4
+tf_layers: 2
+emb_dims: [8, 32, 64, 128]
+output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9me3", "ctcf"]
