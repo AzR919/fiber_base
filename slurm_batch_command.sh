@@ -31,8 +31,8 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 python main.py \
   --data_config configs/data/data17_GM12878_K562_200U_HepG2_200U.yaml \
   --model_config configs/models/model12_uct_mid_all_A_no_fire_msp.yaml \
-  --train_config configs/training/train01.yaml \
-  --eval_configs configs/evals/eval15_HepG2_200U_mini.yaml \
+  --train_config configs/training/train02.yaml \
+  --eval_configs configs/evals/eval23_HepG2_200U_mini.yaml \
   --name_prefix All_A_All_T_no_fire
 
 # Print job completion time

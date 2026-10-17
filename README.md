@@ -10,7 +10,7 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 
 ## Overview
 
-**What it learns**: given N fibers overlapping a window of length L around a cCRE, predict per-fiber, per-assay signal whose coverage-normalized average matches the bulk signal track(s) over that window.
+**What it learns**: given N fibers overlapping a window of length L centred on a genomic region, predict per-fiber, per-assay signal whose coverage-normalized average matches the bulk signal track(s) over that window.
 
 **How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the sum over fibers divided by fiber coverage at each position — i.e. "predict each fiber's contribution, then average". The model returns both: `y` (bulk, `(B, K, L)`, used for the loss) and `processed_fibers` (single-molecule predictions, `(B, K, L, N)`, the imputation we ultimately care about).
 
@@ -20,8 +20,11 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 - **Single-cell** (`single`): each sample is fibers from one cell type predicting that cell type's bulk signal. With several cell types listed, each training sample picks one cell type at random.
 - **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target. Eval in this mode also reports per-cell-type deconvolution MSE.
 
-**Train / validation split**: by chromosome — train on `chr20` cCREs (~25k), validate and evaluate on `chr21` cCREs (~11.4k). Set in `configs/reference.yaml`.
-This is being replaced by **region files** built during data setup: training pools sampled at runtime, plus fixed val/test window sets (e.g. `val_chr22_n200`, `test_chr21_tiles`) named in configs. The files exist; the runtime doesn't read them yet. Details in `configs/README.md` → Regions.
+**Where we train, validate and test** comes from **region files** built during data setup (`configs/README.md` → Regions):
+- **Training** draws regions at runtime from pools on `chr20` (cCRE centres with jitter, optionally mixed with uniform random regions).
+- **Validation** each epoch iterates a fixed window set on `chr22` (`val_chr22_n200`: 200 regions per training cell).
+- **Testing** iterates fixed sets on `chr21`: `test_chr21_tiles` (all 6,843 valid non-overlapping 5 kb tiles) or `test_chr21_mini2000`.
+- Metrics are also reported per region type (bases in promoter / enhancer / CTCF cCREs, outside cCREs).
 
 Eval is **fully deterministic**: same checkpoint + same eval config → identical results.
 
@@ -36,7 +39,8 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 | `args.py` | Argument parsing and config loading (CLI > config files > defaults) |
 | `trainer.py` | Training loop, validation, checkpointing, wandb logging |
 | `evaluator.py` | `Evaluator` (inference + metrics) and `run_final_eval` (loops over eval configs) |
-| `data_utils.py` | `SingleCellFiberDataset`, `MixedCellFiberDataset`, `make_fiber_dataset()` |
+| `data_utils.py` | `SingleCellFiberDataset`, `MixedCellFiberDataset`, `make_fiber_dataset()`: build windows around regions, load fibers + targets |
+| `regions.py` | Reads the region files at runtime: window sets, allowed centres, training pools (`TrainSampler`), per-bp cCRE-class masks |
 | `fiber_utils.py` | Low-level per-fiber feature extraction from CRAM files |
 | `models.py` | `BaseModel` (save/load), `Base01DebugModel`, `UNet03ConvTransformerWithDNA`, `model_selector()` |
 | `metrics.py` | Masked MSE (missing assays excluded), per-assay MSE, pooled + per-window Pearson |
@@ -76,7 +80,7 @@ A run combines one data config, one model config, one training config and (optio
 - `cell_types`: fiber sample → its cell line's ENCODE folder. At runtime the folder's `manifest.json` lists which assays exist; requested assays a cell lacks are masked (no loss, no gradient, `null` in eval).
 - `assay_status`: informational summary of which assays each cell line has.
 
-`reference.yaml` is hand-edited: FASTA, the cCRE BED (used by the current runtime until it moves to region files) and the train/val chromosomes. `load_metapaths()` merges it in.
+`reference.yaml` is hand-edited: FASTA, `regions_root` (the region files) and `train_chrs`. `load_metapaths()` merges it in.
 
 Cell lines with ENCODE data: **GM12878, K562, HepG2, HCT116, MCF-7, Panc1** (all 8 assays) and **H1, H9** (no ATAC). The dev / held-out split and the "200U samples only" rule are in `configs/README.md`.
 
@@ -86,6 +90,9 @@ Cell lines with ENCODE data: **GM12878, K562, HepG2, HCT116, MCF-7, Panc1** (all
 context_length: 5000       # window size in bp
 fibers_per_entry: 100      # fibers per sample
 dataset_type: single       # 'single' or 'mixed'
+
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}   # training regions (default without the key: ccre 1.0)
+val_windows: val_chr22_n200                          # per-epoch validation window set (default)
 
 cell_types:
   GM12878:                 # single: no ratio needed
@@ -110,21 +117,23 @@ output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3"]   # keys from metapath
 
 ```yaml
 epochs: 25
-iters_per_epoch: 1000
+samples_per_epoch: 1000     # training samples per epoch (steps = samples / batch_size)
 batch_size: 8
 lr: 0.0001
 res_dir: "./results"
 seed: 919
+# num_workers: 3           # optional DataLoader workers (default 0); datasets split their work across them
 ```
 
 ### Eval Config (`configs/evals/`)
 
-One config per cell type. `_mini` variants use a 500-cCRE subset for quick checks; full variants use every val cCRE.
+One config per cell type, each naming a test window set. Full variants use `test_chr21_tiles` (6,843 regions); `_mini` variants use `test_chr21_mini2000`.
 
 ```yaml
 context_length: 5000
 fibers_per_entry: 100
-num_sample_ccres: -1       # -1 = all val cCREs; otherwise a seeded subset
+windows: test_chr21_tiles  # window set in <regions_root>/windows/
+# max_regions: 5           # optional seeded subset (debugging)
 seed: 919
 dataset_type: single
 
@@ -139,21 +148,21 @@ cell_types:
 | Config | What it is |
 |---|---|
 | `data00`, `model00`, `train00`, `eval00` | Tiny debug/smoke-test setup |
-| `data13` / `data14` / `data15` | Single cell type: GM12878 / K562_200U / HepG2_200U |
-| `data16` / `data18` / `data19` | Two cell types (one held out): GM+K562 / GM+HepG2 / K562+HepG2 |
-| `data17` | All three cell types |
 | `model10` | UNet03 mid, ATAC only |
 | `model11` | UNet03 mid, all 4 assays, all 5 inputs |
 | `model12` | Same as model11 without `fire_msp` (ablation) |
 | `model13` / `model14` | UNet03 small (8/16/32/64), all 8 assays, with / without `fire_msp`; 1g.10gb slice (tight) |
 | `model15` / `model16` | UNet03 mid (8/24/48/96), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
-| `train01` | Standard run (25 × 1000 iters, bs 8) |
-| `eval13` / `eval14` / `eval15` (+ `_mini`) | Eval on GM12878 / K562_200U / HepG2_200U |
-| `data20` | All 5 dev cell types (split v1, 200U) |
-| `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type) |
+| `train02` | Standard run (25 epochs × 1000 samples, bs 8); `train01` is retired (old key `iters_per_epoch`) |
+| `data20` | All 5 dev cell types (split v1, 200U); training regions half cCRE, half random |
+| `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type); same regions as `data20` |
+| `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |
+| `old_configs/data/data12`–`data19` | Retired pre-split configs (still run: no `train_windows` means cCRE-only) |
+| `eval21` / `eval22` / `eval23` (+ `_mini`) | Eval on dev cells GM12878 / K562_200U / HepG2_200U |
 | `eval16` / `eval17` (+ `_mini`) | Eval on dev cells Panc1_200U / H1_200U |
 | `eval18` / `eval19` / `eval20` (+ `_mini`) | Held-out test: HCT116_200U / MCF_7_200U / H9_200U |
+| `old_configs/evals/eval13`–`eval15` | Retired cCRE-list evals (do not run with the current code) |
 
 ---
 
@@ -183,19 +192,20 @@ python data_prep/setup_data.py                # run interactively
 
 ```bash
 python main.py \
-  --data_config  configs/data/data17_GM12878_K562_200U_HepG2_200U.yaml \
-  --model_config configs/models/model11_uct_mid_all_A.yaml \
-  --train_config configs/training/train01.yaml \
-  [--eval_configs configs/evals/eval13_GM12878_mini.yaml configs/evals/eval15_HepG2_200U_mini.yaml] \
+  --data_config  configs/data/data23_dev_loo_HepG2_200U.yaml \
+  --model_config configs/models/model15_uct_mid_8A.yaml \
+  --train_config configs/training/train02.yaml \
+  [--eval_configs configs/evals/eval21_GM12878_mini.yaml configs/evals/eval23_HepG2_200U_mini.yaml] \
   [--metapaths configs/metapaths.yaml] \
-  [--name_prefix myrun] [--name_suffix v1] [-D]
+  [--num_workers 3] [--name_prefix myrun] [--name_suffix v1] [-D]
 ```
 
 - Results go to `results/<YY-MM-DD_THH-MM-SS>_<prefix>_<data>_<model>_<train>_<suffix>/` (checkpoints `Model_epoch_N.pt`).
 - If `--eval_configs` is given, each eval config runs after training and is logged to wandb.
 - Any config value can be overridden on the CLI (e.g. `--lr 3e-4`).
+- `--num_workers N` loads data in N background processes (the job's CPUs minus one is a good start). Workers are started with `forkserver`, because pyft hangs in workers forked from a process that has already read fibers; any script that uses workers needs an `if __name__ == "__main__":` guard (`main.py` and `eval.py` have one).
 
-**Reproducibility**: the same `seed` + same epoch always gives the same training data order (`set_epoch(epoch)`); validation uses a fixed cCRE iteration.
+**Reproducibility**: the same `seed` + same epoch always gives the same training data order (`set_epoch(epoch)`); validation and eval iterate fixed window sets. With `num_workers > 0` the data are identical for a given number of workers (each worker has its own seed and share of the regions).
 
 ---
 
@@ -204,10 +214,12 @@ python main.py \
 ```bash
 python eval.py \
   --checkpoint results/<run_dir>/Model_epoch_25.pt \
-  --eval_configs configs/evals/eval13_GM12878.yaml configs/evals/eval14_K562_200U.yaml configs/evals/eval15_HepG2_200U.yaml \
+  --eval_configs configs/evals/eval21_GM12878.yaml configs/evals/eval22_K562_200U.yaml configs/evals/eval23_HepG2_200U.yaml \
   [--metapaths configs/metapaths.yaml] [--device cuda] \
-  [--output_dir ./results] [--save_plots] [--wandb]
+  [--output_dir ./results] [--save_plots] [--wandb] [--num_workers 3]
 ```
+
+Prints, per cell type, how many samples were evaluated (regions without fibers are skipped) and a table of Pearson r per region type × assay. `eval_summary.json` has the full breakdown (`strata`: bases, loss and r per region type, per assay).
 
 ---
 

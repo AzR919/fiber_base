@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from utils import *
 from metrics import masked_mse, per_assay_mse, PearsonMeter
 from vis_utils import plot_evaluation_dashboard_t, plot_loss
+from data_utils import loader_context
 
 class Trainer:
     def __init__(self, model, train_dataset, val_dataset=None, wandb_run=None,
@@ -82,10 +83,14 @@ class Trainer:
                 meters[assay].update(losses[k].item(), n=int(counts[k].item()))
 
     def train(self, save_dir):
+        # Datasets split their work across workers (training samples / validation regions)
+        num_workers = getattr(self.config, "num_workers", 0)
         train_loader = DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            worker_init_fn=seed_worker
+            worker_init_fn=seed_worker,
+            num_workers=num_workers,
+            multiprocessing_context=loader_context(num_workers),
         )
 
         val_loader = None
@@ -93,7 +98,9 @@ class Trainer:
             val_loader = DataLoader(
                 self.val_dataset,
                 batch_size=self.batch_size,
-                worker_init_fn=seed_worker
+                worker_init_fn=seed_worker,
+                num_workers=num_workers,
+                multiprocessing_context=loader_context(num_workers),
             )
 
         train_losses = []

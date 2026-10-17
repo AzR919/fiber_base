@@ -30,7 +30,7 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Run full evaluation on all three cell types (fire_msp ablation model, model12_uct_mid_all_A_no_fire_msp)
 python eval.py \
   --checkpoint results/26-10-14_T16-57-00_All_A_All_T_no_fire_data17_GM12878_K562_200U_HepG2_200U_model12_uct_mid_all_A_no_fire_msp_train01/Model_epoch_25.pt \
-  --eval_configs configs/evals/eval13_GM12878.yaml configs/evals/eval14_K562_200U.yaml configs/evals/eval15_HepG2_200U.yaml \
+  --eval_configs configs/evals/eval21_GM12878.yaml configs/evals/eval22_K562_200U.yaml configs/evals/eval23_HepG2_200U.yaml \
   --wandb
 
 # Print job completion time

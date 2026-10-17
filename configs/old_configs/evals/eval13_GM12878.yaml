@@ -1,3 +1,4 @@
+# RETIRED 2026-10-17: cCRE-list eval (num_sample_ccres), replaced by region window sets. Does not run with current code.
 # GM12878 full eval: all val-chromosome cCREs (chr21, ~11.4k). 5kb context, 100 fibers. Single-cell mode.
 
 context_length: 5000

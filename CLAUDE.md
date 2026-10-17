@@ -42,3 +42,4 @@ Run the stop script before closing the laptop (avoids fail2ban bans from danglin
 - Configs are numbered (`dataNN_`, `modelNN_`, `evalNN_`); add new ones with the next number instead of editing ones that have already been used in a run. Each config starts with a header comment saying what it is.
 - Retired configs go in `configs/old_configs/`.
 - Weekly result write-ups go in `reports/`.
+- `tester.py`, `misc/` and `plots_code/` are one-off scripts, not part of the pipeline. When changing pipeline code (renaming functions, changing signatures or config formats), don't update, test or preserve compatibility with them, and don't let them shape the design. Only touch them when explicitly asked to work on one.

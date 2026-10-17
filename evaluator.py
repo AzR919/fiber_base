@@ -13,25 +13,53 @@ from torch.utils.data import DataLoader
 
 import matplotlib.pyplot as plt
 
-from data_utils import make_fiber_dataset
+from data_utils import make_fiber_dataset, loader_context
 from metrics import masked_mse, per_assay_mse, PearsonMeter
+from regions import STRATA
 from utils import *
 from vis_utils import plot_evaluator_record_t
+
+# Region types metrics are reported for, per base pair (see configs/README.md, Regions):
+# all scored bases, bases in any cCRE, in each cCRE class, and outside cCREs
+REPORT_STRATA = ["all", "ccre"] + STRATA + ["non_ccre"]
 
 
 def _nan_to_none(x):
     return None if x is None or np.isnan(x) else float(x)
 
 
+def _meter_summary(meter, output_assays):
+    """Per-assay loss (MSE) and Pearson r from a PearsonMeter, plus their means over assays with data."""
+    r, mse = meter.value.tolist(), meter.mse.tolist()
+    per_assay = {a: {"loss": _nan_to_none(mse[k]), "pearson": _nan_to_none(r[k])} for k, a in enumerate(output_assays)}
+    rs = [v["pearson"] for v in per_assay.values() if v["pearson"] is not None]
+    ls = [v["loss"] for v in per_assay.values() if v["loss"] is not None]
+    return {"n_bp": int(meter.n.max().item()),
+            "pearson": float(np.mean(rs)) if rs else None,
+            "loss": float(np.mean(ls)) if ls else None,
+            "per_assay": per_assay}
+
+
+def _print_strata_table(cell_type, strata, output_assays):
+    print(f"[eval] {cell_type}: Pearson r per base pair, by region type")
+    print(f"  {'region':9s} {'bases':>13s} " + " ".join(f"{a[:8]:>8s}" for a in output_assays) + f" {'mean':>7s}")
+    for name, s in strata.items():
+        vals = " ".join(f"{'-':>8s}" if s["per_assay"][a]["pearson"] is None else f"{s['per_assay'][a]['pearson']:8.3f}"
+                        for a in output_assays)
+        mean = f"{'-':>7s}" if s["pearson"] is None else f"{s['pearson']:7.3f}"
+        print(f"  {name:9s} {s['n_bp']:>13,} {vals} {mean}")
+
+
 class Evaluator:
 
-    def __init__(self, model, dataset, batch_size=1, num_plots_to_log=5, device="cuda", seed=919):
+    def __init__(self, model, dataset, batch_size=1, num_plots_to_log=5, device="cuda", seed=919, num_workers=0):
         self.model = model
         self.device = torch.device(device)
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self.dataset = dataset
         self.batch_size = batch_size
+        self.num_workers = num_workers
 
         self.rng = random.Random(seed)
         self.num_to_save = num_plots_to_log
@@ -44,14 +72,18 @@ class Evaluator:
             batch_size=self.batch_size,
             worker_init_fn=seed_worker,
             drop_last=False,
+            num_workers=self.num_workers,  # the dataset strides its regions across workers
+            multiprocessing_context=loader_context(self.num_workers),
         )
 
         composite_loss_meter = AverageMeter()
         output_assays = self.model.init_args.get("output_assays", ["atac"])
         assay_loss_meters = {a: AverageMeter() for a in output_assays}
-        pearson_meter = PearsonMeter(len(output_assays))   # pooled bp-level r over the same windows as the MSE
+        # Pooled bp-level r (and MSE) per region type; "all" covers the same positions as the MSE above
+        strata_meters = {s: PearsonMeter(len(output_assays)) for s in REPORT_STRATA}
         locus_records = []
         valid_locus_count = 0
+        num_samples = 0
 
         with torch.no_grad():
             for batch_idx, batch in enumerate(test_loader):
@@ -68,7 +100,16 @@ class Evaluator:
                 for k, assay in enumerate(output_assays):
                     if counts[k] > 0:
                         assay_loss_meters[assay].update(losses[k].item(), n=int(counts[k].item()))
-                pearson_meter.update(pred_composite_bulk, target_bulk, assay_mask)
+                num_samples += fiber_features.shape[0]
+
+                strata_meters["all"].update(pred_composite_bulk, target_bulk, assay_mask)
+                if "strata" in batch:
+                    st = batch["strata"].to(self.device)        # (B, len(STRATA), L) bool
+                    in_ccre = st.any(dim=1)
+                    selections = {"ccre": in_ccre, "non_ccre": ~in_ccre, **{c: st[:, i] for i, c in enumerate(STRATA)}}
+                    for name, sel in selections.items():
+                        strata_meters[name].update(pred_composite_bulk, target_bulk,
+                                                   assay_mask[:, :, None] * sel[:, None, :].float())
 
                 ct = batch.get("cell_type", ["Unknown"])
                 cell_type_name = ct[0] if isinstance(ct, (list, tuple)) else ct
@@ -105,17 +146,18 @@ class Evaluator:
                     plt.close()
 
         # None = the evaluated cell type has no bulk data for that assay (or r undefined: flat signal)
-        r = pearson_meter.value.tolist()
+        strata = {s: _meter_summary(m, output_assays) for s, m in strata_meters.items() if m.n.max() > 0}
+        all_bp = strata.get("all", {"pearson": None, "per_assay": {a: {"pearson": None} for a in output_assays}})
         per_assay = {a: {"loss": assay_loss_meters[a].avg if assay_loss_meters[a].count > 0 else None,
-                         "pearson": _nan_to_none(r[k])} for k, a in enumerate(output_assays)}
-        available_r = [v["pearson"] for v in per_assay.values() if v["pearson"] is not None]
+                         "pearson": all_bp["per_assay"][a]["pearson"]} for a in output_assays}
         return {
             # composite pearson = mean of the per-assay r over assays with data
-            "composite": {"loss": composite_loss_meter.avg,
-                          "pearson": float(np.mean(available_r)) if available_r else None},
+            "composite": {"loss": composite_loss_meter.avg, "pearson": all_bp["pearson"]},
             "per_assay": per_assay,
+            "strata": strata,
             "locus_records": locus_records,
-            "num_locus": valid_locus_count * self.batch_size,
+            "num_locus": num_samples,
+            "expected_samples": getattr(self.dataset, "expected_samples", None),
         }
 
 
@@ -149,16 +191,19 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
         else:
             eval_metadata = eval_cfg.get("metadata", {})
 
+        windows = eval_cfg.get("windows")
+        if not windows:
+            raise ValueError(f"{eval_config_path}: eval configs need 'windows: <window set name>' "
+                             "(e.g. test_chr21_mini2000); see configs/README.md, Regions.")
         eval_seed = eval_cfg.get("seed", 919)
-        num_sample_ccres = eval_cfg.get("num_sample_ccres", 100)
         test_set = make_fiber_dataset(
             eval_cfg.get("dataset_type", "single"),
             mode="eval",
             metadata=eval_metadata,
             fibers_per_entry=eval_cfg.get("fibers_per_entry", getattr(train_args, "fibers_per_entry", 200)),
             context_length=eval_cfg.get("context_length", getattr(train_args, "context_length", 4096)),
-            iters_per_epoch=num_sample_ccres,
-            num_sample_ccres=num_sample_ccres,
+            windows=windows,
+            max_regions=eval_cfg.get("max_regions"),
             input_flags=model.init_args["input_flags"],
             dna_type=model.init_args["dna_type"],
             output_assays=output_assays,
@@ -170,23 +215,30 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
             save_path = os.path.join(plots_output_dir, cell_type) + "/"
             os.makedirs(save_path, exist_ok=True)
 
-        evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed)
+        evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed,
+                              num_workers=getattr(train_args, "num_workers", 0))
         eval_results = evaluator.evaluate(save_path=save_path)
 
         composite_loss = eval_results["composite"]["loss"]
         composite_r = eval_results["composite"]["pearson"]
         r_str = f"{composite_r:.4f}" if composite_r is not None else "n/a"
-        print(f"[eval] {cell_type} composite loss: {composite_loss:.6f} | pearson: {r_str}")
+        n_done, n_expected = eval_results["num_locus"], eval_results["expected_samples"]
+        print(f"[eval] {cell_type} on {windows}: {n_done} of {n_expected} samples evaluated "
+              f"({n_expected - n_done} skipped: no fibers) | composite loss: {composite_loss:.6f} | pearson: {r_str}")
+        _print_strata_table(cell_type, eval_results["strata"], output_assays)
 
         assay_avg = {a: eval_results["per_assay"][a]["loss"] for a in output_assays}
         assay_avg_r = {a: eval_results["per_assay"][a]["pearson"] for a in output_assays}
         summary[cell_type] = {
             "eval_config": eval_config_path,
+            "windows": windows,
             "composite_loss": composite_loss,
             "pearson": composite_r,
             "per_assay_loss": assay_avg,
             "per_assay_pearson": assay_avg_r,
-            "num_loci": eval_results["num_locus"],
+            "num_loci": n_done,
+            "expected_samples": n_expected,
+            "strata": eval_results["strata"],   # bp-level loss / r per region type, per assay
         }
 
         if wandb_run is not None:
@@ -199,6 +251,14 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
                     ct_log_dict[f"{prefix}/loss_{assay}"] = data["loss"]
                 if data["pearson"] is not None:
                     ct_log_dict[f"{prefix}/pearson_{assay}"] = data["pearson"]
+            # Per region type: means over assays (per-assay detail is in the summary JSON)
+            for name, s in eval_results["strata"].items():
+                if name == "all":
+                    continue
+                if s["pearson"] is not None:
+                    ct_log_dict[f"{prefix}/pearson@{name}"] = s["pearson"]
+                if s["loss"] is not None:
+                    ct_log_dict[f"{prefix}/loss@{name}"] = s["loss"]
 
             wandb_image_list = []
             for idx, record in enumerate(eval_results.get("locus_records", [])):

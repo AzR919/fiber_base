@@ -1,3 +1,5 @@
+# RETIRED 2026-10-17: uses the old key iters_per_epoch (renamed samples_per_epoch). Same values as train02.
+# Runs whose results folder ends in _train01 (2026-10) used this file.
 # Standard training run: 25 epochs x 1000 iters, batch size 8, lr 1e-4, seed 919.
 
 epochs: 25

@@ -42,6 +42,8 @@ def parse_args():
                         help="Save per-locus dashboard plots to output_dir/{runname}/{cell_type}/.")
     parser.add_argument("--wandb", action="store_true",
                         help="Log results to a new Weights & Biases run.")
+    parser.add_argument("--num_workers", type=int, default=0,
+                        help="DataLoader workers for loading eval regions (0 = load in the main process).")
     return parser.parse_args()
 
 
@@ -73,6 +75,7 @@ def main():
         metapaths=args.metapaths,
         fibers_per_entry=200,
         context_length=4096,
+        num_workers=args.num_workers,
     )
 
     wandb_run = None

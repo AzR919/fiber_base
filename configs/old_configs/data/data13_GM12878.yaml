@@ -1,3 +1,4 @@
+# RETIRED 2026-10-17: pre-split (cCRE-centred) training config, replaced by data20+ (split v1, region files).
 # GM12878 only, single-cell training. 5kb context, 100 fibers per sample.
 # Target assays come from the model config's output_assays.
 

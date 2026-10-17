@@ -1,8 +1,9 @@
-# Debug/test eval config (base template): GM12878, 256bp, 50 fibers, 5 cCREs.
+# Debug/test eval config (base template): GM12878, 256bp windows centred on 5 regions of test_chr21_mini2000, 50 fibers.
 
 context_length: 256
 fibers_per_entry: 50
-num_sample_ccres: 5
+windows: test_chr21_mini2000
+max_regions: 5
 seed: 919
 dataset_type: single
 

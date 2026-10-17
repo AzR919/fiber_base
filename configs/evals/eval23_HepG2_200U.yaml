@@ -1,0 +1,11 @@
+# HepG2_200U full eval: every valid chr21 tile (window set test_chr21_tiles, 6,843 regions). 5kb context, 100 fibers.
+# Dev cell type (split v1, see configs/README.md).
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_tiles
+seed: 919
+dataset_type: single
+
+cell_types:
+  HepG2_200U:

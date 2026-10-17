@@ -15,6 +15,7 @@ from pathlib import Path
 from torch.utils.data import IterableDataset
 
 from utils import *
+from regions import Regions, TrainSampler, DEFAULT_TRAIN_WINDOWS
 from fiber_utils import (
     get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp,
     get_fiber_data as _get_fiber_data_np,
@@ -24,19 +25,37 @@ from fiber_utils import (
 
 #--------------------------------------------------------------------------------------------------
 
+def loader_context(num_workers):
+    """multiprocessing_context for DataLoaders. Workers must not be plain forks of a process that has already
+    read fibers: pyft's Rust thread pool does not survive fork() and the workers hang silently. 'forkserver'
+    forks them from a clean helper process instead (scripts using it need an `if __name__ == "__main__":` guard)."""
+    return "forkserver" if num_workers > 0 else None
+
+
+def _worker_shard():
+    """(worker id, number of workers) for the current DataLoader worker; (0, 1) without workers."""
+    info = torch.utils.data.get_worker_info()
+    return (0, 1) if info is None else (info.id, info.num_workers)
+
+
 class SingleCellFiberDataset(IterableDataset):
     """
-    Iterable dataset yielding one (fiber stack, bulk target) pair per cell type per locus.
+    Iterable dataset yielding one (fiber stack, bulk target) pair per cell type per region.
+    Regions come from the region files (see regions.py / configs/README.md); the input window is
+    context_length bp centred on each region.
 
-    mode='train': randomly samples cCREs with jitter, retries on failure, seeded per epoch.
-    mode='eval':  deterministically iterates ccre_list[:num_sample_ccres] × all cell types,
-                  no jitter, skips loci that fail (no retry), fully reproducible.
+    mode='train': draws region centres from the training pools (train_windows: sources + jitter) on
+                  train_chrs, retries regions where the cell has no fibers, seeded per epoch and worker.
+    mode='eval':  iterates a fixed window set (windows: e.g. val_chr22_n200, test_chr21_tiles) × all
+                  cell types, no retry (regions without fibers are skipped), fully reproducible. Samples
+                  also carry 'strata': (len(STRATA), L) per-bp cCRE-class masks for stratified metrics.
+    With DataLoader workers, training samples and eval regions are split across workers.
     """
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  mode, input_flags, seed=919,
                  dna_type="none", output_assays=None,
-                 iters_per_epoch=1000, num_sample_ccres=100):
+                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None):
 
         if output_assays is None:
             output_assays = ["atac"]
@@ -72,8 +91,7 @@ class SingleCellFiberDataset(IterableDataset):
 
         self.fibers_per_entry = fibers_per_entry
         self.context_length = context_length
-        self.iters_per_epoch = iters_per_epoch
-        self.num_sample_ccres = num_sample_ccres
+        self.samples_per_epoch = samples_per_epoch
         self.seed = seed
         self.epoch = 0
         self.mode = mode
@@ -88,15 +106,25 @@ class SingleCellFiberDataset(IterableDataset):
 
         self.rng = random.Random(seed)
 
-        if not os.path.exists(self.fasta_path + ".fai"):
-            pysam.faidx(self.fasta_path)
+        self.regions = Regions(metadata["regions_root"])
+        if context_length > self.regions.max_window:
+            raise ValueError(f"context_length {context_length} exceeds the regions' max_window "
+                             f"{self.regions.max_window}; raise max_window in data_prep/regions_spec.yaml.")
+        if context_length != self.regions.region_length:
+            print(f"[regions] context_length {context_length} != region_length {self.regions.region_length}: "
+                  f"windows are centred on regions and scored over the whole window (centre-only scoring "
+                  f"is not implemented yet).", flush=True)
 
-        fasta_idx = pysam.FastaFile(self.fasta_path)
-        chrom_sizes = dict(zip(fasta_idx.references, fasta_idx.lengths))
-        fasta_idx.close()
-
-        self.load_genomic_sizes(chrom_sizes, mode=mode)
-        self.load_ccres(metadata["ccre_path"], mode=mode)
+        if mode == "train":
+            tw = train_windows or DEFAULT_TRAIN_WINDOWS
+            self.sampler = TrainSampler(self.regions, metadata["train_chrs"], tw["sources"], tw.get("jitter", 0))
+        elif mode == "eval":
+            if not windows:
+                raise ValueError("mode='eval' needs a window set name (windows=...), e.g. 'test_chr21_mini2000'.")
+            self.windows = windows
+            self.region_list = self.regions.window_set(windows, max_regions=max_regions, seed=seed)
+        else:
+            raise ValueError(f"Unknown mode: {mode!r}. Expected 'train' or 'eval'.")
 
         self.input_flags = input_flags
         self.active_feature_indices = [i for i in range(5) if self.input_flags[i]]
@@ -111,23 +139,10 @@ class SingleCellFiberDataset(IterableDataset):
             raise ValueError(f"Invalid genomic range: {start}-{end}")
         return torch.from_numpy(get_locus_onehot(self.fasta, chrom, start, end))
 
-    def load_genomic_sizes(self, possible_chr_sizes, mode="train"):
-        if mode == "train":
-            target_chrs = self.metadata.get("train_chrs", ["chr20"])
-        elif mode == "eval":
-            target_chrs = self.metadata.get("val_chrs", ["chr21"])
-        else:
-            raise ValueError(f"Unknown mode: {mode!r}. Expected 'train' or 'eval'.")
-
-        self.chr_sizes = {k: possible_chr_sizes[k] for k in target_chrs if k in possible_chr_sizes}
-        if not self.chr_sizes:
-            raise ValueError(f"None of the requested chromosomes {target_chrs} were found in the FASTA index!")
-
-    def load_ccres(self, bed_path, mode="train"):
-        df = pd.read_csv(bed_path, sep='\t', header=None, usecols=[0, 1, 2])
-        df.columns = ['chrom', 'start', 'end']
-        filtered_df = df[df['chrom'].isin(self.chr_sizes.keys())]
-        self.ccre_list = filtered_df.values
+    @property
+    def expected_samples(self):
+        """Eval mode: samples yielded if no region is skipped (regions × cell types)."""
+        return len(self.region_list) * self.num_cell_types
 
     def init_worker_resources(self):
         if self.fiber_bams is None:
@@ -144,28 +159,26 @@ class SingleCellFiberDataset(IterableDataset):
         feature_map = [get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp]
         self.input_features = [feature_map[i] for i in self.active_feature_indices]
 
-    def expand_ccre_locus(self, ccre_chrom, ccre_start, ccre_end, jitter_range=200):
-        true_center = (ccre_start + ccre_end) // 2
-        jitter = self.rng.randint(-jitter_range, jitter_range) if jitter_range > 0 else 0
-        focal_point = true_center + jitter
+    def window_at(self, chrom, centre):
+        """Input window (chrom, start, end) of context_length bp centred on a region centre. The region rule
+        guarantees it lies inside the chromosome, so no clamping is needed."""
+        start = int(centre) - self.context_length // 2
+        return chrom, start, start + self.context_length
 
-        half_window = self.context_length // 2
-        start = focal_point - half_window
-        end = start + self.context_length
+    def window_for_region(self, region):
+        chrom, start, end = region
+        return self.window_at(chrom, (start + end) // 2)
 
-        max_size = self.chr_sizes[ccre_chrom]
-        if start < 0:
-            start = 0
-            end = self.context_length
-        elif end > max_size:
-            end = max_size
-            start = max_size - self.context_length
+    def _train_samples(self):
+        """Seeds self.rng for this epoch and worker; returns this worker's share of samples_per_epoch."""
+        wid, nw = _worker_shard()
+        self.rng = random.Random(self.seed + wid + self.epoch * 1000)
+        return self.samples_per_epoch // nw + (1 if wid < self.samples_per_epoch % nw else 0)
 
-        return ccre_chrom, int(start), int(end)
-
-    def generate_ccre_locus(self, jitter_range=200):
-        ccre_chrom, ccre_start, ccre_end = self.rng.choice(self.ccre_list)
-        return self.expand_ccre_locus(ccre_chrom, ccre_start, ccre_end, jitter_range)
+    def _eval_regions(self):
+        """This worker's share of the window set (strided, so each region is evaluated exactly once)."""
+        wid, nw = _worker_shard()
+        return self.region_list[wid::nw]
 
     def _collect_fiber_tensors(self, cell_idx, chrom, start, end, min_overlap=50):
         fibers_np, dna_np, n_fibers, coverage_np = _get_fiber_data_np(
@@ -188,8 +201,11 @@ class SingleCellFiberDataset(IterableDataset):
         arr = np.stack(tracks, axis=0)  # (K, L)
         return torch.asinh(torch.from_numpy(arr))
 
+    def strata_for(self, locus):
+        return torch.from_numpy(self.regions.strata_masks(*locus))
+
     def _make_sample(self, fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                     other_tensor, locus, cell_type_name, assay_mask):
+                     other_tensor, locus, cell_type_name, assay_mask, strata=None):
         out_dict = {
             "fiber_features": fiber_tensor,
             "target_bulk": other_tensor,
@@ -199,6 +215,8 @@ class SingleCellFiberDataset(IterableDataset):
             "locus": locus,
             "cell_type": cell_type_name
         }
+        if strata is not None:
+            out_dict["strata"] = strata
         if self.return_ref_genome:
             out_dict["ref_dna"] = self.onehot_for_locus(locus).T
         if self.return_fiber_dna:
@@ -209,17 +227,12 @@ class SingleCellFiberDataset(IterableDataset):
         self.init_worker_resources()
 
         if self.mode == "train":
-            worker_info = torch.utils.data.get_worker_info()
-            seed_offset = 0 if worker_info is None else worker_info.id
-            seed_offset += self.epoch * 1000
-            self.rng = random.Random(self.seed + seed_offset)
-
-            for _ in range(self.iters_per_epoch):
+            for _ in range(self._train_samples()):
                 found = False
                 while not found:
                     cell_idx = self.rng.randint(0, self.num_cell_types - 1)
                     cell_type_name = self.cell_type_names[cell_idx]
-                    locus = self.generate_ccre_locus()
+                    locus = self.window_at(*self.sampler.sample_centre(self.rng))
 
                     fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
                         cell_idx, *locus, min_overlap=self.context_length // 8
@@ -237,16 +250,9 @@ class SingleCellFiberDataset(IterableDataset):
                                         other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
 
         else:  # eval mode: deterministic, no retry
-            if self.num_sample_ccres == -1:
-                ccre_iter = self.ccre_list
-            else:
-                rng = np.random.default_rng(self.seed)
-                n = min(self.num_sample_ccres, len(self.ccre_list))
-                idx = np.sort(rng.choice(len(self.ccre_list), size=n, replace=False))
-                ccre_iter = self.ccre_list[idx]
-
-            for ccre_entry in ccre_iter:
-                locus = self.expand_ccre_locus(*ccre_entry, jitter_range=0)
+            for region in self._eval_regions():
+                locus = self.window_for_region(region)
+                strata = self.strata_for(locus)
 
                 for cell_idx, cell_type_name in enumerate(self.cell_type_names):
                     fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
@@ -260,7 +266,8 @@ class SingleCellFiberDataset(IterableDataset):
                         continue
 
                     yield self._make_sample(fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                                            other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
+                                            other_tensor, locus, cell_type_name, self.assay_masks[cell_idx],
+                                            strata=strata)
 
 
 #--------------------------------------------------------------------------------------------------
@@ -270,27 +277,30 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
     Dataset that samples fibers from multiple cell types at a shared locus, concatenating
     them into a synthetic mixed stack with per-cell-type masks and bulk targets.
 
-    mode='train': randomly samples cCREs with jitter, retries if any cell type fails.
-    mode='eval':  deterministically iterates ccre_list[:num_sample_ccres], no jitter,
-                  skips loci where any required cell type has insufficient fibers.
+    mode='train': draws regions from the training pools (as SingleCellFiberDataset), retries if any
+                  cell type fails.
+    mode='eval':  iterates a fixed window set, one composite per region, skipping regions where any
+                  required cell type has insufficient fibers.
     """
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  input_flags, mode='eval', seed=919,
                  dna_type="none", output_assays=None,
-                 iters_per_epoch=1000, num_sample_ccres=100):
+                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None):
 
         super().__init__(
             metadata=metadata,
             fibers_per_entry=fibers_per_entry,
             context_length=context_length,
-            iters_per_epoch=iters_per_epoch,
-            num_sample_ccres=num_sample_ccres,
+            samples_per_epoch=samples_per_epoch,
             input_flags=input_flags,
             mode=mode,
             seed=seed,
             dna_type=dna_type,
             output_assays=output_assays,
+            train_windows=train_windows,
+            windows=windows,
+            max_regions=max_regions,
         )
 
         try:
@@ -301,6 +311,11 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
 
         self.cell_ratios = self._setup_mixing_ratios(meta_cell_ratios)
         self.fiber_counts_per_cell = self._calculate_fiber_counts()
+
+    @property
+    def expected_samples(self):
+        """Eval mode: one composite per region if none is skipped."""
+        return len(self.region_list)
 
     def _setup_mixing_ratios(self, cell_ratios):
         if cell_ratios is None:
@@ -420,16 +435,10 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
         self.init_worker_resources()
 
         if self.mode == "train":
-            worker_info = torch.utils.data.get_worker_info()
-            seed_offset = 0 if worker_info is None else worker_info.id
-            seed_offset += self.epoch * 1000
-            self.rng = random.Random(self.seed + seed_offset)
-
-            for _ in range(self.iters_per_epoch):
+            for _ in range(self._train_samples()):
                 found = False
                 while not found:
-                    ccre_entry = self.rng.choice(self.ccre_list)
-                    locus = self.expand_ccre_locus(*ccre_entry, jitter_range=200)
+                    locus = self.window_at(*self.sampler.sample_centre(self.rng))
 
                     cell_samples = []
                     failed = False
@@ -447,16 +456,8 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
                 yield self._build_composite_sample(locus, cell_samples)
 
         else:  # eval mode: deterministic, no retry
-            if self.num_sample_ccres == -1:
-                ccre_iter_list = self.ccre_list
-            else:
-                rng = np.random.default_rng(self.seed)
-                n = min(self.num_sample_ccres, len(self.ccre_list))
-                idx = np.sort(rng.choice(len(self.ccre_list), size=n, replace=False))
-                ccre_iter_list = self.ccre_list[idx]
-
-            for ccre_locus in ccre_iter_list:
-                locus = self.expand_ccre_locus(*ccre_locus, jitter_range=0)
+            for region in self._eval_regions():
+                locus = self.window_for_region(region)
                 cell_samples = []
                 failed_sampling = False
 
@@ -471,7 +472,9 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
                 if failed_sampling or not cell_samples:
                     continue
 
-                yield self._build_composite_sample(locus, cell_samples)
+                sample = self._build_composite_sample(locus, cell_samples)
+                sample["strata"] = self.strata_for(locus)
+                yield sample
 
 
 #--------------------------------------------------------------------------------------------------

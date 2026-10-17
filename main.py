@@ -24,16 +24,18 @@ def main():
         "metadata": args.metadata,
         "fibers_per_entry": args.fibers_per_entry,
         "context_length": args.context_length,
-        "iters_per_epoch": args.iters_per_epoch,
-        "num_sample_ccres": args.iters_per_epoch,
         "input_flags": args.input_flags,
         "seed": args.seed,
         "dna_type": args.dna_type,
         "output_assays": args.output_assays,
     }
 
-    train_dataset = make_fiber_dataset(args.dataset_type, mode="train", **dataset_kwargs)
-    val_dataset = make_fiber_dataset(args.dataset_type, mode="eval", **dataset_kwargs)
+    # Training regions are drawn from the pools at runtime; validation iterates a fixed window set
+    train_dataset = make_fiber_dataset(args.dataset_type, mode="train", samples_per_epoch=args.samples_per_epoch,
+                                       train_windows=args.train_windows, **dataset_kwargs)
+    val_dataset = make_fiber_dataset(args.dataset_type, mode="eval", windows=args.val_windows, **dataset_kwargs)
+    print(f"Training regions: {args.train_windows} on {args.metadata['train_chrs']} | "
+          f"validation: {args.val_windows} ({val_dataset.expected_samples} samples per epoch)", flush=True)
 
     model = model_selector(args.model, args)
 

@@ -1,9 +1,9 @@
-# MCF_7_200U full eval: all val-chromosome cCREs (chr21, ~11.4k). 5kb context, 100 fibers. Single-cell mode.
+# MCF_7_200U full eval: every valid chr21 tile (window set test_chr21_tiles, 6,843 regions). 5kb context, 100 fibers.
 # HELD-OUT cell type: never train on it or use it for model selection (split v1, see configs/README.md).
 
 context_length: 5000
 fibers_per_entry: 100
-num_sample_ccres: -1
+windows: test_chr21_tiles
 seed: 919
 dataset_type: single
 

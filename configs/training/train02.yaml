@@ -1,0 +1,11 @@
+# Standard training run: 25 epochs x 1000 samples (125 steps at batch size 8), lr 1e-4, seed 919.
+# Same values as the retired train01 (key renamed: iters_per_epoch -> samples_per_epoch).
+
+epochs: 25
+samples_per_epoch: 1000
+batch_size: 8
+lr: 0.0001
+
+# Output & Miscellaneous
+res_dir: "./results"
+seed: 919

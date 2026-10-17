@@ -1,0 +1,16 @@
+# TEMPORARY comparison with the old setup: GM12878 + K562_200U, cCRE-only training (as data16 did), evaluate on
+# HepG2 (eval23_HepG2_200U[_mini]). Same cells and sampling as before, but on the region files: cCRE centres that
+# satisfy the region rule, chr22 validation, chr21 tile evaluation. Retire once the comparison is done.
+# Single-cell training (each sample drawn from one randomly chosen cell type). 5kb context, 100 fibers per sample.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+# Regions (configs/README.md, Regions): cCRE centres only (+-200 bp jitter) on train_chrs; chr22 validation.
+train_windows: {sources: {ccre: 1.0}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  GM12878:
+  K562_200U:

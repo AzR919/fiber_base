@@ -8,10 +8,10 @@ cell-type split. Update this file whenever that logic changes.
 | Path | What | Edited by |
 |---|---|---|
 | `metapaths.yaml` | Fiber sample → CRAM, sample → ENCODE cell folder, per-cell assay status | **Generated** by data setup (`data_prep/setup_data.py`, step 1) from `data_prep/encode_spec.yaml`; don't edit by hand |
-| `reference.yaml` | Reference genome, cCRE file, train/val chromosomes | Hand-edited (merged into metapaths by `load_metapaths`) |
+| `reference.yaml` | Reference genome, `regions_root`, training chromosomes | Hand-edited (merged into metapaths by `load_metapaths`) |
 | *(cluster)* `DATA_FIBER/regions/` | Region files: training pools, val/test window sets (see Regions below) | **Generated** by data setup (step 2) from `data_prep/regions_spec.yaml`; referenced from configs by name |
-| `data/dataNN_*.yaml` | Training data: which fiber samples, context length, fibers per sample | Hand |
-| `evals/evalNN_*.yaml` | Evaluation sets (one sample each; `_mini` = 500 seeded cCREs) | Hand |
+| `data/dataNN_*.yaml` | Training data: which fiber samples, context length, fibers per sample, training regions, validation window set | Hand |
+| `evals/evalNN_*.yaml` | Evaluation: one sample + a test window set each (`_mini` = `test_chr21_mini2000`) | Hand |
 | `models/modelNN_*.yaml` | Architecture, inputs, output assays | Hand |
 | `training/trainNN.yaml` | Epochs, iterations, batch size, lr, seed | Hand |
 | `old_configs/` | Retired configs, kept for reproducing old runs | — |
@@ -73,7 +73,7 @@ Known gaps (accepted):
 ## Workflow
 
 1. **Ablations / model selection (dev only).** For each setting, train a leave-one-out fold
-   (`data21`–`data25`) and evaluate on the dev cell it left out (`eval13`–`eval17`). To keep cost down,
+   (`data21`–`data25`) and evaluate on the dev cell it left out (`eval21`–`eval23`, `eval16`, `eval17`). To keep cost down,
    screen settings with one fold first (e.g. `data23`, HepG2 held out). Run all 5 folds only for the
    finalists.
 2. **Final models.** Train on all 5 dev cells (`data20`).
@@ -82,14 +82,17 @@ Known gaps (accepted):
 | Config | Use |
 |---|---|
 | `data20_dev5_200U` | All 5 dev cells: final models |
-| `data21_dev_loo_GM12878` | Dev minus GM12878 → eval with `eval13_GM12878` |
-| `data22_dev_loo_K562_200U` | Dev minus K562 → eval with `eval14_K562_200U` |
-| `data23_dev_loo_HepG2_200U` | Dev minus HepG2 → eval with `eval15_HepG2_200U` |
+| `data21_dev_loo_GM12878` | Dev minus GM12878 → eval with `eval21_GM12878` |
+| `data22_dev_loo_K562_200U` | Dev minus K562 → eval with `eval22_K562_200U` |
+| `data23_dev_loo_HepG2_200U` | Dev minus HepG2 → eval with `eval23_HepG2_200U` |
 | `data24_dev_loo_Panc1_200U` | Dev minus Panc1 → eval with `eval16_Panc1_200U` |
 | `data25_dev_loo_H1_200U` | Dev minus H1 → eval with `eval17_H1_200U` (no ATAC) |
 | `eval18_HCT116_200U`, `eval19_MCF_7_200U`, `eval20_H9_200U` | Held-out test (final models only) |
+| `data26_GM12878_K562_200U_ccre_only` | Temporary, outside the split: GM12878 + K562 with cCRE-only training (the old `data16` setup on region files), tested on HepG2 (`eval23`) to compare with old results. Retire when done |
 
-All eval configs have a `_mini` twin (500 seeded cCREs) for quick checks.
+Every eval config scores `test_chr21_tiles` (all 6,843 valid chr21 tiles) and has a `_mini` twin on
+`test_chr21_mini2000` (2,000 of those tiles) for quick checks. The cCRE-list evals `eval13`–`eval15`
+are retired to `old_configs/evals/`.
 
 Model configs for the 8-assay setup (all UNet03 conv-transformer + reference DNA; each odd number has
 an even-numbered `no_fire_msp` ablation twin):
@@ -100,29 +103,20 @@ an even-numbered `no_fire_msp` ablation twin):
 | `model15_uct_mid_8A` / `model16_…_no_fire_msp` | mid | 8/24/48/96 | 2g.20gb |
 | `model17_uct_large_8A` / `model18_…_no_fire_msp` | large | 8/32/64/128 | 2g.20gb |
 
-## Chromosomes and windows (current runtime)
-
-- **Chromosomes:** train on `chr20`, validate on `chr21` (set in `reference.yaml`).
-  - Eval configs run on the validation chromosome, so every eval number is on chromosomes and cell
-    types the model never trained on, unless stated otherwise.
-  - An eval config can override this with its own `val_chrs:` key, e.g. to score a held-out cell on
-    chr20 and separate "new cell type" from "new region of the genome".
-  - Caveat: `run_final_eval` keys results by cell type, so two configs for the same cell type in one
-    eval run overwrite each other. Run them as separate eval jobs.
-- **Windows:** samples are 5 kb windows centred on cCREs (5000 bp context, 100 fibers).
-
-This is what the code does today. It is being replaced by the region files below.
-
-## Regions (built; runtime adoption pending)
+## Regions
 
 Where we train, validate and test is defined by region files, built by data setup step 2
-(`data_prep/build_regions.py`) from `data_prep/regions_spec.yaml` into `DATA_FIBER/regions/`.
-To change them, edit the spec and re-run data setup.
+(`data_prep/build_regions.py`) from `data_prep/regions_spec.yaml` into `DATA_FIBER/regions/`, and read
+at runtime by `regions.py`. To change them, edit the spec and re-run data setup.
+
+**Chromosomes (dev phase):** train on chr20 (`train_chrs` in `reference.yaml`), validate per epoch on
+chr22, test on chr21. Val and test chromosomes are fixed by the window sets, not by chromosome lists,
+so no chromosome is used for two purposes. Final runs add bigger sets (see below).
 
 **Region vs window.** The files store **regions**: the interval we score (`R = 5000` bp). The runtime
 builds the model's input **window** (`context_length = L`) centred on each region. Today `L = R`, so they
-coincide. If we later predict only the centre of the window, `L > R` and only the central `R` bp are
-scored, with the same files.
+coincide. Centre-only scoring (`L > R`, score just the central `R` bp) is not implemented yet: with
+`L ≠ R` the runtime prints a note and scores the whole window. Keep `context_length: 5000` for real runs.
 
 **Region rule.** Every region (val, test, and training draws) satisfies:
 1. It does not overlap the ENCODE hg38 blacklist v2.
@@ -164,24 +158,42 @@ tiling, so no region is ever counted twice.
   its numbers estimate the full-tiling numbers.
 - **Same regions for every cell type:** the eval config picks the cells; every region is run for each.
   Leave-one-out folds, held-out cells and baselines are all scored on identical regions.
-- **Scoring by region type** happens per base pair at runtime from `strata/ccre_classes.bed`: all bases,
-  bases in any cCRE, PLS / ELS / CTCF bases, and bases outside cCREs. The window class only steers sampling.
-- **Regions without fibers** for a cell are skipped at runtime and the count is logged.
+- **Scoring by region type** happens per base pair: eval samples carry a mask of which bases fall in a
+  cCRE of each class (from `strata/ccre_classes.bed`), and the evaluator reports MSE and Pearson r over
+  `all` bases, `ccre` (any cCRE), `PLS` / `ELS` / `CTCF` / `other`, and `non_ccre`. The window class only
+  steers sampling.
+- **Regions without fibers** for a cell are skipped; eval prints "N of M samples evaluated".
 - **Final runs** add new sets to the spec (e.g. test tiles on chr10 + chr21); no code changes.
 
 ### Training (sampled at runtime)
 
 Per sample: pick a source by the data config's weights (e.g. `{ccre: 0.5, random: 0.5}`), then draw a
-region centre from `pools/ccre_centres.bed` (+ ±200 bp jitter) or uniformly from `allowed_centres.bed`,
+region centre from `pools/ccre_centres.bed` (+ uniform jitter) or uniformly from `allowed_centres.bed`,
 restricted to `train_chrs` (`reference.yaml`; dev phase `[chr20]`). Jittered centres must still be allowed.
+The dev configs (`data20`–`data25`) use `{sources: {ccre: 0.5, random: 0.5}, jitter: 200}`: half the
+regions on regulatory elements, half anywhere, so training covers background and broad domains like
+the chr21 tiles we test on. Without `train_windows` the default is `{sources: {ccre: 1.0}, jitter: 200}`,
+matching the old cCRE-centred training, so the retired `data12`–`data19` still run.
 
-### Planned config keys
+### Config keys
 
 ```yaml
 # data config
-train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
-val_windows: val_chr22_n200
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}   # weights are normalised
+val_windows: val_chr22_n200                          # per-epoch validation: 200 regions x each training cell
 
-# eval config (replaces num_sample_ccres)
-windows: test_chr21_mini2000
+# eval config
+windows: test_chr21_mini2000                         # any set in regions/windows/
+max_regions: 5                                       # optional: seeded subset, for debugging (eval00)
 ```
+
+Old keys `num_sample_ccres` and `val_chrs` are rejected with an error pointing here.
+
+### Outputs
+
+- **Console:** per cell type, a table of Pearson r per region type × assay, plus how many samples were
+  evaluated out of how many expected.
+- **`eval_summary.json`:** per cell type, the window set, sample counts, the usual loss / Pearson per
+  assay, and `strata`: bases scored, loss and r per region type, per assay.
+- **wandb:** the usual `test/<cell>/loss…` and `pearson…` keys, plus `test/<cell>/pearson@<region type>`
+  and `loss@<region type>` (means over assays).

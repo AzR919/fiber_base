@@ -1,9 +1,9 @@
-# H1_200U mini eval: 500 val cCREs (seeded subset), for quick checks after training. 5kb context, 100 fibers.
-# Dev cell type (split v1, see configs/README.md). No ENCODE ATAC: atac is reported as null.
+# H1_200U mini eval: 2,000 chr21 tiles (window set test_chr21_mini2000, proportional stratified sample), for quick
+# checks after training. 5kb context, 100 fibers. Dev cell type (split v1, see configs/README.md). No ENCODE ATAC: atac is reported as null.
 
 context_length: 5000
 fibers_per_entry: 100
-num_sample_ccres: 500
+windows: test_chr21_mini2000
 seed: 919
 dataset_type: single
 

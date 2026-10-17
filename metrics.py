@@ -44,18 +44,23 @@ class PearsonMeter:
     Streaming Pearson r per assay, pooled over every position of every window that has the assay —
     the correlation counterpart of the MSE we report. Batch statistics are merged with Chan et al.'s
     parallel update in float64, so it is exact (no catastrophic cancellation) over tens of millions of
-    positions without storing them.
+    positions without storing them. Also tracks the MSE over the same positions (.mse), so a meter
+    restricted to a subset of positions (e.g. bases in promoter cCREs) gives both metrics for it.
     """
     def __init__(self, num_assays: int):
         zeros = lambda: torch.zeros(num_assays, dtype=torch.float64)
         self.n, self.mean_x, self.mean_y = zeros(), zeros(), zeros()
         self.m2_x, self.m2_y, self.c_xy = zeros(), zeros(), zeros()
+        self.sse = zeros()
 
     def update(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor):
-        """pred/target: (B, K, L); mask: (B, K), 1 where the sample has data for the assay."""
+        """pred/target: (B, K, L). mask: (B, K), 1 where the sample has data for the assay, or (B, K, L)
+        to also select positions (e.g. assay mask × a per-bp region-type mask)."""
         x = pred.detach().double()
         y = target.detach().to(x.device).double()
-        w = mask.detach().to(x.device).double()[:, :, None].expand_as(x)
+        w = mask.detach().to(x.device).double()
+        w = (w[:, :, None] if w.dim() == 2 else w).expand_as(x)
+        self.sse += (w * (x - y) ** 2).sum(dim=(0, 2)).cpu()
         n_b = w.sum(dim=(0, 2))
         mean_x_b = (w * x).sum(dim=(0, 2)) / n_b.clamp(min=1)
         mean_y_b = (w * y).sum(dim=(0, 2)) / n_b.clamp(min=1)
@@ -79,3 +84,8 @@ class PearsonMeter:
         denom = torch.sqrt(self.m2_x * self.m2_y)
         r = self.c_xy / denom
         return r.masked_fill((self.n == 0) | (denom == 0), float("nan")).float()
+
+    @property
+    def mse(self) -> torch.Tensor:
+        """(K,) MSE over the same positions; NaN for assays never seen."""
+        return (self.sse / self.n).masked_fill(self.n == 0, float("nan")).float()

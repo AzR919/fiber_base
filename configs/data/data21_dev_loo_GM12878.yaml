@@ -6,6 +6,11 @@ context_length: 5000
 fibers_per_entry: 100
 dataset_type: single
 
+# Regions (configs/README.md, Regions). Training: half cCRE centres (+-200 bp jitter), half uniform random regions,
+# on train_chrs (reference.yaml). Validation: fixed chr22 window set.
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
 cell_types:
   K562_200U:
   HepG2_200U:

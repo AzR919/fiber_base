@@ -5,9 +5,11 @@ Priority Order: Command Line Arguments > Config JSON/YAML Files > Parser Default
 
 import os
 import sys
+import json
 import argparse
 
 from utils import *
+from regions import DEFAULT_TRAIN_WINDOWS
 
 #--------------------------------------------------------------------------------------------------
 
@@ -34,11 +36,16 @@ def get_args():
     data_group = parser.add_argument_group("Data Configuration")
     data_group.add_argument("--fasta_path", type=str,
                             default="/home/azr/projects/def-maxwl/azr/data/misc/hg38.fa")
-    data_group.add_argument("--ccre_path", type=str,
-                            default="/home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed")
+    data_group.add_argument("--regions_root", type=str,
+                            default="/home/azr/projects/def-maxwl/azr/data/DATA_FIBER/regions")
     data_group.add_argument("--train_chrs", type=str, nargs="+", default=["chr20"])
-    data_group.add_argument("--val_chrs", type=str, nargs="+", default=["chr21"])
     data_group.add_argument("--fiber_base_path", type=str, default="")
+
+    # Regions (see configs/README.md, Regions)
+    data_group.add_argument("--train_windows", type=json.loads, default=dict(DEFAULT_TRAIN_WINDOWS),
+                            help='Training region sampling, e.g. \'{"sources": {"ccre": 0.5, "random": 0.5}, "jitter": 200}\'')
+    data_group.add_argument("--val_windows", type=str, default="val_chr22_n200",
+                            help="Window set (in regions_root/windows/) used for per-epoch validation")
 
     # Dataset Parameters
     data_group.add_argument("--context_length", type=int, default=4096)
@@ -74,9 +81,12 @@ def get_args():
     # Train
     trainer_group = parser.add_argument_group("Training Configuration")
     trainer_group.add_argument("--epochs", type=int, default=2)
-    trainer_group.add_argument("--iters_per_epoch", type=int, default=1000)
+    trainer_group.add_argument("--samples_per_epoch", type=int, default=1000,
+                               help="Training samples drawn per epoch (optimizer steps = samples_per_epoch / batch_size)")
     trainer_group.add_argument("--batch_size", type=int, default=16)
     trainer_group.add_argument("--lr", type=float, default=1e-4)
+    trainer_group.add_argument("--num_workers", type=int, default=0,
+                               help="DataLoader workers for train/val/eval loading (0 = load in the main process)")
 
     # I/O
     io_group = parser.add_argument_group("Model I/O")
@@ -110,9 +120,8 @@ def get_args():
     # Default metadata structure
     parsed_args.metadata = {
         "fasta_path": parsed_args.fasta_path,
-        "ccre_path": parsed_args.ccre_path,
+        "regions_root": parsed_args.regions_root,
         "train_chrs": parsed_args.train_chrs,
-        "val_chrs": parsed_args.val_chrs,
         "fiber_base_path": parsed_args.fiber_base_path,
         "bulk_base_paths": {},
         "cell_types": {}
@@ -139,7 +148,7 @@ def get_args():
         if metapaths is not None:
             # Resolve paths via metapaths using output_assays declared by the model config
             resolved = resolve_config_with_metapaths(data_cfg, metapaths, parsed_args.output_assays)
-            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "cell_types"]:
+            for key in ["fasta_path", "regions_root", "train_chrs", "cell_types"]:
                 if key not in cli_args_set:
                     parsed_args.metadata[key] = resolved[key]
                     if hasattr(parsed_args, key):
@@ -147,7 +156,7 @@ def get_args():
         elif "metadata" in data_cfg:
             # Old-style config with explicit metadata block
             meta_cfg = data_cfg["metadata"]
-            for key in ["fasta_path", "ccre_path", "train_chrs", "val_chrs", "fiber_base_path", "cell_types"]:
+            for key in ["fasta_path", "regions_root", "train_chrs", "fiber_base_path", "cell_types"]:
                 if key in meta_cfg and key not in cli_args_set:
                     parsed_args.metadata[key] = meta_cfg[key]
                     if hasattr(parsed_args, key):
@@ -161,6 +170,9 @@ def get_args():
     # Step 5: Load train config JSON/YAML file if provided
     if parsed_args.train_config:
         train_cfg = load_config_file(parsed_args.train_config)
+        if "iters_per_epoch" in train_cfg:
+            raise ValueError(f"{parsed_args.train_config}: 'iters_per_epoch' was renamed to 'samples_per_epoch' "
+                             "(it counts samples; optimizer steps = samples_per_epoch / batch_size).")
         for key, val in train_cfg.items():
             if hasattr(parsed_args, key) and key not in cli_args_set:
                 setattr(parsed_args, key, val)

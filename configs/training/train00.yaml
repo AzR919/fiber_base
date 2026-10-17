@@ -1,7 +1,7 @@
-# Debug/test training config (base template): 2 epochs x 10 iters, batch size 2.
+# Debug/test training config (base template): 2 epochs x 10 samples, batch size 2.
 
 epochs: 2
-iters_per_epoch: 10
+samples_per_epoch: 10
 batch_size: 2
 lr: 0.0001
 
