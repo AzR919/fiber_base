@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-10-16_00_encode_data_setup
+#SBATCH --job-name=2026-10-17_00_data_setup
 #SBATCH --account=def-maxwl_cpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
@@ -12,9 +12,9 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
-# Downloads the ENCODE tracks in data_prep/encode_spec.yaml and regenerates configs/metapaths.yaml.
-# Submit from the repo root: sbatch data_prep/slurm_setup_data.sh
-# Safe to resubmit: verified files are skipped and partial downloads resume.
+# Sets up all data: ENCODE tracks + configs/metapaths.yaml (data_prep/encode_spec.yaml), then the region files
+# (data_prep/regions_spec.yaml). Submit from the repo root: sbatch data_prep/slurm_setup_data.sh
+# Safe to resubmit: finished work is skipped and partial downloads resume.
 
 set -euo pipefail
 
@@ -27,11 +27,13 @@ echo "Working directory is $(pwd)"
 
 source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
-if ! curl -s -o /dev/null --max-time 30 https://www.encodeproject.org/; then
-    echo "ERROR: $(hostname) cannot reach www.encodeproject.org (no internet on this node?)" >&2
-    exit 1
-fi
+for url in https://www.encodeproject.org/ https://github.com/; do
+    if ! curl -s -o /dev/null --max-time 30 "$url"; then
+        echo "ERROR: $(hostname) cannot reach $url (no internet on this node?)" >&2
+        exit 1
+    fi
+done
 
-python data_prep/setup_data.py --spec data_prep/encode_spec.yaml --workers 4
+python -u data_prep/setup_data.py --workers 4
 
 echo "Job finished on $(date)"

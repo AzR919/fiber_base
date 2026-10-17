@@ -4,7 +4,7 @@ Base repository for single-molecule imputation using Fiber-seq.
 
 **End goal: impute histone modifications at single-molecule resolution** — Given chromatin accessibility on an individual molecule (Fiber-seq), impute histone modifications on that molecule.
 
-No ground truth exists at that resolution, so the model is trained with **weak supervision**: it takes a stack of single-molecule fiber reads at a genomic locus, predicts a per-fiber signal for each assay, and only the average of those per-fiber predictions is compared against bulk tracks (currently ATAC-seq, H3K4me3, H3K27ac and H3K27me3, all at once). The bulk prediction is the training signal; the per-fiber predictions are the actual product.
+No ground truth exists at that resolution, so the model is trained with **weak supervision**: it takes a stack of single-molecule fiber reads at a genomic locus, predicts a per-fiber signal for each assay, and only the average of those per-fiber predictions is compared against bulk tracks (up to 8 ENCODE assays at once: ATAC-seq, CTCF and six histone marks). The bulk prediction is the training signal; the per-fiber predictions are the actual product.
 
 ---
 
@@ -20,7 +20,8 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 - **Single-cell** (`single`): each sample is fibers from one cell type predicting that cell type's bulk signal. With several cell types listed, each training sample picks one cell type at random.
 - **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target. Eval in this mode also reports per-cell-type deconvolution MSE.
 
-**Train / validation split**: by chromosome — train on `chr20` cCREs (~25k), validate and evaluate on `chr21` cCREs (~11.4k). Set in `configs/metapaths.yaml`.
+**Train / validation split**: by chromosome — train on `chr20` cCREs (~25k), validate and evaluate on `chr21` cCREs (~11.4k). Set in `configs/reference.yaml`.
+This is being replaced by **region files** built during data setup: training pools sampled at runtime, plus fixed val/test window sets (e.g. `val_chr22_n200`, `test_chr21_tiles`) named in configs. The files exist; the runtime doesn't read them yet. Details in `configs/README.md` → Regions.
 
 Eval is **fully deterministic**: same checkpoint + same eval config → identical results.
 
@@ -38,10 +39,11 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 | `data_utils.py` | `SingleCellFiberDataset`, `MixedCellFiberDataset`, `make_fiber_dataset()` |
 | `fiber_utils.py` | Low-level per-fiber feature extraction from CRAM files |
 | `models.py` | `BaseModel` (save/load), `Base01DebugModel`, `UNet03ConvTransformerWithDNA`, `model_selector()` |
-| `metrics.py` | Loss functions (MSE) |
+| `metrics.py` | Masked MSE (missing assays excluded), per-assay MSE, pooled + per-window Pearson |
 | `utils.py` | Seeding, config + metapaths resolution, run naming, wandb setup, meters |
 | `vis_utils.py` | Fiber-stack and evaluation dashboard plots |
-| `configs/` | YAML configs: `data/`, `models/`, `training/`, `evals/`, `metapaths.yaml`; retired ones in `old_configs/` |
+| `configs/` | YAML configs: `data/`, `models/`, `training/`, `evals/`, `metapaths.yaml`, `reference.yaml`; retired ones in `old_configs/`. `configs/README.md` explains the cell-type split and the regions |
+| `data_prep/` | Data setup: one command downloads ENCODE tracks, regenerates `metapaths.yaml` and builds the region files (see Data Setup) |
 | `slurm_batch_command.sh` | Slurm script for training runs |
 | `slurm_batch_command_eval.sh` | Slurm script for evaluating a checkpoint |
 | `logs/` | Slurm `.out` / `.err` files, named by job name |
@@ -67,11 +69,16 @@ Assay order follows the model's `output_assays`.
 
 A run combines one data config, one model config, one training config and (optionally) one or more eval configs. File paths are not written in these configs — they are resolved from `configs/metapaths.yaml` using the cell type names and the model's `output_assays`.
 
-### Metapaths (`configs/metapaths.yaml`)
+### Metapaths (`configs/metapaths.yaml` + `configs/reference.yaml`)
 
-Single source of truth for paths on the cluster: hg38 FASTA, cCRE BED, train/val chromosomes, a base directory per assay, and per-cell-type filenames for the fiber CRAM and each bulk bigWig. `null` means that file isn't available yet. To add a cell type, add a block here — no code changes needed.
+`metapaths.yaml` is **generated** by data setup (step 1); don't edit it. It has:
+- `fiber_paths`: fiber sample → CRAM.
+- `cell_types`: fiber sample → its cell line's ENCODE folder. At runtime the folder's `manifest.json` lists which assays exist; requested assays a cell lacks are masked (no loss, no gradient, `null` in eval).
+- `assay_status`: informational summary of which assays each cell line has.
 
-Cell types with fiber + all four bulk assays: **GM12878, K562_200U, HepG2_200U**. Others (A549, Caco-2, H1, H9, several LCL/fibroblast/iPSC lines) have fiber data only so far.
+`reference.yaml` is hand-edited: FASTA, the cCRE BED (used by the current runtime until it moves to region files) and the train/val chromosomes. `load_metapaths()` merges it in.
+
+Cell lines with ENCODE data: **GM12878, K562, HepG2, HCT116, MCF-7, Panc1** (all 8 assays) and **H1, H9** (no ATAC). The dev / held-out split and the "200U samples only" rule are in `configs/README.md`.
 
 ### Data Config (`configs/data/`)
 
@@ -143,6 +150,32 @@ cell_types:
 | `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `train01` | Standard run (25 × 1000 iters, bs 8) |
 | `eval13` / `eval14` / `eval15` (+ `_mini`) | Eval on GM12878 / K562_200U / HepG2_200U |
+| `data20` | All 5 dev cell types (split v1, 200U) |
+| `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type) |
+| `eval16` / `eval17` (+ `_mini`) | Eval on dev cells Panc1_200U / H1_200U |
+| `eval18` / `eval19` / `eval20` (+ `_mini`) | Held-out test: HCT116_200U / MCF_7_200U / H9_200U |
+
+---
+
+## Data Setup (`data_prep/`)
+
+One command sets up all data. Every step skips work that is already done, so it is cheap and safe to re-run:
+
+```bash
+sbatch data_prep/slurm_setup_data.sh          # as a CPU job (needs internet: ENCODE + GitHub)
+python data_prep/setup_data.py --dry-run      # report what each step would do, write nothing
+python data_prep/setup_data.py                # run interactively
+```
+
+| Step | Script | Hand-edited input | Generated output |
+|---|---|---|---|
+| 1. ENCODE tracks | `setup_encode.py` | `encode_spec.yaml` (cell lines, assays, fiber samples) | `<encode_root>/<cell>/*_fc.bigWig` + `manifest.json`, `encode_lock.yaml`, `configs/metapaths.yaml` |
+| 2. Regions | `build_regions.py` | `regions_spec.yaml` (chromosomes, region rule, val/test window sets) | `<regions_root>/`: `exclude.bed`, `allowed_centres.bed`, `strata/`, `pools/`, `windows/`, `manifest.json` |
+
+- **Skipping:** ENCODE files already on disk with the right md5 are skipped, and `encode_lock.yaml` pins which file each cell + assay uses. Region files are rebuilt only when `regions_spec.yaml`, `build_regions.py` or an input (FASTA index, cCRE file, blacklist) changes; `manifest.json` stores a fingerprint of all of them.
+- **Flags:** `--dry-run`, `--workers N` (parallel downloads), `--verify` (re-hash ENCODE files), `--force-regions`.
+- **To change the data:** edit a spec and re-run. Never edit generated files. Each step can also run on its own (`python data_prep/setup_encode.py`, `python data_prep/build_regions.py`).
+- **ENCODE file selection** (`encode_api.py`): released, unperturbed GRCh38 "fold change over control" bigWigs; per experiment the file with the most biological replicates; experiments ranked by audit severity, then replicates, then recency. Audits rank candidates, never exclude them.
 
 ---
 

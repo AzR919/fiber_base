@@ -43,6 +43,27 @@ def _finish(part, dest, h, size, md5sum):
     os.replace(part, dest)
 
 
+def fetch_url(url, dest, retries=3):
+    """Download a small file with no published md5/size (e.g. the ENCODE blacklist) to dest via dest.part.
+    Returns the md5 hex digest; callers record it so later runs can detect changes."""
+    part = dest + ".part"
+    for attempt in range(retries):
+        try:
+            h = hashlib.md5()
+            with urllib.request.urlopen(url, timeout=120) as resp, open(part, "wb") as out:
+                for block in iter(lambda: resp.read(CHUNK), b""):
+                    out.write(block)
+                    h.update(block)
+            os.replace(part, dest)
+            return h.hexdigest()
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+            if attempt == retries - 1:
+                raise
+            wait = 5 * 2 ** attempt
+            print(f"    retry {attempt + 1}/{retries - 1} for {os.path.basename(dest)} in {wait}s: {e}", flush=True)
+            time.sleep(wait)
+
+
 def fetch(url, dest, md5sum, size, retries=5):
     """Download url to dest (resuming dest.part if present), verifying size and md5. Raises on failure."""
     part = dest + ".part"

@@ -7,8 +7,9 @@ cell-type split. Update this file whenever that logic changes.
 
 | Path | What | Edited by |
 |---|---|---|
-| `metapaths.yaml` | Fiber sample → CRAM, sample → ENCODE cell folder, per-cell assay status | **Generated** by `data_prep/setup_data.py` from `data_prep/encode_spec.yaml`; don't edit by hand |
+| `metapaths.yaml` | Fiber sample → CRAM, sample → ENCODE cell folder, per-cell assay status | **Generated** by data setup (`data_prep/setup_data.py`, step 1) from `data_prep/encode_spec.yaml`; don't edit by hand |
 | `reference.yaml` | Reference genome, cCRE file, train/val chromosomes | Hand-edited (merged into metapaths by `load_metapaths`) |
+| *(cluster)* `DATA_FIBER/regions/` | Region files: training pools, val/test window sets (see Regions below) | **Generated** by data setup (step 2) from `data_prep/regions_spec.yaml`; referenced from configs by name |
 | `data/dataNN_*.yaml` | Training data: which fiber samples, context length, fibers per sample | Hand |
 | `evals/evalNN_*.yaml` | Evaluation sets (one sample each; `_mini` = 500 seeded cCREs) | Hand |
 | `models/modelNN_*.yaml` | Architecture, inputs, output assays | Hand |
@@ -99,7 +100,7 @@ an even-numbered `no_fire_msp` ablation twin):
 | `model15_uct_mid_8A` / `model16_…_no_fire_msp` | mid | 8/24/48/96 | 2g.20gb |
 | `model17_uct_large_8A` / `model18_…_no_fire_msp` | large | 8/32/64/128 | 2g.20gb |
 
-## Chromosomes and windows
+## Chromosomes and windows (current runtime)
 
 - **Chromosomes:** train on `chr20`, validate on `chr21` (set in `reference.yaml`).
   - Eval configs run on the validation chromosome, so every eval number is on chromosomes and cell
@@ -108,5 +109,79 @@ an even-numbered `no_fire_msp` ablation twin):
     chr20 and separate "new cell type" from "new region of the genome".
   - Caveat: `run_final_eval` keys results by cell type, so two configs for the same cell type in one
     eval run overwrite each other. Run them as separate eval jobs.
-- **Windows:** samples are 5 kb windows centred on cCREs (5000 bp context, 100 fibers). Random
-  windows beyond cCREs are planned.
+- **Windows:** samples are 5 kb windows centred on cCREs (5000 bp context, 100 fibers).
+
+This is what the code does today. It is being replaced by the region files below.
+
+## Regions (built; runtime adoption pending)
+
+Where we train, validate and test is defined by region files, built by data setup step 2
+(`data_prep/build_regions.py`) from `data_prep/regions_spec.yaml` into `DATA_FIBER/regions/`.
+To change them, edit the spec and re-run data setup.
+
+**Region vs window.** The files store **regions**: the interval we score (`R = 5000` bp). The runtime
+builds the model's input **window** (`context_length = L`) centred on each region. Today `L = R`, so they
+coincide. If we later predict only the centre of the window, `L > R` and only the central `R` bp are
+scored, with the same files.
+
+**Region rule.** Every region (val, test, and training draws) satisfies:
+1. It does not overlap the ENCODE hg38 blacklist v2.
+2. An input window of up to `max_window = 20 kb` centred on it is inside the chromosome and has no N
+   bases. So any `context_length` up to 20 kb works without rebuilding, and windows never need clamping.
+3. It is on chr1–22. chrX/chrY/chrM are left out (the cell lines differ in sex and X copy number).
+
+`allowed_centres.bed` is exactly the set of centres that satisfy 1–2.
+
+**Window class** (used only to stratify sampling): the first of `PLS` > `ELS` (pELS/dELS) > `CTCF`
+(CTCF-only) > `other` (DNase-H3K4me3) with a cCRE overlapping the region, else `background`.
+
+### Files
+
+| File | Contents |
+|---|---|
+| `exclude.bed` | Blacklist v2 + N runs (`chrom start end reason`) |
+| `allowed_centres.bed` | Where a region centre may lie (region rule above) |
+| `strata/ccre_classes.bed` | Every cCRE with its class, for per-bp scoring by class |
+| `pools/ccre_centres.bed` | cCRE centres that satisfy the region rule: training pool |
+| `windows/<set>.bed` | Fixed val/test sets: `chrom start end region_id class`, 0-based half-open, sorted; opens in IGV |
+| `manifest.json` | How everything was built: rule parameters, seeds, class counts, md5 of the inputs |
+
+### Val/test window sets
+
+Val and test regions are tiles of one fixed grid: `start = k × 5000` from each chromosome start, kept
+if the tile's centre is allowed. Tiles never overlap and a sampled set is always a subset of the full
+tiling, so no region is ever counted twice.
+
+| Set | Use | How it's built |
+|---|---|---|
+| `val_chr22_n200` | Per-epoch validation (200 regions × each training cell) | Proportional stratified sample of chr22 tiles, seed 919 |
+| `test_chr21_tiles` | Reported dev-phase test numbers | Every valid chr21 tile |
+| `test_chr21_mini2000` | Quick checks after training | Proportional stratified sample of the chr21 tiles, seed 919 |
+| `test_chr21_ccre_centred` | Legacy: compare with old runs | 5 kb centred on every chr21 cCRE, overlaps kept (the old protocol) |
+
+- **Proportional stratified:** each class gets the same share of the sample as it has among all tiles
+  (largest-remainder rounding), sampled with a fixed seed. The mini set keeps the real composition, so
+  its numbers estimate the full-tiling numbers.
+- **Same regions for every cell type:** the eval config picks the cells; every region is run for each.
+  Leave-one-out folds, held-out cells and baselines are all scored on identical regions.
+- **Scoring by region type** happens per base pair at runtime from `strata/ccre_classes.bed`: all bases,
+  bases in any cCRE, PLS / ELS / CTCF bases, and bases outside cCREs. The window class only steers sampling.
+- **Regions without fibers** for a cell are skipped at runtime and the count is logged.
+- **Final runs** add new sets to the spec (e.g. test tiles on chr10 + chr21); no code changes.
+
+### Training (sampled at runtime)
+
+Per sample: pick a source by the data config's weights (e.g. `{ccre: 0.5, random: 0.5}`), then draw a
+region centre from `pools/ccre_centres.bed` (+ ±200 bp jitter) or uniformly from `allowed_centres.bed`,
+restricted to `train_chrs` (`reference.yaml`; dev phase `[chr20]`). Jittered centres must still be allowed.
+
+### Planned config keys
+
+```yaml
+# data config
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+# eval config (replaces num_sample_ccres)
+windows: test_chr21_mini2000
+```

@@ -1,0 +1,30 @@
+# Regions spec: where we train, validate and test. data_prep/build_regions.py reads this and writes the
+# region files into <regions_root>/ (see configs/README.md, "Regions"). Edit this file, never the outputs.
+# Window sets are referenced by name from data/eval configs (val_windows / windows).
+
+# --- Locations ---
+regions_root: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/regions
+fasta_path:   /home/azr/projects/def-maxwl/azr/data/misc/hg38.fa
+# ENCODE cCRE registry V3 (926,535 cCREs). Column 11 holds the class: PLS, pELS, dELS, CTCF-only, DNase-H3K4me3.
+ccre_path:    /home/azr/projects/def-maxwl/azr/data/misc/grch38_ccres.bed
+# ENCODE hg38 blacklist v2 (Amemiya et al. 2019). Downloaded once into <regions_root>/sources/; its md5 is
+# recorded in manifest.json.
+blacklist_url: https://github.com/Boyle-Lab/Blacklist/raw/master/lists/hg38-blacklist.v2.bed.gz
+
+# --- Region rules ---
+# Chromosomes anything may come from. chrX/chrY/chrM are left out (the cell lines differ in sex and X copy number).
+chroms: [chr1, chr2, chr3, chr4, chr5, chr6, chr7, chr8, chr9, chr10, chr11, chr12,
+         chr13, chr14, chr15, chr16, chr17, chr18, chr19, chr20, chr21, chr22]
+region_length: 5000   # R: the scored interval; also the tile size. The runtime centres the input window on it.
+max_window: 20000     # L_max: every region leaves room for an input window this long (inside the chromosome, no N).
+
+# --- Fixed region sets (val/test). Training samples from pools at runtime instead. ---
+# method:
+#   tiles         every valid tile (non-overlapping R-bp grid from each chromosome start)
+#   stratified    n tiles sampled per window class in proportion to the class's share of all tiles (seeded)
+#   ccre_centred  legacy protocol: R bp centred on every cCRE (overlaps kept), to compare with old runs
+window_sets:
+  val_chr22_n200:          {method: stratified, chroms: [chr22], n: 200, seed: 919}
+  test_chr21_tiles:        {method: tiles, chroms: [chr21]}
+  test_chr21_mini2000:     {method: stratified, chroms: [chr21], n: 2000, seed: 919}
+  test_chr21_ccre_centred: {method: ccre_centred, chroms: [chr21]}

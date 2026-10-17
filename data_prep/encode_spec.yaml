@@ -1,5 +1,5 @@
 # Data setup spec: which ENCODE bulk tracks to download for which cell lines, and where the fiber-seq
-# and ENCODE data live. data_prep/setup_data.py reads this, downloads the tracks into <encode_root>/<cell>/,
+# and ENCODE data live. data_prep/setup_encode.py reads this, downloads the tracks into <encode_root>/<cell>/,
 # and regenerates configs/metapaths.yaml. Edit this file (not metapaths.yaml) to add cell lines, assays, or
 # fiber samples. (Reference genome / cCREs / train-val chromosomes live in configs/reference.yaml.)
 
