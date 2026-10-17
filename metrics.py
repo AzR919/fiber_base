@@ -1,30 +1,46 @@
 """
 Metrics for model evaluation.
 
-Bulk tensors are (B, K, L); assay masks are (B, K) with 1 where that sample's cell type has data for
-the assay. Masked-out assays contribute no loss and no gradient.
+Bulk tensors are (B, K, L). Masks are either (B, K), 1 where that sample's cell type has data for the assay,
+or (B, K, L) per-position weights: assay mask × positions covered by enough fibers (score_weights). Masked-out
+entries contribute no loss and no gradient.
 """
 
 import torch
+
+MIN_COVERAGE = 5  # default: positions covered by fewer fibers are not scored (their bulk average is too noisy)
 
 
 def mse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.mse_loss(pred, target)
 
 
+def score_weights(assay_mask: torch.Tensor, fiber_coverage: torch.Tensor, min_coverage: int = MIN_COVERAGE):
+    """(B, K, L) weights for losses and metrics: assays the sample's cell type has (assay_mask, (B, K)) × positions
+    covered by at least min_coverage fibers (fiber_coverage, (B, L))."""
+    covered = (fiber_coverage.to(assay_mask.device) >= min_coverage).float()
+    return assay_mask.float()[:, :, None] * covered[:, None, :]
+
+
+def _weights(mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+    w = mask.float()
+    return (w[:, :, None] if w.dim() == 2 else w).expand_as(like)
+
+
 def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """MSE over the (sample, assay) pairs that have data. Equals plain MSE when mask is all ones."""
-    sq = (pred.float() - target.float()) ** 2 * mask.float()[:, :, None]
-    return sq.sum() / (mask.float().sum() * pred.shape[-1]).clamp(min=1)
+    """MSE over the scored entries. mask: (B, K) or (B, K, L). Equals plain MSE when mask is all ones."""
+    sq = (pred.float() - target.float()) ** 2
+    w = _weights(mask, sq)
+    return (sq * w).sum() / w.sum().clamp(min=1)
 
 
 def per_assay_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor):
-    """Per-assay MSE averaged over the samples that have that assay.
-    Returns (losses (K,), counts (K,)); losses for assays with count 0 are meaningless (0)."""
-    per_sample = ((pred.float() - target.float()) ** 2).mean(dim=-1)   # (B, K)
-    mask = mask.float()
-    counts = mask.sum(dim=0)                                          # (K,)
-    losses = (per_sample * mask).sum(dim=0) / counts.clamp(min=1)
+    """Per-assay MSE over the scored positions. mask: (B, K) or (B, K, L).
+    Returns (losses (K,), counts (K,) = scored positions); losses for assays with count 0 are meaningless (0)."""
+    sq = (pred.float() - target.float()) ** 2
+    w = _weights(mask, sq)
+    counts = w.sum(dim=(0, 2))                                        # (K,)
+    losses = (sq * w).sum(dim=(0, 2)) / counts.clamp(min=1)
     return losses, counts
 
 

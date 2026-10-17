@@ -188,6 +188,25 @@ class SinusoidalPositionalEncoding(nn.Module):
         seq_len = x.size(1)
         return x + self.pe[:, :seq_len, :]
 
+
+def average_fibers(processed_fibers, fiber_mask=None, fiber_coverage=None):
+    """
+    Bulk prediction = mean of the per-fiber predictions over the fibers present at each position.
+    processed_fibers: [B, K, L, N]. fiber_mask: [B, L, N] bool, each fiber's scored span (alignment trimmed to its
+    first..last nucleosome). Outputs outside it are zeroed, so they get no gradient, cannot carry signal and do not
+    count; the denominator is the number of fibers present. Without a mask, falls back to sum / fiber_coverage.
+    Returns (bulk [B, K, L], masked per-fiber predictions [B, K, L, N]).
+    """
+    if fiber_mask is not None:
+        m = fiber_mask.unsqueeze(1).to(processed_fibers.dtype)     # [B, 1, L, N]
+        processed_fibers = processed_fibers * m
+        cov = m.sum(-1)                                            # [B, 1, L]
+    elif fiber_coverage is not None:
+        cov = fiber_coverage.float().unsqueeze(1)                  # [B, 1, L]
+    else:
+        raise ValueError("Forward pass needs fiber_mask (or fiber_coverage) to average per-fiber predictions.")
+    return processed_fibers.sum(-1) / cov.clamp(min=1), processed_fibers
+
 #--------------------------------------------------------------------------------------------------
 # Complete Model Implementations
 
@@ -207,7 +226,7 @@ class Base01DebugModel(BaseModel):
         self.out_conv = nn.Conv1d(2, K, kernel_size=1)
         self.fiber_act = nn.Softplus()
 
-    def forward(self, x, fiber_coverage=None, *args, **kwargs):
+    def forward(self, x, fiber_coverage=None, fiber_mask=None, *args, **kwargs):
         B, C, L, N = x.shape
         K = self.out_conv.out_channels
 
@@ -216,9 +235,7 @@ class Base01DebugModel(BaseModel):
         out_flat = self.out_conv(feat)                                   # [B*N, K, L]
         raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)       # [B, K, L, N]
         processed_fibers = self.fiber_act(raw_fibers)                    # [B, K, L, N]
-        cov = fiber_coverage.float().clamp(min=1).unsqueeze(1)           # [B, 1, L]
-        y = processed_fibers.sum(-1) / cov                               # [B, K, L]
-        return y, processed_fibers
+        return average_fibers(processed_fibers, fiber_mask, fiber_coverage)
 
 class UNet03ConvTransformerWithDNA(BaseModel):
     """
@@ -298,16 +315,14 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         # Non-negative activation for single-molecule accessibility
         self.fiber_act = nn.Softplus()
 
-    def forward(self, x, ref_dna=None, fiber_coverage=None, *args, **kwargs):
+    def forward(self, x, ref_dna=None, fiber_coverage=None, fiber_mask=None, *args, **kwargs):
         """
         Args:
             x: Fiber features tensor of shape [B, C_fiber, L, N]
             ref_dna: Optional reference sequence tensor of shape [B, 4, L]
-            fiber_coverage: Per-position fiber count tensor of shape [B, L]
+            fiber_coverage: Per-position fiber count tensor of shape [B, L] (used only without fiber_mask)
+            fiber_mask: [B, L, N] bool, each fiber's scored span; per-fiber outputs outside it are zeroed
         """
-        if fiber_coverage is None:
-            raise ValueError("Forward pass requires 'fiber_coverage' tensor when decoder_type is 'avg_n'.")
-
         B, C, L, N = x.shape
 
         x = x.permute(0,3,1,2).reshape(B * N, self.num_input_features, L)
@@ -376,10 +391,7 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)  # [B, K, L, N]
 
         processed_fibers = self.fiber_act(raw_fibers)               # [B, K, L, N]
-        cov = fiber_coverage.float().clamp(min=1).unsqueeze(1)      # [B, 1, L]
-        y = processed_fibers.sum(-1) / cov                          # [B, K, L]
-
-        return y, processed_fibers
+        return average_fibers(processed_fibers, fiber_mask, fiber_coverage)
 
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory

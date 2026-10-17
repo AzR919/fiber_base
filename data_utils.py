@@ -181,13 +181,20 @@ class SingleCellFiberDataset(IterableDataset):
         return self.region_list[wid::nw]
 
     def _collect_fiber_tensors(self, cell_idx, chrom, start, end, min_overlap=50):
-        fibers_np, dna_np, n_fibers, coverage_np = _get_fiber_data_np(
+        """Fibers at a locus as a dict: fiber_features (C, L, N), fiber_dna_tensor (4, L, N) or None, n_fibers,
+        fiber_mask (L, N) bool (each fiber's scored span, see fiber_utils.get_fiber_data) and fiber_coverage (L,)."""
+        fibers_np, dna_np, n_fibers, coverage_np, mask_np = _get_fiber_data_np(
             self.fiber_bams[cell_idx], chrom, start, end, self.fasta,
             self.fibers_per_entry, self.context_length, self.input_features,
             return_fiber_dna=self.return_fiber_dna, min_overlap=min_overlap,
         )
-        fiber_dna_tensor = torch.from_numpy(dna_np).permute(2, 1, 0) if dna_np is not None else None
-        return torch.from_numpy(fibers_np).permute(1, 2, 0), fiber_dna_tensor, n_fibers, torch.from_numpy(coverage_np)
+        return {
+            "fiber_features": torch.from_numpy(fibers_np).permute(1, 2, 0),
+            "fiber_dna_tensor": torch.from_numpy(dna_np).permute(2, 1, 0) if dna_np is not None else None,
+            "n_fibers": n_fibers,
+            "fiber_mask": torch.from_numpy(mask_np).T.contiguous(),
+            "fiber_coverage": torch.from_numpy(coverage_np),
+        }
 
     def get_other_bw_data(self, cell_idx, chrom, start, end):
         """(K, L) asinh bulk signal; assays this cell has no data for are zeros (see self.assay_masks)."""
@@ -196,7 +203,8 @@ class SingleCellFiberDataset(IterableDataset):
             if bw is None:
                 tracks.append(np.zeros(end - start, dtype=np.float32))
                 continue
-            raw = np.array(bw.values(chrom, start, end), dtype=np.float32)
+            raw = np.asarray(bw.values(chrom, start, end, numpy=True), dtype=np.float32)
+            # NaN (no data) -> 0, so targets never contain NaN and samples need no NaN check
             tracks.append(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0))
         arr = np.stack(tracks, axis=0)  # (K, L)
         return torch.asinh(torch.from_numpy(arr))
@@ -204,14 +212,14 @@ class SingleCellFiberDataset(IterableDataset):
     def strata_for(self, locus):
         return torch.from_numpy(self.regions.strata_masks(*locus))
 
-    def _make_sample(self, fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                     other_tensor, locus, cell_type_name, assay_mask, strata=None):
+    def _make_sample(self, fibers, other_tensor, locus, cell_type_name, assay_mask, strata=None):
         out_dict = {
-            "fiber_features": fiber_tensor,
+            "fiber_features": fibers["fiber_features"],
             "target_bulk": other_tensor,
             "assay_mask": assay_mask,
-            "n_fibers": n_fibers,
-            "fiber_coverage": fiber_coverage,
+            "n_fibers": fibers["n_fibers"],
+            "fiber_mask": fibers["fiber_mask"],
+            "fiber_coverage": fibers["fiber_coverage"],
             "locus": locus,
             "cell_type": cell_type_name
         }
@@ -220,7 +228,7 @@ class SingleCellFiberDataset(IterableDataset):
         if self.return_ref_genome:
             out_dict["ref_dna"] = self.onehot_for_locus(locus).T
         if self.return_fiber_dna:
-            out_dict["fiber_dna_tensor"] = fiber_dna_tensor
+            out_dict["fiber_dna_tensor"] = fibers["fiber_dna_tensor"]
         return out_dict
 
     def __iter__(self):
@@ -234,20 +242,14 @@ class SingleCellFiberDataset(IterableDataset):
                     cell_type_name = self.cell_type_names[cell_idx]
                     locus = self.window_at(*self.sampler.sample_centre(self.rng))
 
-                    fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
-                        cell_idx, *locus, min_overlap=self.context_length // 8
-                    )
-                    if n_fibers == 0:
+                    fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
+                    if fibers["n_fibers"] == 0:
                         continue
 
                     other_tensor = self.get_other_bw_data(cell_idx, *locus)
-                    if torch.isnan(other_tensor).any().item():
-                        continue
-
                     found = True
 
-                yield self._make_sample(fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                                        other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
+                yield self._make_sample(fibers, other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
 
         else:  # eval mode: deterministic, no retry
             for region in self._eval_regions():
@@ -255,18 +257,12 @@ class SingleCellFiberDataset(IterableDataset):
                 strata = self.strata_for(locus)
 
                 for cell_idx, cell_type_name in enumerate(self.cell_type_names):
-                    fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
-                        cell_idx, *locus, min_overlap=self.context_length // 8
-                    )
-                    if n_fibers == 0:
+                    fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
+                    if fibers["n_fibers"] == 0:
                         continue
 
                     other_tensor = self.get_other_bw_data(cell_idx, *locus)
-                    if torch.isnan(other_tensor).any().item():
-                        continue
-
-                    yield self._make_sample(fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage,
-                                            other_tensor, locus, cell_type_name, self.assay_masks[cell_idx],
+                    yield self._make_sample(fibers, other_tensor, locus, cell_type_name, self.assay_masks[cell_idx],
                                             strata=strata)
 
 
@@ -342,32 +338,30 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
         if n_fibers_needed == 0:
             return None
 
-        fiber_tensor, fiber_dna_tensor, n_fibers, fiber_coverage = self._collect_fiber_tensors(
-            cell_idx, *locus, min_overlap=self.context_length // 8
-        )
+        fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
 
-        if n_fibers < n_fibers_needed:
+        if fibers["n_fibers"] < n_fibers_needed:
             return None
 
         bw_tensor = self.get_other_bw_data(cell_idx, *locus)
-        if torch.isnan(bw_tensor).any().item():
-            return None
 
-        trimmed_fiber_tensor = fiber_tensor[:, :, :n_fibers_needed]
+        fiber_dna_tensor = fibers["fiber_dna_tensor"]
         trimmed_dna_tensor = (
             fiber_dna_tensor[:, :, :n_fibers_needed]
             if (self.return_fiber_dna and fiber_dna_tensor is not None)
             else None
         )
+        trimmed_mask = fibers["fiber_mask"][:, :n_fibers_needed]
 
         return {
             "cell_type": ct,
-            "fiber_features": trimmed_fiber_tensor,
+            "fiber_features": fibers["fiber_features"][:, :, :n_fibers_needed],
             "target_bulk": bw_tensor,
             "assay_mask": self.assay_masks[cell_idx],
             "fiber_dna_tensor": trimmed_dna_tensor,
             "n_fibers": n_fibers_needed,
-            "fiber_coverage": fiber_coverage,
+            "fiber_mask": trimmed_mask,
+            "fiber_coverage": trimmed_mask.sum(dim=-1).float(),  # only the fibers kept in the mix
         }
 
     def _build_composite_sample(self, locus, cell_samples):
@@ -381,7 +375,7 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
 
         cell_type_masks = {}
         individual_bulk_targets = {}
-        mixed_coverage = torch.zeros(self.context_length, dtype=torch.float32)
+        mixed_fiber_mask = torch.zeros(self.context_length, self.fibers_per_entry, dtype=torch.bool)
         current_fiber_offset = 0
 
         for sample in cell_samples:
@@ -392,7 +386,7 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             mixed_fiber_tensors[:, :, current_fiber_offset:current_fiber_offset + n_fibers] = (
                 sample["fiber_features"][:, :, :n_fibers]
             )
-            mixed_coverage += sample["fiber_coverage"]
+            mixed_fiber_mask[:, current_fiber_offset:current_fiber_offset + n_fibers] = sample["fiber_mask"][:, :n_fibers]
 
             if self.return_fiber_dna and sample["fiber_dna_tensor"] is not None:
                 mixed_dna_tensors[:, :, current_fiber_offset:current_fiber_offset + n_fibers] = (
@@ -418,7 +412,8 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             "cell_type_targets": individual_bulk_targets,
             "cell_type_masks": cell_type_masks,
             "n_fibers": current_fiber_offset,
-            "fiber_coverage": mixed_coverage,
+            "fiber_mask": mixed_fiber_mask,
+            "fiber_coverage": mixed_fiber_mask.sum(dim=-1).float(),
             "locus": locus,
             "mixing_ratios": self.cell_ratios,
         }

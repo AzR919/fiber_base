@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from data_utils import make_fiber_dataset, loader_context
-from metrics import masked_mse, per_assay_mse, PearsonMeter
+from metrics import masked_mse, per_assay_mse, PearsonMeter, score_weights, MIN_COVERAGE
 from regions import STRATA
 from utils import *
 from vis_utils import plot_evaluator_record_t
@@ -52,7 +52,8 @@ def _print_strata_table(cell_type, strata, output_assays):
 
 class Evaluator:
 
-    def __init__(self, model, dataset, batch_size=1, num_plots_to_log=5, device="cuda", seed=919, num_workers=0):
+    def __init__(self, model, dataset, batch_size=1, num_plots_to_log=5, device="cuda", seed=919, num_workers=0,
+                 min_coverage=MIN_COVERAGE):
         self.model = model
         self.device = torch.device(device)
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
@@ -60,6 +61,7 @@ class Evaluator:
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.min_coverage = min_coverage  # positions covered by fewer fibers are not scored
 
         self.rng = random.Random(seed)
         self.num_to_save = num_plots_to_log
@@ -89,27 +91,28 @@ class Evaluator:
             for batch_idx, batch in enumerate(test_loader):
                 fiber_features, target_bulk, forward_kwargs = unpack_batch(batch, self.device)
                 assay_mask = batch["assay_mask"].to(self.device)
+                coverage = batch["fiber_coverage"].to(self.device)
 
                 with torch.amp.autocast(self.device_type, dtype=torch.float16):
                     pred_composite_bulk, processed_fibers = self.model(fiber_features, **forward_kwargs)
 
-                # Assays the cell type has no bulk data for are excluded from every loss
-                comp_loss = masked_mse(pred_composite_bulk, target_bulk, assay_mask).item()
+                # Scored entries only: assays the cell type has, at positions covered by >= min_coverage fibers
+                weights = score_weights(assay_mask, coverage, self.min_coverage)    # (B, K, L)
+                comp_loss = masked_mse(pred_composite_bulk, target_bulk, weights).item()
                 composite_loss_meter.update(comp_loss)
-                losses, counts = per_assay_mse(pred_composite_bulk, target_bulk, assay_mask)
+                losses, counts = per_assay_mse(pred_composite_bulk, target_bulk, weights)
                 for k, assay in enumerate(output_assays):
                     if counts[k] > 0:
                         assay_loss_meters[assay].update(losses[k].item(), n=int(counts[k].item()))
                 num_samples += fiber_features.shape[0]
 
-                strata_meters["all"].update(pred_composite_bulk, target_bulk, assay_mask)
+                strata_meters["all"].update(pred_composite_bulk, target_bulk, weights)
                 if "strata" in batch:
                     st = batch["strata"].to(self.device)        # (B, len(STRATA), L) bool
                     in_ccre = st.any(dim=1)
                     selections = {"ccre": in_ccre, "non_ccre": ~in_ccre, **{c: st[:, i] for i, c in enumerate(STRATA)}}
                     for name, sel in selections.items():
-                        strata_meters[name].update(pred_composite_bulk, target_bulk,
-                                                   assay_mask[:, :, None] * sel[:, None, :].float())
+                        strata_meters[name].update(pred_composite_bulk, target_bulk, weights * sel[:, None, :].float())
 
                 ct = batch.get("cell_type", ["Unknown"])
                 cell_type_name = ct[0] if isinstance(ct, (list, tuple)) else ct
@@ -122,6 +125,7 @@ class Evaluator:
                     "pred_bulk": pred_composite_bulk.cpu(),
                     "target_bulk": target_bulk.cpu(),
                     "assay_mask": assay_mask.cpu(),
+                    "score_mask": (coverage >= self.min_coverage).cpu(),
                     "loss": comp_loss,
                 }
                 valid_locus_count += 1
@@ -216,7 +220,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
             os.makedirs(save_path, exist_ok=True)
 
         evaluator = Evaluator(model, test_set, batch_size=1, num_plots_to_log=5, device=device, seed=eval_seed,
-                              num_workers=getattr(train_args, "num_workers", 0))
+                              num_workers=getattr(train_args, "num_workers", 0),
+                              min_coverage=getattr(train_args, "min_coverage", MIN_COVERAGE))
         eval_results = evaluator.evaluate(save_path=save_path)
 
         composite_loss = eval_results["composite"]["loss"]

@@ -12,7 +12,11 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 
 **What it learns**: given N fibers overlapping a window of length L centred on a genomic region, predict per-fiber, per-assay signal whose coverage-normalized average matches the bulk signal track(s) over that window.
 
-**How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the sum over fibers divided by fiber coverage at each position — i.e. "predict each fiber's contribution, then average". The model returns both: `y` (bulk, `(B, K, L)`, used for the loss) and `processed_fibers` (single-molecule predictions, `(B, K, L, N)`, the imputation we ultimately care about).
+**How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the mean of the per-fiber predictions over the fibers present at each position — i.e. "predict each fiber's contribution, then average".
+
+**Fiber mask**: each fiber only counts inside its *scored span*: its alignment trimmed to its first..last nucleosome (read ends beyond the outermost nucleosomes are neither MSP nor nucleosome, so their msp/nuc channels are uninformative). The loader returns this as `fiber_mask` `(L, N)`; the model zeroes per-fiber predictions outside it, so empty parts of a fiber row and padding rows get no output, no gradient and do not count in the average. The trimmed read ends are still part of the input, as context. Fibers with no nucleosome are skipped.
+
+**Scored positions**: loss and every metric only use positions covered by at least `min_coverage` fibers (default 5; `--min_coverage`), since averages over fewer fibers are noisy. Dashboards shade the unscored positions. The model returns both: `y` (bulk, `(B, K, L)`, used for the loss) and `processed_fibers` (single-molecule predictions, `(B, K, L, N)`, the imputation we ultimately care about).
 
 **Validating the single-molecule output**: low bulk MSE is necessary but not sufficient — a model can match the bulk average while spreading signal uniformly across fibers. Mixed-cell deconvolution (below) is one indirect check that per-fiber predictions carry molecule-specific information.
 
@@ -61,7 +65,8 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 
 - Fiber features: `(C, L, N)` — Channels × context Length × N fibers; batched `(B, C, L, N)`
 - Bulk target: `(K, L)` per sample, `(B, K, L)` batched — one row per output assay, `asinh`-transformed bigWig signal (NaN → 0)
-- Fiber coverage: `(L,)` per sample, `(B, L)` batched
+- Fiber mask: `(L, N)` bool per sample, `(B, L, N)` batched — each fiber's scored span (padding rows all False)
+- Fiber coverage: `(L,)` per sample, `(B, L)` batched — `fiber_mask.sum(-1)`, the number of fibers scored at each position
 - Reference DNA one-hot: `(4, L)` per sample
 
 Channel order (selected by `input_flags`): `[m6a, cpg, msp, nuc, fire_msp]`
@@ -123,6 +128,7 @@ lr: 0.0001
 res_dir: "./results"
 seed: 919
 # num_workers: 3           # optional DataLoader workers (default 0); datasets split their work across them
+# min_coverage: 5          # optional (default 5): loss/metrics only at positions with >= this many fibers
 ```
 
 ### Eval Config (`configs/evals/`)

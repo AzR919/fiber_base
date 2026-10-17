@@ -38,15 +38,16 @@ def suppress_stdout_stderr():
 #--------------------------------------------------------------------------------------------------
 # DNA Utilities
 
+# Byte -> row of _ONEHOT_ROWS: A/C/G/T (either case) -> 0..3, anything else -> 4 (all-zeros row)
+_ONEHOT_INDEX = np.full(256, 4, dtype=np.intp)
+for _i, _base in enumerate(b"ACGT"):
+    _ONEHOT_INDEX[_base] = _ONEHOT_INDEX[_base + 32] = _i
+_ONEHOT_ROWS = np.vstack([np.eye(4, dtype=np.float32), np.zeros((1, 4), dtype=np.float32)])
+
+
 def _dna_to_onehot(sequence):
     """Convert a nucleotide string to (L, 4) float32 array. N/unknown → all-zeros row."""
-    mapping = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
-    out = np.zeros((len(sequence), 4), dtype=np.float32)
-    for i, nuc in enumerate(sequence.upper()):
-        j = mapping.get(nuc, -1)
-        if j >= 0:
-            out[i, j] = 1.0
-    return out
+    return _ONEHOT_ROWS[_ONEHOT_INDEX[np.frombuffer(sequence.encode("ascii"), dtype=np.uint8)]]
 
 
 def get_locus_onehot(fasta, chrom, start, end):
@@ -57,10 +58,37 @@ def get_locus_onehot(fasta, chrom, start, end):
 
 #--------------------------------------------------------------------------------------------------
 # Fiber Signal Extraction
-# All functions return np.ndarray of shape (context_length,) where context_length = end - start.
+# All functions take (fiber, start, end, ref) with ref a RefWindow for [start, end), and return
+# np.ndarray of shape (context_length,) where context_length = end - start.
 # Overlap-aware: the -1 background mask is set only within the fiber's actual alignment coverage.
 
-def get_m6a(fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+class RefWindow:
+    """Reference sequence of one window plus the masks every fiber in it shares, computed once per window
+    (not once per fiber): at_mask marks A/T bases (m6a sites), cpg_mask marks both bases of each CpG."""
+    def __init__(self, seq):
+        self.seq = seq
+        b = np.frombuffer(seq.upper().encode("ascii"), dtype=np.uint8)
+        self.at_mask = (b == ord("A")) | (b == ord("T"))
+        cg = np.flatnonzero((b[:-1] == ord("C")) & (b[1:] == ord("G")))
+        self.cpg_mask = np.zeros(len(b), dtype=bool)
+        self.cpg_mask[cg] = True
+        self.cpg_mask[cg + 1] = True
+
+
+def _call_positions(mods, start, end, q_threshold):
+    """Window-relative positions of base-modification calls in [start, end) with ML >= q_threshold.
+    Positions stay int64: float32 cannot hold genomic coordinates above 2**24 (16.7 Mb) exactly, which used to
+    shift calls by 1-2 bp. Calls without a reference position (None) are dropped."""
+    starts = mods.reference_starts
+    try:
+        pos = np.array(starts, dtype=np.int64)
+    except TypeError:  # None entries: no reference position for that call
+        pos = np.array([-1 if p is None else p for p in starts], dtype=np.int64)
+    keep = (pos >= start) & (pos < end) & (np.asarray(mods.ml) >= q_threshold)
+    return pos[keep] - start
+
+
+def get_m6a(fiber, start, end, ref, Q_THRESHOLD=200):
     context_length = end - start
     m6a_data = np.zeros(context_length, dtype=np.float32)
 
@@ -69,58 +97,27 @@ def get_m6a(fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
     if overlap_start >= overlap_end:
         return m6a_data
 
-    f_start_idx = overlap_start - start
-    f_end_idx   = overlap_end   - start
-
-    ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-    at_mask = np.isin(ref_seq_arr, ['A', 'T'])
-
-    fiber_at_mask = np.zeros(context_length, dtype=bool)
-    fiber_at_mask[f_start_idx:f_end_idx] = at_mask[f_start_idx:f_end_idx]
-    m6a_data[fiber_at_mask] = -1.0
-
-    ref_starts = np.array(fiber.m6a.reference_starts, dtype=np.float32)
-    qualities  = np.array(fiber.m6a.ml, dtype=np.float32)
-
-    mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-    valid_positions = (ref_starts[mask] - start).astype(np.int32)
-    m6a_data[valid_positions] = 1.0
+    lo, hi = overlap_start - start, overlap_end - start
+    m6a_data[lo:hi][ref.at_mask[lo:hi]] = -1.0
+    m6a_data[_call_positions(fiber.m6a, start, end, Q_THRESHOLD)] = 1.0
     return m6a_data
 
 
-def get_cpg(fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+def get_cpg(fiber, start, end, ref, Q_THRESHOLD=200):
     context_length = end - start
     cpg_data = np.zeros(context_length, dtype=np.float32)
 
     overlap_start = max(start, fiber.start)
     overlap_end   = min(end,   fiber.end)
-
     if overlap_start < overlap_end:
-        local_start = int(overlap_start - start)
-        local_end   = int(overlap_end   - start)
+        lo, hi = overlap_start - start, overlap_end - start
+        cpg_data[lo:hi][ref.cpg_mask[lo:hi]] = -1.0
 
-        ref_seq_arr = np.array(list(ref_dna_seq.upper()))
-
-        c_positions = np.where(ref_seq_arr[:-1] == 'C')[0]
-        valid_cg    = c_positions[ref_seq_arr[c_positions + 1] == 'G']
-
-        g_positions = np.where(ref_seq_arr[1:] == 'G')[0] + 1
-        valid_gc    = g_positions[ref_seq_arr[g_positions - 1] == 'C']
-
-        all_cpg_indices  = np.unique(np.concatenate([valid_cg, valid_gc]))
-        in_fiber_mask    = (all_cpg_indices >= local_start) & (all_cpg_indices < local_end)
-        cpg_data[all_cpg_indices[in_fiber_mask]] = -1.0
-
-    ref_starts = np.array(fiber.cpg.reference_starts, dtype=np.float32)
-    qualities  = np.array(fiber.cpg.ml, dtype=np.float32)
-
-    mask = (ref_starts >= start) & (ref_starts < end) & (qualities >= Q_THRESHOLD)
-    valid_positions = (ref_starts[mask] - start).astype(np.int32)
-    cpg_data[valid_positions] = 1.0
+    cpg_data[_call_positions(fiber.cpg, start, end, Q_THRESHOLD)] = 1.0
     return cpg_data
 
 
-def get_msp(fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
+def get_msp(fiber, start, end, ref, Q_THRESHOLD=0):
     context_length = end - start
     msp_data = np.zeros(context_length, dtype=np.float32)
 
@@ -136,7 +133,7 @@ def get_msp(fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
     return msp_data
 
 
-def get_nuc(fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
+def get_nuc(fiber, start, end, ref, Q_THRESHOLD=0):
     context_length = end - start
     nuc_data = np.zeros(context_length, dtype=np.float32)
 
@@ -152,7 +149,7 @@ def get_nuc(fiber, start, end, ref_dna_seq, Q_THRESHOLD=0):
     return nuc_data
 
 
-def get_fire_msp(fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
+def get_fire_msp(fiber, start, end, ref, Q_THRESHOLD=200):
     context_length = end - start
     fire_msp_data = np.zeros(context_length, dtype=np.float32)
 
@@ -173,6 +170,17 @@ def get_fire_msp(fiber, start, end, ref_dna_seq, Q_THRESHOLD=200):
 #--------------------------------------------------------------------------------------------------
 # Fiber Batch Collection
 
+def nucleosome_span(fiber):
+    """(first nucleosome start, last nucleosome end) in reference coordinates, or None if the fiber has no
+    nucleosome with a reference position. Read ends outside this span are neither MSP nor nucleosome (MSPs are
+    only called between nucleosomes), so their msp/nuc channels are uninformative there."""
+    spans = [(s, s + n) for s, n in zip(fiber.nuc.reference_starts, fiber.nuc.reference_lengths)
+             if s is not None and n is not None]
+    if not spans:
+        return None
+    return min(s for s, _ in spans), max(e for _, e in spans)
+
+
 def get_fiber_data(
     fiber_bam, chrom, start, end, fasta,
     fibers_per_entry, context_length, input_features,
@@ -181,6 +189,10 @@ def get_fiber_data(
     """
     Collect fiber reads over [chrom:start-end] and extract per-fiber feature arrays.
 
+    Each fiber has a scored span: its alignment trimmed to [first nucleosome start, last nucleosome end],
+    intersected with the window. Input features cover the whole alignment (read ends still give context);
+    the model only predicts, and coverage only counts, inside the scored span (fiber_mask).
+
     Parameters
     ----------
     fiber_bam       : open pyft.Fiberbam handle
@@ -188,21 +200,23 @@ def get_fiber_data(
     fasta           : open pysam.FastaFile handle
     fibers_per_entry : max fibers to collect (N dimension)
     context_length  : window size in bp (= end - start)
-    input_features  : list of signal functions [fn(fiber, start, end, ref_dna_seq) -> (L,)]
+    input_features  : list of signal functions [fn(fiber, start, end, ref: RefWindow) -> (L,)]
     return_fiber_dna : whether to build per-fiber DNA one-hot array
-    min_overlap     : minimum bp overlap between fiber alignment and window
+    min_overlap     : minimum bp of the fiber's scored span inside the window (fibers with less, or with no
+                      nucleosome at all, are skipped)
 
     Returns
     -------
     fibers_array   : np.ndarray  (fibers_per_entry, n_features, context_length)
     dna_array      : np.ndarray  (fibers_per_entry, context_length, 4)  or  None
     n_fibers       : int  — actual fibers collected (≤ fibers_per_entry)
-    fiber_coverage : np.ndarray  (context_length,)  — per-position fiber count
+    fiber_coverage : np.ndarray  (context_length,)  — per-position count of fibers whose scored span covers it
+    fiber_mask     : np.ndarray  (fibers_per_entry, context_length) bool — each fiber's scored span (padding rows False)
     """
-    ref_dna_seq    = fasta.fetch(chrom, start, end)
+    ref            = RefWindow(fasta.fetch(chrom, start, end))  # shared by every fiber in the window
     fibers_array   = np.zeros((fibers_per_entry, len(input_features), context_length), dtype=np.float32)
     dna_array      = np.zeros((fibers_per_entry, context_length, 4), dtype=np.float32) if return_fiber_dna else None
-    fiber_coverage = np.zeros(context_length, dtype=np.float32)
+    fiber_mask     = np.zeros((fibers_per_entry, context_length), dtype=bool)
 
     with suppress_stdout_stderr():
         possible_fibers = fiber_bam.fetch(chrom, start, end)
@@ -212,14 +226,18 @@ def get_fiber_data(
         if n_fibers == fibers_per_entry:
             break
 
+        span = nucleosome_span(fiber)
+        if span is None:
+            continue
+        span_start = max(start, fiber.start, span[0])
+        span_end   = min(end,   fiber.end,   span[1])
+        if span_end - span_start < min_overlap:
+            continue
+        fiber_mask[n_fibers, span_start - start:span_end - start] = True
+
         overlap_start = max(start, fiber.start)
         overlap_end   = min(end,   fiber.end)
-        if overlap_end - overlap_start < min_overlap:
-            continue
-
         win_start = overlap_start - start
-        win_end   = overlap_end   - start
-        fiber_coverage[win_start:win_end] += 1
 
         if return_fiber_dna:
             dna_buffer = list("N" * context_length)
@@ -232,7 +250,8 @@ def get_fiber_data(
                     dna_buffer[win_start:win_start + slc_len] = list(slc[:slc_len])
             dna_array[n_fibers] = _dna_to_onehot("".join(dna_buffer))
 
-        fibers_array[n_fibers] = np.array([fn(fiber, start, end, ref_dna_seq) for fn in input_features])
+        fibers_array[n_fibers] = np.array([fn(fiber, start, end, ref) for fn in input_features])
         n_fibers += 1
 
-    return fibers_array, dna_array, n_fibers, fiber_coverage
+    fiber_coverage = fiber_mask.sum(axis=0).astype(np.float32)
+    return fibers_array, dna_array, n_fibers, fiber_coverage, fiber_mask

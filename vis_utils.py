@@ -177,13 +177,23 @@ def _fmt_r(r):
     return "n/a" if r is None or np.isnan(r) else f"{r:.2f}"
 
 
+def _shade_unscored(ax, score_mask):
+    """Light grey bands over positions excluded from loss/metrics (too few fibers)."""
+    edges = np.diff(np.concatenate([[0], (~score_mask).astype(np.int8), [0]]))
+    for i, (s, e) in enumerate(zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1))):
+        ax.axvspan(s, e, color='lightgrey', alpha=0.5, lw=0, label='Not scored (few fibers)' if i == 0 else None)
+
+
 def _render_bulk_comparison(ax, target, pred_bulk, assay_name, mode, has_target=True,
-                            avg_loss=None, avg_pearson=None):
+                            avg_loss=None, avg_pearson=None, score_mask=None):
     """
     Target vs predicted bulk signal for one assay. target, pred_bulk: (L,) numpy arrays.
-    Title line 1: this window's loss and Pearson r; line 2 (if given): the epoch/eval averages.
-    has_target=False: the cell type has no bulk data for this assay, so only the prediction is drawn.
+    Title line 1: this window's loss and Pearson r over the scored positions; line 2 (if given): the epoch/eval
+    averages. has_target=False: the cell type has no bulk data for this assay, so only the prediction is drawn.
+    score_mask: (L,) bool, positions used for loss/metrics (None = all); the rest is shaded.
     """
+    if score_mask is not None and not score_mask.all():
+        _shade_unscored(ax, score_mask)
     if has_target:
         ax.plot(target, color='dimgray', lw=1.5, label='Target')
     ax.plot(pred_bulk, color='darkorange', lw=1.5, label='Predicted', alpha=0.85)
@@ -191,9 +201,12 @@ def _render_bulk_comparison(ax, target, pred_bulk, assay_name, mode, has_target=
     ax.legend(loc='upper right', frameon=False, fontsize=FS_LEGEND)
     ax.tick_params(labelsize=FS_TICK, labelbottom=False)
 
-    if has_target:
-        loss = float(np.mean((target - pred_bulk) ** 2))
-        title = f"{assay_name}  |  loss {loss:.3f}  |  r {_fmt_r(_window_pearson(target, pred_bulk))}"
+    keep = np.ones(len(pred_bulk), dtype=bool) if score_mask is None else score_mask
+    if has_target and keep.any():
+        loss = float(np.mean((target[keep] - pred_bulk[keep]) ** 2))
+        title = f"{assay_name}  |  loss {loss:.3f}  |  r {_fmt_r(_window_pearson(target[keep], pred_bulk[keep]))}"
+    elif has_target:
+        title = f"{assay_name}  |  no position scored (too few fibers)"
     else:
         title = f"{assay_name}  |  no ENCODE data (prediction only)"
     if avg_loss is not None or avg_pearson is not None:
@@ -229,16 +242,16 @@ def _render_fiber_heatmap(ax, out_fibers):
 
 
 def _render_assay_pair(fig, col_gs, row_start, out_k, out_fibers_k, tar_k, assay_name, mode,
-                       has_target=True, avg_loss=None, avg_pearson=None):
+                       has_target=True, avg_loss=None, avg_pearson=None, score_mask=None):
     """
     Renders one assay in 2 consecutive rows of col_gs:
       row_start   → bulk comparison (target vs pred)
       row_start+1 → per-fiber prediction heatmap
-    out_k, tar_k: (L,)  out_fibers_k: (L, N)
+    out_k, tar_k: (L,)  out_fibers_k: (L, N)  score_mask: (L,) bool or None
     Returns (ax_sig, ax_heat).
     """
     ax_sig = fig.add_subplot(col_gs[row_start, 0])
-    _render_bulk_comparison(ax_sig, tar_k, out_k, assay_name, mode, has_target, avg_loss, avg_pearson)
+    _render_bulk_comparison(ax_sig, tar_k, out_k, assay_name, mode, has_target, avg_loss, avg_pearson, score_mask)
     ax_heat = fig.add_subplot(col_gs[row_start + 1, 0], sharex=ax_sig)
     _render_fiber_heatmap(ax_heat, out_fibers_k)
     return ax_sig, ax_heat
@@ -285,6 +298,7 @@ def plot_evaluation_dashboard(
     mode="Train",
     assay_mask=None,
     assay_avg_pearson=None,
+    score_mask=None,
 ):
     """
     Evaluation dashboard: input fiber stack (col 0) + K assays laid out in a roughly square grid of
@@ -295,6 +309,8 @@ def plot_evaluation_dashboard(
     output_assays: list of K assay name strings.
     assay_avg_losses / assay_avg_pearson: dict {assay: float} of epoch/eval averages per assay, or None.
     assay_mask: (K,) bools, False where the cell type has no bulk data for that assay; None = all present.
+    score_mask: (L,) bools, positions covered by enough fibers to be scored; None = all. The window's loss and r
+    use only these positions, and the others are shaded.
     locus: (chrom, start, end). cell_type: str. Returns matplotlib Figure.
     """
     chr_name, start, end = locus
@@ -325,7 +341,8 @@ def plot_evaluation_dashboard(
             _render_assay_pair(fig, col_gs, local_k * 3, out[k], out_fibers[k], tar[k], name, mode,
                                has_target=True if assay_mask is None else bool(assay_mask[k]),
                                avg_loss=assay_avg_losses.get(name) if assay_avg_losses else None,
-                               avg_pearson=assay_avg_pearson.get(name) if assay_avg_pearson else None)
+                               avg_pearson=assay_avg_pearson.get(name) if assay_avg_pearson else None,
+                               score_mask=score_mask)
     return fig
 
 
@@ -457,7 +474,7 @@ def plot_evaluator_record(record, input_flags, assay_avg_losses=None, output_ass
     """
     Evaluation dashboard (see plot_evaluation_dashboard) from a single Evaluator locus record.
     record values: fiber_features (C,L,N), processed_fibers (K,L,N), pred_bulk (K,L),
-    target_bulk (K,L), locus (chrom,start,end), optional cell_type and assay_mask (K,).
+    target_bulk (K,L), locus (chrom,start,end), optional cell_type, assay_mask (K,) and score_mask (L,).
     assay_avg_losses / assay_avg_pearson: dict {assay: float} of averages per assay, or None.
     Returns matplotlib Figure.
     """
@@ -466,7 +483,7 @@ def plot_evaluator_record(record, input_flags, assay_avg_losses=None, output_ass
     return plot_evaluation_dashboard(
         record["fiber_features"], input_flags, record["pred_bulk"], record["processed_fibers"],
         record["target_bulk"], record["locus"], record.get("cell_type", "Unknown"), output_assays,
-        assay_avg_losses, mode, record.get("assay_mask"), assay_avg_pearson)
+        assay_avg_losses, mode, record.get("assay_mask"), assay_avg_pearson, record.get("score_mask"))
 
 
 def plot_dna_tensor_logo(dna_arr, region_slice=None, title="Fiber Consensus Sequence Logo"):
@@ -512,6 +529,7 @@ def plot_evaluation_dashboard_t(
     mode="Train",
     assay_mask=None,
     assay_avg_pearson=None,
+    score_mask=None,
 ):
     """
     Torch wrapper for plot_evaluation_dashboard.
@@ -519,9 +537,11 @@ def plot_evaluation_dashboard_t(
     output_assays: list of K assay name strings.
     assay_avg_losses / assay_avg_pearson: dict {assay: float} of epoch averages per assay, or None.
     assay_mask: (B, K) tensor (1 = cell type has bulk data for the assay), or None = all present.
+    score_mask: (B, L) bool tensor of scored positions (enough fibers), or None = all.
     locus: collated list-of-lists from DataLoader. cell_type: list[str].
     """
     mask = None if assay_mask is None else assay_mask[0].cpu().numpy().astype(bool)
+    scored = None if score_mask is None else score_mask[0].cpu().numpy().astype(bool)
     inp = inp_t[0].cpu().detach().float().numpy()
     out = out_t[0].cpu().detach().float().numpy()           # (K, L)
     out_fibers = out_fibers_t[0].cpu().detach().float().numpy()  # (K, L, N)
@@ -532,7 +552,7 @@ def plot_evaluation_dashboard_t(
         locus_tup = (locus[0], int(locus[1]), int(locus[2]))
     ct = cell_type[0] if isinstance(cell_type, (list, tuple)) else cell_type
     return plot_evaluation_dashboard(inp, input_flags, out, out_fibers, tar, locus_tup, ct, output_assays,
-                                     assay_avg_losses, mode, mask, assay_avg_pearson)
+                                     assay_avg_losses, mode, mask, assay_avg_pearson, scored)
 
 
 def plot_single_column_fiber_stack_t(
@@ -600,7 +620,7 @@ def plot_evaluator_record_t(record_t, input_flags, assay_avg_losses=None, output
     for k, v in record_t.items():
         if k in squeeze_keys and isinstance(v, torch.Tensor):
             record[k] = v[0].cpu().detach().float().numpy()
-        elif k == "assay_mask" and isinstance(v, torch.Tensor):
+        elif k in ("assay_mask", "score_mask") and isinstance(v, torch.Tensor):
             record[k] = v[0].cpu().numpy().astype(bool)
         elif k == "locus":
             locus = v

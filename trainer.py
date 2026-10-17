@@ -3,6 +3,7 @@ Main training loop and execution manager.
 """
 
 import os
+import time
 import wandb
 
 import torch
@@ -12,7 +13,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from utils import *
-from metrics import masked_mse, per_assay_mse, PearsonMeter
+from metrics import masked_mse, per_assay_mse, PearsonMeter, score_weights, MIN_COVERAGE
 from vis_utils import plot_evaluation_dashboard_t, plot_loss
 from data_utils import loader_context
 
@@ -36,21 +37,28 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', patience=patience
         )
-        self.criterion = masked_mse  # assays a cell type has no bulk data for contribute no loss/gradient
+        # Loss only over scored entries: assays the cell type has, at positions covered by >= min_coverage fibers
+        self.criterion = masked_mse
+        self.min_coverage = getattr(config, "min_coverage", MIN_COVERAGE)
 
         self.scaler = torch.amp.GradScaler(self.device)
+
+    def _score_weights(self, batch):
+        """(B, K, L) loss weights: assay mask × positions covered by >= min_coverage fibers."""
+        return score_weights(batch["assay_mask"].to(self.device), batch["fiber_coverage"].to(self.device),
+                             self.min_coverage)
 
     def train_step(self, batch):
         self.model.train()
         fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
-        assay_mask = batch["assay_mask"].to(self.device)
+        weights = self._score_weights(batch)
 
         self.optimizer.zero_grad()
 
         # Execute forward pass under mixed precision context
         with torch.amp.autocast(self.device_type):
             output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-        loss = self.criterion(output, target, assay_mask)
+        loss = self.criterion(output, target, weights)
 
         # Scale loss and backpropagate using the Gradient Scaler
         self.scaler.scale(loss).backward()
@@ -62,22 +70,21 @@ class Trainer:
     def val_step(self, batch):
         self.model.eval()
         fiber_features, target, forward_kwargs = unpack_batch(batch, self.device)
-        assay_mask = batch["assay_mask"].to(self.device)
+        weights = self._score_weights(batch)
 
         with torch.no_grad():
             # Run validation evaluation under mixed precision context
             with torch.amp.autocast(self.device_type):
                 output, processed_fibers = self.model(fiber_features, **forward_kwargs)
-            loss = self.criterion(output, target, assay_mask)
+            loss = self.criterion(output, target, weights)
 
         return loss.item(), output, processed_fibers
 
-    @staticmethod
-    def _update_assay_meters(meters, output_assays, output, batch, device):
-        """Per-assay epoch meters, counting only samples whose cell type has that assay."""
+    def _update_assay_meters(self, meters, output_assays, output, batch):
+        """Per-assay epoch meters over scored positions (assays the cell type has, covered by >= min_coverage)."""
         with torch.no_grad():
-            losses, counts = per_assay_mse(output.detach(), batch["target_bulk"].to(device),
-                                           batch["assay_mask"].to(device))
+            losses, counts = per_assay_mse(output.detach(), batch["target_bulk"].to(self.device),
+                                           self._score_weights(batch))
         for k, assay in enumerate(output_assays):
             if counts[k] > 0:
                 meters[assay].update(losses[k].item(), n=int(counts[k].item()))
@@ -118,6 +125,7 @@ class Trainer:
             output_assays = getattr(self.config, "output_assays", ["atac"])
 
             # --- TRAINING PHASE ---
+            t_epoch = time.time()
             train_meter = AverageMeter()
             train_assay_meters = {a: AverageMeter() for a in output_assays}
             last_t_batch, last_t_output, last_t_fibers = None, None, None
@@ -131,15 +139,17 @@ class Trainer:
                     self.wandb_run.log({"gpu_peak_mb": peak_mb, "gpu_alloc_mb": alloc_mb})
                 n = batch["fiber_features"].size(0)
                 train_meter.update(t_loss, n=n)
-                self._update_assay_meters(train_assay_meters, output_assays, t_output, batch, self.device)
+                self._update_assay_meters(train_assay_meters, output_assays, t_output, batch)
                 last_t_batch = batch
                 last_t_output = t_output
                 last_t_fibers = t_processed_fibers
 
             avg_train_loss = train_meter.avg
             train_losses.append(avg_train_loss)
+            train_secs = time.time() - t_epoch
 
             # --- VALIDATION PHASE ---
+            t_val = time.time()
             avg_val_loss = None
             val_assay_meters = {a: AverageMeter() for a in output_assays}
             val_pearson = PearsonMeter(len(output_assays))
@@ -151,8 +161,8 @@ class Trainer:
                     v_loss, v_output, v_processed_fibers = self.val_step(v_batch)
                     n = v_batch["fiber_features"].size(0)
                     val_meter.update(v_loss, n=n)
-                    self._update_assay_meters(val_assay_meters, output_assays, v_output, v_batch, self.device)
-                    val_pearson.update(v_output, v_batch["target_bulk"], v_batch["assay_mask"])
+                    self._update_assay_meters(val_assay_meters, output_assays, v_output, v_batch)
+                    val_pearson.update(v_output, v_batch["target_bulk"], self._score_weights(v_batch))
                     last_v_batch = v_batch
                     last_v_output = v_output
                     last_v_fibers = v_processed_fibers
@@ -171,13 +181,18 @@ class Trainer:
             val_assay_r = {a: r for a, r in zip(output_assays, val_r) if r == r}
             mean_val_r = sum(val_assay_r.values()) / len(val_assay_r) if val_assay_r else None
 
-            log_dict = {"train_loss": avg_train_loss, "epoch": epoch}
+            val_secs = time.time() - t_val
+            n_train = train_meter.count
+            log_dict = {"train_loss": avg_train_loss, "epoch": epoch,
+                        "time_train_s": train_secs, "time_val_s": val_secs,
+                        "train_samples_per_s": n_train / max(train_secs, 1e-9)}
+            timing = f" | {train_secs:.0f}s train ({n_train / max(train_secs, 1e-9):.1f} samples/s) + {val_secs:.0f}s val"
             if avg_val_loss is not None:
                 log_dict["val_loss"] = avg_val_loss
                 r_str = f" | Val Pearson: {mean_val_r:.4f}" if mean_val_r is not None else ""
-                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}{r_str}")
+                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}{r_str}{timing}", flush=True)
             else:
-                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f}")
+                print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.6f}{timing}", flush=True)
 
             for assay, value in train_assay_avg.items():
                 log_dict[f"train_loss_{assay}"] = value
@@ -203,6 +218,7 @@ class Trainer:
                     assay_avg_losses=train_assay_avg,
                     mode="Train",
                     assay_mask=last_t_batch["assay_mask"],
+                    score_mask=last_t_batch["fiber_coverage"] >= self.min_coverage,
                 )
                 log_dict["Train_Dashboard"] = wandb.Image(fig_t)
                 plt.close(fig_t)
@@ -222,6 +238,7 @@ class Trainer:
                     mode="Val",
                     assay_mask=last_v_batch["assay_mask"],
                     assay_avg_pearson=val_assay_r,
+                    score_mask=last_v_batch["fiber_coverage"] >= self.min_coverage,
                 )
                 log_dict["Val_Dashboard"] = wandb.Image(fig_v)
                 plt.close(fig_v)

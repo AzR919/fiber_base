@@ -85,6 +85,8 @@ def get_args():
                                help="Training samples drawn per epoch (optimizer steps = samples_per_epoch / batch_size)")
     trainer_group.add_argument("--batch_size", type=int, default=16)
     trainer_group.add_argument("--lr", type=float, default=1e-4)
+    trainer_group.add_argument("--min_coverage", type=int, default=5,
+                               help="Loss and metrics only use positions covered by at least this many fibers")
     trainer_group.add_argument("--num_workers", type=int, default=0,
                                help="DataLoader workers for train/val/eval loading (0 = load in the main process)")
 

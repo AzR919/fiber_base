@@ -163,6 +163,9 @@ tiling, so no region is ever counted twice.
   `all` bases, `ccre` (any cCRE), `PLS` / `ELS` / `CTCF` / `other`, and `non_ccre`. The window class only
   steers sampling.
 - **Regions without fibers** for a cell are skipped; eval prints "N of M samples evaluated".
+- **Low-coverage positions are not scored:** loss and metrics only use positions covered by at least
+  `min_coverage` fibers (default 5), counting each fiber only inside its scored span (alignment trimmed
+  to its first..last nucleosome).
 - **Final runs** add new sets to the spec (e.g. test tiles on chr10 + chr21); no code changes.
 
 ### Training (sampled at runtime)

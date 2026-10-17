@@ -44,6 +44,8 @@ def parse_args():
                         help="Log results to a new Weights & Biases run.")
     parser.add_argument("--num_workers", type=int, default=0,
                         help="DataLoader workers for loading eval regions (0 = load in the main process).")
+    parser.add_argument("--min_coverage", type=int, default=5,
+                        help="Metrics only use positions covered by at least this many fibers.")
     return parser.parse_args()
 
 
@@ -76,6 +78,7 @@ def main():
         fibers_per_entry=200,
         context_length=4096,
         num_workers=args.num_workers,
+        min_coverage=args.min_coverage,
     )
 
     wandb_run = None
