@@ -54,6 +54,7 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 | `data_prep/` | Data setup: one command downloads ENCODE tracks, regenerates `metapaths.yaml` and builds the region files (see Data Setup) |
 | `slurm_batch_command.sh` | Slurm script for training runs |
 | `slurm_batch_command_eval.sh` | Slurm script for evaluating a checkpoint |
+| `slurm_batch_command_baseline.sh` | CPU Slurm script for the cross-cell-average baseline of one training set |
 | `logs/` | Slurm `.out` / `.err` files, named by job name |
 | `reports/` | Dated write-ups of results |
 | `plots_code/` | Figure scripts (e.g. `ceehrc_26/`) |
@@ -161,6 +162,7 @@ cell_types:
 | `model15` / `model16` | UNet03 mid (8/24/48/96), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `train02` | Standard run (25 epochs × 1000 samples, bs 8); `train01` is retired (old key `iters_per_epoch`) |
+| `train03` | Long run (100 epochs × 1000 samples, bs 8) |
 | `data20` | All 5 dev cell types (split v1, 200U); training regions half cCRE, half random |
 | `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type); same regions as `data20` |
 | `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |
@@ -226,6 +228,22 @@ python eval.py \
 ```
 
 Prints, per cell type, how many samples were evaluated (regions without fibers are skipped) and a table of Pearson r per region type × assay. `eval_summary.json` has the full breakdown (`strata`: bases, loss and r per region type, per assay).
+
+### Cross-cell-average baseline
+
+The reference a model has to beat: for each eval sample, the mean of the **training cells'** tracks at the same window (asinh space, one vote per cell line, the evaluated cell line excluded; assays only from the lines that have them). It is scored exactly like a model: same samples, same scored positions, same region-type breakdown.
+
+```bash
+# Baseline only: no checkpoint, CPU is enough (sbatch slurm_batch_command_baseline.sh)
+python eval.py --baseline_only --train_data_config configs/data/data20_dev5_200U.yaml \
+  --eval_configs configs/evals/eval21_GM12878.yaml [more...] --device cpu --num_workers 7
+
+# Model + baseline + cell-specific score in one pass (training cells read from the checkpoint)
+python eval.py --checkpoint results/<run_dir>/Model_epoch_25.pt --baseline --eval_configs ...
+```
+
+- With a model, eval also reports the **cell-specific r**: the partial correlation of prediction and target given the baseline, i.e. how much of the target the model explains beyond the cross-cell average (0 = nothing beyond it). Correlating prediction − baseline with target − baseline would be misleading: both share −baseline, so even a constant prediction scores high.
+- The baseline reads every training cell's tracks for each sample, which is slow without a bigWig cache. It depends only on the data (training cells, window set, coverage rule), not on the model, so run it once per training set with `--baseline_only` and reuse the numbers. The JSON gets a `baseline` block per cell type (and `partial` with a model).
 
 ---
 

@@ -1,0 +1,11 @@
+# Long training run: 100 epochs x 1000 samples (125 steps at batch size 8), lr 1e-4, seed 919.
+# Same as train02 but 4x the epochs (validation Pearson was still rising at epoch 25 with train02).
+
+epochs: 100
+samples_per_epoch: 1000
+batch_size: 8
+lr: 0.0001
+
+# Output & Miscellaneous
+res_dir: "./results"
+seed: 919

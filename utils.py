@@ -127,7 +127,9 @@ def resolve_config_with_metapaths(config: dict, metapaths: dict, output_assays: 
         if missing:
             print(f"[metapaths] {ct_name}: no ENCODE data for {missing}; masked out of the loss")
 
-        entry = {"fibers": metapaths["fiber_paths"][ct_name], "bulk": bulk}
+        # encode_dir identifies the cell line (e.g. K562_100U and K562_200U share it)
+        entry = {"fibers": metapaths["fiber_paths"][ct_name], "bulk": bulk,
+                 "encode_dir": metapaths["cell_types"][ct_name]}
         if ct_cfg and "ratio" in ct_cfg:
             entry["ratio"] = ct_cfg["ratio"]
         metadata["cell_types"][ct_name] = entry

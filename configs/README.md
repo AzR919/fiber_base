@@ -198,5 +198,9 @@ Old keys `num_sample_ccres` and `val_chrs` are rejected with an error pointing h
   evaluated out of how many expected.
 - **`eval_summary.json`:** per cell type, the window set, sample counts, the usual loss / Pearson per
   assay, and `strata`: bases scored, loss and r per region type, per assay.
+- **Baseline (optional, `eval.py --baseline` / `--baseline_only`):** the cross-cell average of the training
+  cells, scored on the same samples and positions; with a model also the cell-specific r (partial correlation
+  of prediction and target given the baseline). JSON blocks `baseline` and `partial`; wandb keys
+  `test/<cell>/baseline_pearson…` and `partial_pearson…`. See the root README.
 - **wandb:** the usual `test/<cell>/loss…` and `pearson…` keys, plus `test/<cell>/pearson@<region type>`
   and `loss@<region type>` (means over assays).

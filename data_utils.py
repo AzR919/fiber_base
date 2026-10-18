@@ -49,13 +49,16 @@ class SingleCellFiberDataset(IterableDataset):
     mode='eval':  iterates a fixed window set (windows: e.g. val_chr22_n200, test_chr21_tiles) × all
                   cell types, no retry (regions without fibers are skipped), fully reproducible. Samples
                   also carry 'strata': (len(STRATA), L) per-bp cCRE-class masks for stratified metrics.
+                  With baseline_cells ({cell: metadata entry}, the cells a model was trained on), samples also
+                  carry the cross-cell-average baseline (see get_baseline).
     With DataLoader workers, training samples and eval regions are split across workers.
     """
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  mode, input_flags, seed=919,
                  dna_type="none", output_assays=None,
-                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None):
+                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None,
+                 baseline_cells=None):
 
         if output_assays is None:
             output_assays = ["atac"]
@@ -129,6 +132,20 @@ class SingleCellFiberDataset(IterableDataset):
         self.input_flags = input_flags
         self.active_feature_indices = [i for i in range(5) if self.input_flags[i]]
 
+        # Cross-cell-average baseline: one source per training cell line (samples sharing an ENCODE folder, like
+        # K562_100U and K562_200U, count once); each evaluated cell averages every source except its own cell line.
+        self.baseline_sources, self.baseline_bws = None, None
+        if baseline_cells:
+            if mode != "eval":
+                raise ValueError("baseline_cells is only supported in eval mode.")
+            by_line = {}
+            for entry in baseline_cells.values():
+                by_line.setdefault(entry["encode_dir"], [entry["bulk"].get(a) for a in self.output_assays])
+            self.baseline_sources = list(by_line.items())                    # [(encode_dir, [path or None per assay])]
+            own = [metadata["cell_types"][c].get("encode_dir") for c in self.cell_type_names]
+            self.baseline_index = [[i for i, (d, _) in enumerate(self.baseline_sources) if d != own_dir]
+                                   for own_dir in own]
+
     def set_epoch(self, epoch):
         """Call at the start of each training epoch for seeded-deterministic data ordering."""
         self.epoch = epoch
@@ -149,6 +166,9 @@ class SingleCellFiberDataset(IterableDataset):
             self.fiber_bams = [pyft.Fiberbam(str(Path(p).resolve())) for p in self.fiber_data_paths]
         if self.other_bws is None:
             self.other_bws = [[None if p is None else pyBigWig.open(p) for p in paths] for paths in self.other_bw_paths]
+        if self.baseline_sources and self.baseline_bws is None:
+            self.baseline_bws = [[None if p is None else pyBigWig.open(p) for p in paths]
+                                 for _, paths in self.baseline_sources]
         if self.fasta is None:
             if not os.path.exists(self.fasta_path):
                 raise FileNotFoundError(f"FASTA not found: {self.fasta_path}")
@@ -196,23 +216,38 @@ class SingleCellFiberDataset(IterableDataset):
             "fiber_coverage": torch.from_numpy(coverage_np),
         }
 
+    @staticmethod
+    def _read_track(bw, chrom, start, end):
+        """(L,) raw bigWig values; NaN (no data) -> 0, so targets never contain NaN and samples need no NaN check."""
+        raw = np.asarray(bw.values(chrom, start, end, numpy=True), dtype=np.float32)
+        return np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
+
     def get_other_bw_data(self, cell_idx, chrom, start, end):
         """(K, L) asinh bulk signal; assays this cell has no data for are zeros (see self.assay_masks)."""
-        tracks = []
-        for bw in self.other_bws[cell_idx]:
-            if bw is None:
-                tracks.append(np.zeros(end - start, dtype=np.float32))
-                continue
-            raw = np.asarray(bw.values(chrom, start, end, numpy=True), dtype=np.float32)
-            # NaN (no data) -> 0, so targets never contain NaN and samples need no NaN check
-            tracks.append(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0))
-        arr = np.stack(tracks, axis=0)  # (K, L)
-        return torch.asinh(torch.from_numpy(arr))
+        tracks = [np.zeros(end - start, dtype=np.float32) if bw is None else self._read_track(bw, chrom, start, end)
+                  for bw in self.other_bws[cell_idx]]
+        return torch.asinh(torch.from_numpy(np.stack(tracks, axis=0)))  # (K, L)
+
+    def get_baseline(self, cell_idx, chrom, start, end):
+        """
+        Cross-cell-average baseline for an evaluated cell: per assay, the mean over the training cell lines (all
+        except the evaluated cell's own line) of their asinh signal at this window, i.e. in the same space as the
+        targets. Returns (bulk (K, L), mask (K,)); mask 0 where no training cell line has the assay.
+        """
+        K, L = len(self.output_assays), end - start
+        total, count = np.zeros((K, L), dtype=np.float32), np.zeros(K, dtype=np.float32)
+        for i in self.baseline_index[cell_idx]:
+            for k, bw in enumerate(self.baseline_bws[i]):
+                if bw is not None:
+                    total[k] += np.arcsinh(self._read_track(bw, chrom, start, end))
+                    count[k] += 1
+        return (torch.from_numpy(total / np.maximum(count, 1)[:, None]),
+                torch.from_numpy((count > 0).astype(np.float32)))
 
     def strata_for(self, locus):
         return torch.from_numpy(self.regions.strata_masks(*locus))
 
-    def _make_sample(self, fibers, other_tensor, locus, cell_type_name, assay_mask, strata=None):
+    def _make_sample(self, fibers, other_tensor, locus, cell_type_name, assay_mask, strata=None, baseline=None):
         out_dict = {
             "fiber_features": fibers["fiber_features"],
             "target_bulk": other_tensor,
@@ -225,6 +260,8 @@ class SingleCellFiberDataset(IterableDataset):
         }
         if strata is not None:
             out_dict["strata"] = strata
+        if baseline is not None:
+            out_dict["baseline_bulk"], out_dict["baseline_mask"] = baseline
         if self.return_ref_genome:
             out_dict["ref_dna"] = self.onehot_for_locus(locus).T
         if self.return_fiber_dna:
@@ -262,8 +299,9 @@ class SingleCellFiberDataset(IterableDataset):
                         continue
 
                     other_tensor = self.get_other_bw_data(cell_idx, *locus)
+                    baseline = self.get_baseline(cell_idx, *locus) if self.baseline_sources else None
                     yield self._make_sample(fibers, other_tensor, locus, cell_type_name, self.assay_masks[cell_idx],
-                                            strata=strata)
+                                            strata=strata, baseline=baseline)
 
 
 #--------------------------------------------------------------------------------------------------
