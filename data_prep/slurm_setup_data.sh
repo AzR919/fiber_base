@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-10-17_00_data_setup
+#SBATCH --job-name=2026-10-17_03_data_setup_fir
 #SBATCH --account=def-maxwl_cpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err
