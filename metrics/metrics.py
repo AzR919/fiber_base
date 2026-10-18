@@ -1,5 +1,6 @@
 """
-Metrics for model evaluation.
+Losses and metrics. What each one means and how to read it: metrics/README.md (overview) and
+metrics/APPENDIX.md (definitions, formulas, caveats).
 
 Bulk tensors are (B, K, L). Masks are either (B, K), 1 where that sample's cell type has data for the assay,
 or (B, K, L) per-position weights: assay mask × positions covered by enough fibers (score_weights). Masked-out
@@ -105,3 +106,14 @@ class PearsonMeter:
     def mse(self) -> torch.Tensor:
         """(K,) MSE over the same positions; NaN for assays never seen."""
         return (self.sse / self.n).masked_fill(self.n == 0, float("nan")).float()
+
+
+def partial_correlation(r_pt: torch.Tensor, r_bt: torch.Tensor, r_pb: torch.Tensor) -> torch.Tensor:
+    """
+    Partial correlation of prediction (p) and target (t) given the baseline (b), from the three pooled
+    correlations on the same positions: r_pt.b = (r_pt - r_bt * r_pb) / sqrt((1 - r_bt^2) (1 - r_pb^2)).
+    Equals corr of p and t after regressing b out of both; 0 when p adds nothing beyond b. NaN where undefined.
+    (Correlating p - b with t - b would not do: both share -b, so even a constant prediction would score high.)
+    """
+    r_pt, r_bt, r_pb = r_pt.double(), r_bt.double(), r_pb.double()
+    return ((r_pt - r_bt * r_pb) / torch.sqrt((1 - r_bt ** 2) * (1 - r_pb ** 2))).float()

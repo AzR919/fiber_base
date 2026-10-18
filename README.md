@@ -47,7 +47,7 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 | `regions.py` | Reads the region files at runtime: window sets, allowed centres, training pools (`TrainSampler`), per-bp cCRE-class masks |
 | `fiber_utils.py` | Low-level per-fiber feature extraction from CRAM files |
 | `models.py` | `BaseModel` (save/load), `Base01DebugModel`, `UNet03ConvTransformerWithDNA`, `model_selector()` |
-| `metrics.py` | Masked MSE (missing assays excluded), per-assay MSE, pooled + per-window Pearson |
+| `metrics/` | Losses and metrics (`metrics.py`: masked MSE, pooled Pearson/MSE meter, partial correlation). `metrics/README.md` explains every reported number; `metrics/APPENDIX.md` has definitions, formulas and caveats |
 | `utils.py` | Seeding, config + metapaths resolution, run naming, wandb setup, meters |
 | `vis_utils.py` | Fiber-stack and evaluation dashboard plots |
 | `configs/` | YAML configs: `data/`, `models/`, `training/`, `evals/`, `metapaths.yaml`, `reference.yaml`; retired ones in `old_configs/`. `configs/README.md` explains the cell-type split and the regions |

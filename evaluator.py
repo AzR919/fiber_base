@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 from data_utils import make_fiber_dataset, loader_context
-from metrics import masked_mse, per_assay_mse, PearsonMeter, score_weights, MIN_COVERAGE
+from metrics import masked_mse, per_assay_mse, PearsonMeter, score_weights, partial_correlation, MIN_COVERAGE
 from regions import STRATA
 from utils import *
 from vis_utils import plot_evaluator_record_t
@@ -50,18 +50,13 @@ def _strata_summary(meters, output_assays):
 
 
 def _partial_summary(pt_meters, bt_meters, pb_meters, output_assays):
-    """
-    Per region type and assay: partial correlation of prediction (p) and target (t) given the baseline (b),
-    r_pt.b = (r_pt - r_bt * r_pb) / sqrt((1 - r_bt^2) (1 - r_pb^2)), from pooled correlations on the same positions.
-    0 when the prediction adds nothing beyond the cross-cell average. (Correlating p - b with t - b would not do:
-    both share -b, so even a constant prediction would score high.)
-    """
+    """Per region type and assay: partial correlation of prediction and target given the baseline
+    (metrics.partial_correlation, from pooled correlations on the same positions)."""
     out = {}
     for s in pt_meters:
         if pt_meters[s].n.max() == 0:
             continue
-        r_pt, r_bt, r_pb = (m[s].value.double() for m in (pt_meters, bt_meters, pb_meters))
-        partial = ((r_pt - r_bt * r_pb) / torch.sqrt((1 - r_bt ** 2) * (1 - r_pb ** 2))).tolist()
+        partial = partial_correlation(pt_meters[s].value, bt_meters[s].value, pb_meters[s].value).tolist()
         per_assay = {a: {"pearson": _nan_to_none(partial[k])} for k, a in enumerate(output_assays)}
         rs = [v["pearson"] for v in per_assay.values() if v["pearson"] is not None]
         out[s] = {"n_bp": int(pt_meters[s].n.max().item()), "pearson": float(np.mean(rs)) if rs else None,
