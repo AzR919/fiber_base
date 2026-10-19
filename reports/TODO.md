@@ -37,27 +37,27 @@ None verifies an individual molecule; that would need single-molecule histone me
 
 ---
 
-## 2. Where we stand (2026-10-18)
+## 2. Where we stand
 
-Setup for all numbers: split v1 (dev = GM12878, K562, HepG2, Panc1, H1; held out = HCT116, MCF-7, H9), 200U
-samples, train on chr20, validate on chr22, test on all 6,843 valid chr21 tiles; mid 8-assay UNet (model15),
-fibers trimmed to their nucleosome span, scoring at positions with ≥ 5 fibers. Results on fir under `results/`.
+Update this section as the work moves on. Detailed numbers go in the dated reports (`reports/`).
 
-| Run | What | Key numbers (chr21, mean over assays) |
-|---|---|---|
-| `2026-10-17_06/07` GM_K5_ccre | GM12878 + K562, cCRE-only training, 25 epochs | Pearson 0.31–0.49 per cell; beats its 2-cell baseline in 4/8 cells |
-| `2026-10-18_00/01` baselines | Cross-cell average of data26 / data20 training cells | data20 baseline Pearson 0.39–0.56 |
-| `2026-10-17_08/09` DEV5 | data20 (5 dev cells, half cCRE / half random), 25 epochs | Pearson 0.36–0.51 (below the 5-cell baseline in every cell); MSE at or below the baseline in 6/8 cells |
-| `2026-10-18_02` DEV5 + baseline | Same model, cell-specific r | **Partial r +0.18 to +0.36 in every cell, held-out cells +0.18 to +0.25**; strongest for ATAC, H3K4me1, H3K27ac, H3K4me3; H3K36me3 ≈ +0.05 |
-| `2026-10-18_03/04` DEV5_long | Same, 100 epochs (train03), eval with baseline | Pearson 0.38–0.57 (above the baseline in HepG2 and H1, within 0.01 in GM12878/K562); MSE below the baseline in 6/8 cells; **partial r +0.19 to +0.41**, up from 25 epochs in every cell. Val Pearson plateaus at 0.494 by epoch ~60 (LR cut to ~0 after) |
+**Done**
+- Pipeline: reproducible data setup (ENCODE fold-change tracks, 8 assays × 8 cell lines; region files), cell-type
+  split (5 dev, 3 held out), train/val/test regions (chr20 / chr22 / chr21 tiles), fiber masks trimmed to the
+  nucleosome span, scoring at positions with ≥ 5 fibers, cross-cell-average baseline and cell-specific r.
+- **T1 (bulk recovery):** works. With enough training the dev-split model is close to the cross-cell average on
+  Pearson (ahead in some dev cells, behind in Panc1 and the held-out cells) and better on MSE in most cells.
+- **T2 (held-out cell types):** the cell-specific r is positive in every cell type, held-out ones included, so the
+  model carries cell-specific information from the fibers that generalizes to new cell types (supports H over
+  H0 at the population level). Wrong-cell control and cell-type-specific loci still to do.
 
-Reading so far: bulk recovery works and, with enough training, is close to the cross-cell average on Pearson and
-better on MSE in most cells (T1); the model carries cell-specific information that generalizes to unseen cells
-(T2, supports H over H0 at the population level). Broad marks are the weak point, H3K36me3 above all in the
-held-out and epithelial cells (0.11–0.18 vs a 0.40–0.55 baseline), even though longer training fixed it in
-K562/GM12878/HepG2.
+**Known weak points**
+- Broad marks, H3K36me3 above all (far below the baseline in several cell types); likely needs longer context.
+- Training plateaus after ~60 × 1000 samples with the current LR schedule.
 
----
+**Next**
+- T3 (mixture-only supervision), the main test of H, with the current target scale; then T4 (scale variants).
+- Single-molecule references for the ladder (4a).
 
 ## 3. Tests
 
@@ -125,11 +125,13 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   two-library control quantifies this; pairs of cell types with similar library statistics reduce it.
 - **Status.** Not started. Needs I1, I2 (and I4 for the second round).
 
-### T4. Target scale and calibration (methodology comparison)
+### T4. Output parameterization and assay model (methodology comparison)
 
-- **Hypothesis.** Aggregating per-fiber predictions in a space linear in the fraction of marked molecules
-  (fold change), with cell-agnostic calibration, gives per-fiber outputs that resolve molecules better than the
-  current setup (mean of per-fiber outputs compared directly with asinh(FC)).
+- **What varies.** What a molecule's output represents and how outputs map to the bulk track (the "assay model"
+  between molecules and ENCODE). All variants stay cell-agnostic: nothing about the cell type beyond its fibers.
+- **Hypothesis.** Outputs in physical units (a probability per molecule, aggregated linearly in the fraction of
+  marked molecules, with assay effects such as scale and fragment smoothing modelled once per assay) resolve
+  molecules better than the current setup (an unbounded per-bp value whose mean is compared with asinh(FC)).
 - **Background.** The bulk is linear in the fraction of marked molecules; asinh(bulk) is not, so the current
   per-fiber outputs are not "this molecule's share of the bulk". The current mixture target (weighted mean of
   asinh tracks) has the same problem. Per-cell calibration is ruled out: prediction must need nothing about the
@@ -141,9 +143,16 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   - V2: V1 + sigmoid per-fiber outputs (probability of the mark) + one affine calibration per **assay** (shared by
     all cells), and/or per-track linear target normalization in data setup (a single scale per ENCODE track, from
     the track alone; choose carefully so real global differences are not removed).
+  - V3: V2 with the probability defined on **nucleosomes**: for histone marks, one probability per called
+    nucleosome, painted over its span, 0 on linkers / accessible patches (no histone there); bulk = a per-assay
+    smoothing kernel (ChIP fragment blurring, learned once per assay) applied to the average over molecules.
+    Unlike V1/V2 this changes the *support* of the prediction, not only its scale, and it differs by assay type:
+    nucleosomes for histone marks, the molecule's own accessible patches for ATAC, the motif footprint
+    (bound / unbound) for CTCF.
 - **Readouts.** T3's fiber-level readouts (main), plus T1/T2 bulk readouts (should not get worse).
-- **Prediction.** V1/V2 improve T3's separation at equal or better bulk recovery.
-- **Status.** Deferred until after T3 V0. Needs I4.
+- **Prediction.** V1–V3 improve T3/T5 readouts at equal or better bulk recovery; V3 most, because it restricts
+  per-molecule outputs to physically meaningful units and lets them be sharp while the bulk stays smooth.
+- **Status.** Deferred until after T3 with V0. Needs I4 (V1/V2) and I14 (V3).
 
 ### T5. Within-population structure
 
@@ -282,21 +291,71 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b | Extend the spec/lock to per-replicate FC files |
 | I12 | DNA-only model run; similar-cell average baseline | 4b | Allow all-zero `input_flags`; baseline with a chosen cell subset |
 | I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
+| I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
 
 ## 6. Engineering backlog (performance and quality)
+
+**Step 0: find the bottleneck.** Training runs at ~9 samples/s and validation (forward only) at ~23/s. If
+validation is GPU-bound, a training step (forward + backward + checkpoint recomputation, ~3× forward) predicts
+~8 samples/s, so training may already be GPU-bound on the 2g.20gb slice (2/7 of an H100), not loader-bound.
+Time a training step on synthetic batches (GPU) and the loader alone (CPU) before choosing fixes.
+
+**Speed**
+- **Validate less often:** validation is ~42 s per 107 s of training (~28% of time) at 1000 samples per epoch;
+  use ~5000 samples per epoch.
+- **Worker restarts:** `forkserver` workers restart every epoch (~15–20 s per loader); larger epochs fix most of
+  it, persistent workers with a shared epoch counter the rest.
+- **Gradient checkpointing** in every `DoubleConv` recomputes activations (~+30% compute) while memory has
+  headroom (11.9 of 19.6 GB): drop it where memory allows.
+- **DNA encoded once per window, not per fiber:** the DNA features are concatenated onto every fiber, so the first
+  UNet level redoes DNA work 100×; a separate DNA branch run once per window and added at each scale is cheaper
+  (and can be deeper or longer-range).
+- **Fewer fibers per training sample** (e.g. 50 random): halves compute; the bulk average is noisier but unbiased;
+  eval keeps 100.
+- `torch.compile`, a larger MIG slice: if GPU-bound.
+- **Eval batch size > 1** (now 1, GPU mostly idle).
 
 - **bigWig cache:** training is limited by cold bigWig reads (~9 samples/s train vs ~23 val). Cache asinh target
   tracks for the chromosomes in use as float16 memory-mapped arrays (data setup); also makes the baseline cheap
   enough to run with every eval.
-- **Fiber selection bias:** the first 100 fibers by start position are kept, so coverage is lower on the right of
-  each window. Random (seeded) selection decodes all overlapping fibers (+50–90% fetch time); separate step.
+**Training and data (better results)**
+- **Fiber selection bias / augmentation:** the first 100 fibers by start position are kept, so coverage is lower
+  on the right of each window and a locus always shows the same fibers. Random (seeded) subsets per visit fix
+  the bias and act as augmentation; they decode all overlapping fibers (+50–90% fetch time).
+- **Reverse-complement augmentation:** flip the window (fiber channels and targets) and reverse-complement the
+  DNA; marks are strand-agnostic, so this doubles the effective data.
+- **More training chromosomes:** training uses chr20 only (64 Mb); drawing from all chromosomes except val/test
+  costs nothing per sample (config change) and likely helps generalization.
 - **Context and broad marks:** fibers are cropped to the 5 kb window before the model. Process longer input
   (full fiber or up to 20 kb; regions already allow it) and score the central region (centre-only scoring is
   not implemented yet). Likely needed for H3K36me3 / H3K27me3 domains.
 - **Longer training / LR schedule:** 25 epochs was undertrained; with train03 val Pearson plateaus at ~0.49 by
   epoch ~60, after which ReduceLROnPlateau (patience 5) has cut the LR to ~0. ~60 epochs captures the gain; a
-  longer patience or a cosine schedule may get more.
+  longer patience or a cosine schedule with warmup (possibly a higher peak LR) and gradient clipping may get more.
+- **Comparison protocol for these changes:** one dev config, ~30k samples, mini eval + cell-specific r; one
+  change per run so gains are attributable.
+**Other**
 - **Eval summary keyed by cell type:** two eval configs for the same cell type in one run overwrite each other.
 - **Mixed-mode evaluation:** composite target currently mixes asinh tracks (see T4).
 - **Housekeeping:** October logs exist only on nibi (the fir sync's initial pull replaced local `logs/`); nibi
   test job 24330075 may still be queued there.
+
+## 7. Model improvements for single-molecule imputation
+
+Aimed at more accurate, more molecule-specific outputs rather than bulk. Several will barely move bulk metrics, so
+judge them with the single-molecule readouts (cell-specific r, T3, T5), with bulk metrics as a guard.
+
+| # | Change | Why it should help single molecules | Effort |
+|---|---|---|---|
+| M1 | **Nucleosome-level outputs + per-assay assay model** (T4 variant V3) | Histone marks sit on nucleosomes; the ChIP peak shape comes from fragment blurring and averaging, not from each molecule. Predicting a probability per nucleosome (0 on linkers) and modelling the blurring once per assay restricts outputs to physical units and stops the model painting a bulk-like shape onto every molecule | Medium–large |
+| M2 | **Supervision that distinguishes molecules:** mixture training with varying proportions (in addition to single-cell training), more cell types at the same loci, both libraries (100U + 200U) of a cell | The loss only constrains averages; seeing the same DNA with different molecules and different targets forces the model to read the fibers. Mixtures make per-subpopulation signal identifiable; two libraries with one target teach robustness to library effects | Medium (I1) |
+| M3 | **Whole read as context** (process the full fiber, crop the output; the report's design) | A molecule's state depends on its surroundings (inside a transcribed gene body for H3K36me3, nucleosome arrays, nearby elements); fibers are ~18 kb but cropped to 5 kb. Likely also the fix for broad marks | Medium–large |
+| M4 | **Continuous call confidences as inputs:** m6A/CpG ML probabilities instead of ±1 at ML ≥ 200; FIRE scores of MSPs instead of a thresholded channel | Keeps per-molecule information currently discarded | Small |
+| M5 | **DNA as modulation, not an additive path:** gate or scale (FiLM) fiber features by DNA instead of concatenating DNA as a full input | The DNA path is identical for every fiber at a locus, the channel through which the bulk-on-every-molecule shortcut flows; with modulation a fiber's output needs fiber evidence | Medium |
+| M6 | **Same-molecule biological constraints** (soft penalties): H3K27ac vs H3K27me3 on the same nucleosome (same lysine); check H3K4me3 vs CpG methylation at CpG islands | Independent, molecule-level supervision that is meaningless on bulk tracks; small weights, after M1–M2 | Small–medium |
+| M7 | **Per-molecule consistency:** per-position (or fiber-masked) normalization instead of `GroupNorm(1, C)` over the whole window; optionally consistency of a molecule's prediction across overlapping windows | Now a molecule's prediction can depend on how much of it falls in the window, which a single-molecule model should not | Small |
+| M8 | **Model selection on single-molecule readouts** | Bulk metrics cannot detect drift towards H0 | Process only |
+
+M1–M3 fit together as a "v2" model (nucleosome-level outputs on full reads, trained on single cells plus
+mixtures), to compare with the current model on T3/T5 and on bulk as a guard.
+
