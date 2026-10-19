@@ -49,11 +49,13 @@ fibers trimmed to their nucleosome span, scoring at positions with ≥ 5 fibers.
 | `2026-10-18_00/01` baselines | Cross-cell average of data26 / data20 training cells | data20 baseline Pearson 0.39–0.56 |
 | `2026-10-17_08/09` DEV5 | data20 (5 dev cells, half cCRE / half random), 25 epochs | Pearson 0.36–0.51 (below the 5-cell baseline in every cell); MSE at or below the baseline in 6/8 cells |
 | `2026-10-18_02` DEV5 + baseline | Same model, cell-specific r | **Partial r +0.18 to +0.36 in every cell, held-out cells +0.18 to +0.25**; strongest for ATAC, H3K4me1, H3K27ac, H3K4me3; H3K36me3 ≈ +0.05 |
-| `2026-10-18_03/04` DEV5_long | Same, 100 epochs (train03), eval with baseline | running; val Pearson 0.48 at epoch 39 vs 0.44 final for 25 epochs |
+| `2026-10-18_03/04` DEV5_long | Same, 100 epochs (train03), eval with baseline | Pearson 0.38–0.57 (above the baseline in HepG2 and H1, within 0.01 in GM12878/K562); MSE below the baseline in 6/8 cells; **partial r +0.19 to +0.41**, up from 25 epochs in every cell. Val Pearson plateaus at 0.494 by epoch ~60 (LR cut to ~0 after) |
 
-Reading so far: bulk recovery works but does not beat the cross-cell average on Pearson (expected, see T1); the
-model does carry cell-specific information that generalizes to unseen cells (T2, supports H over H0 at the
-population level). Broad marks, especially H3K36me3, are the weak point.
+Reading so far: bulk recovery works and, with enough training, is close to the cross-cell average on Pearson and
+better on MSE in most cells (T1); the model carries cell-specific information that generalizes to unseen cells
+(T2, supports H over H0 at the population level). Broad marks are the weak point, H3K36me3 above all in the
+held-out and epithelial cells (0.11–0.18 vs a 0.40–0.55 baseline), even though longer training fixed it in
+K562/GM12878/HepG2.
 
 ---
 
@@ -185,11 +187,85 @@ model with a known expected difference.
   closest to ground truth; single-cell CUT&Tag (e.g. K562) gives per-locus distributions to compare against the
   spread of per-molecule predictions. **TODO:** check availability.
 
+### T9. A pretrained sequence-to-activity model as the DNA encoder
+
+- **Idea.** Replace the small DNA encoder (a DoubleConv on the window's one-hot sequence) with the trunk of a
+  sequence-to-activity model (Enformer, Borzoi; ChromBPNet-style for base-pair resolution), whose purpose is
+  exactly to encode DNA.
+- **For.** Long-range context: Enformer/Borzoi embeddings summarize ~100–500 kb around each position, which is what
+  the weak broad marks (H3K36me3 over gene bodies, H3K27me3/H3K9me3 domains) probably need and a 5 kb window
+  cannot provide.
+- **Against / risks, besides compute.**
+  1. **Leakage.** Enformer and Borzoi were trained on ENCODE tracks that include our cell lines and assays
+     (GM12878, K562, HepG2, ... histone ChIP), with held-out sets of genomic regions, not whole chromosomes. Their
+     embeddings may partly encode the very chr21 tracks we test on. Use only a model/fold whose training excluded
+     our test regions, or train our own larger encoder on our training chromosomes.
+  2. **It strengthens the shortcut we test against.** The DNA embedding is identical for every fiber (and every
+     cell type) at a locus. A strong one lets the model fit the bulk from DNA alone and ignore the fibers: bulk
+     metrics may improve while per-molecule informativeness drops (H0). Judge it on the cell-specific r and T3/T5,
+     not on bulk r.
+  3. **Resolution mismatch.** Enformer outputs 128 bp bins, Borzoi 32 bp; our per-fiber outputs are per base pair,
+     so embeddings must be upsampled (coarse) and combined with base-pair features.
+  4. **Context mismatch.** These models need 196–524 kb of input around each 5 kb window.
+  5. **Engineering.** Large models (Enformer ~250M parameters) from TensorFlow/Keras, with PyTorch ports; keep the
+     trunk frozen and **precompute embeddings once per locus** (DNA is the same for all cells and fibers), e.g.
+     chr20–22 at 128 bp × ~3k dims in float16 is a few GB per chromosome. This also makes the compute cost small.
+- **Design.** Frozen trunk, cached embeddings, injected where the DNA encoder is now. Compare with the current
+  model on bulk r/MSE, cell-specific r (T2), and T3. Include "the seq2act model alone" as the DNA-only rung of
+  the ladder.
+- **Prediction.** Gains concentrated in broad marks; per-molecule readouts (cell-specific r, T3) should not drop.
+  If bulk improves but they drop, the model is copying DNA-derived bulk onto molecules.
+- **Status.** Idea; after the single-molecule tests.
+
 ---
 
-## 4. Implementation TODO
+## 4. Comparison ladder
 
-Do not change the code base until the current runs (`2026-10-18_03_dev5_long`, `_04_..._eval_baseline`) finish.
+Reference points from best possible to worst possible, so results can be read qualitatively. **The single-molecule
+part (4a) comes first**; the bulk ladder (4b) later. Our claim is not to top the bulk ladder but: comparable bulk
+accuracy to methods with the same information, plus molecule-level output that none of them provides.
+
+### 4a. Single-molecule references (focus)
+
+Scored with the molecule-level tests (T3 mixtures, T5 within-population), not bulk tracks.
+
+| Reference | What it represents | Expected on T3 / T5 |
+|---|---|---|
+| Model trained with each cell type's own track (not only the mixture) | Upper bound for T3 | Best separation |
+| **fiberCANDI (us)** | | Should beat the two below |
+| **Rule-based single-molecule imputer**, e.g. "molecules accessible at an element carry the active mark", scaled to match the bulk | The obvious objection: did the model learn more than accessible = active? | Some separation for active marks, little for repressive ones |
+| **Bulk on every molecule** (the mixture / cross-cell bulk assigned to each molecule) | H0 | No separation, by construction |
+| Random per-molecule values with the right mean | Noise floor | None |
+
+### 4b. Bulk references (later)
+
+Two axes matter: what the method sees about the target cell, and its output resolution. Where we land is an
+empirical result, not a fixed position.
+
+| Rung | Sees from the target cell | Output | Notes |
+|---|---|---|---|
+| Replicate of the target assay | the assay itself | bulk | **Noise ceiling; priority.** ENCODE per-replicate FC tracks exist for most experiments; compare replicate vs replicate (not vs pooled, which contains it) |
+| CANDI, all of the target cell's assays (minus the target) | other assays | bulk | Richer input than ours. **Check CANDI's training split**: if it saw the target (cell, assay), it is partly an oracle |
+| Model trained on the target cell type | fibers + target track in training | molecule | Cost of generalizing to a new cell; exists for dev cells, missing for the held-out 3 |
+| **CANDI, ATAC only** and **CANDI on aggregated Fiber-seq accessibility** | bulk accessibility | bulk | **The head-to-head peer.** The Fiber-seq version is the like-for-like one; H1/H9 have no ATAC |
+| Bulk model on aggregated fiber channels (T6) | aggregated fibers | bulk | In-house "same information" reference |
+| fiberCANDI + bulk ChIP of a similar-cell cluster | fibers + other cells' histone bulk | molecule | A model variant, not a reference: likely better bulk but risk of copying the prior onto every molecule (H0); needs cell knowledge |
+| **fiberCANDI (us)** | fibers only | molecule | |
+| Average over similar cell types | nothing | bulk | "Similar" defined without the target's histone data (accessibility or lineage); tiny groups with 8 cells |
+| Average over all other (training) cell types | nothing | bulk | Done (cross-cell-average baseline) |
+| DNA-only model (ours without fibers, or a seq2act model, T9) | nothing | bulk | Isolates what the fibers add; `setup_wandb_run` skips all-zero `input_flags` runs, adjust |
+| Genome-wide constant per assay | nothing | bulk | MSE floor only (Pearson undefined) |
+
+Fair comparison: same chr21 tiles, same scored positions (target cell's fiber coverage ≥ 5 applied to every
+method), same metrics and transform (asinh FC); external predictions at coarser resolution (CANDI bins) need a
+common binning for the ladder.
+
+Priority within 4b: replicate ceiling → DNA-only model → similar-cell average → CANDI (after the leakage check)
+→ target-cell-trained model for held-out cells → CANDI all-assays and fiberCANDI + cluster.
+
+---
+
+## 5. Implementation TODO
 
 | ID | Change | For | Notes |
 |---|---|---|---|
@@ -202,8 +278,12 @@ Do not change the code base until the current runs (`2026-10-18_03_dev5_long`, `
 | I7 | chrX window set (regions spec) + bimodality analysis | T5b | Spec entry only for the windows |
 | I8 | Check CRAMs for haplotype (HP) tags; phasing otherwise | T5c | |
 | I9 | Aggregated-input bulk model | T6 | New model variant |
+| I10 | Rule-based single-molecule imputer + "bulk on every molecule" reference, scored with T3/T5 | 4a | Analysis only, on saved predictions (I2) |
+| I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b | Extend the spec/lock to per-replicate FC files |
+| I12 | DNA-only model run; similar-cell average baseline | 4b | Allow all-zero `input_flags`; baseline with a chosen cell subset |
+| I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
 
-## 5. Engineering backlog (performance and quality)
+## 6. Engineering backlog (performance and quality)
 
 - **bigWig cache:** training is limited by cold bigWig reads (~9 samples/s train vs ~23 val). Cache asinh target
   tracks for the chromosomes in use as float16 memory-mapped arrays (data setup); also makes the baseline cheap
@@ -213,7 +293,9 @@ Do not change the code base until the current runs (`2026-10-18_03_dev5_long`, `
 - **Context and broad marks:** fibers are cropped to the 5 kb window before the model. Process longer input
   (full fiber or up to 20 kb; regions already allow it) and score the central region (centre-only scoring is
   not implemented yet). Likely needed for H3K36me3 / H3K27me3 domains.
-- **Longer training / LR schedule:** 25 epochs was undertrained; check where DEV5_long saturates.
+- **Longer training / LR schedule:** 25 epochs was undertrained; with train03 val Pearson plateaus at ~0.49 by
+  epoch ~60, after which ReduceLROnPlateau (patience 5) has cut the LR to ~0. ~60 epochs captures the gain; a
+  longer patience or a cosine schedule may get more.
 - **Eval summary keyed by cell type:** two eval configs for the same cell type in one run overwrite each other.
 - **Mixed-mode evaluation:** composite target currently mixes asinh tracks (see T4).
 - **Housekeeping:** October logs exist only on nibi (the fir sync's initial pull replaced local `logs/`); nibi
