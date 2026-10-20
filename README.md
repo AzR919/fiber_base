@@ -12,7 +12,9 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 
 **What it learns**: given N fibers overlapping a window of length L centred on a genomic region, predict per-fiber, per-assay signal whose coverage-normalized average matches the bulk signal track(s) over that window.
 
-**How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the mean of the per-fiber predictions over the fibers present at each position — i.e. "predict each fiber's contribution, then average".
+**How the current model does it** (`UNet03ConvTransformerWithDNA`): each fiber is encoded independently (fused with a reference-DNA encoding), passed through a 1D U-Net with a transformer bottleneck, and turned into a non-negative per-fiber prediction for each assay. The bulk prediction is the average of the per-fiber predictions over the fibers present at each position — i.e. "predict each fiber's contribution, then average".
+
+**Fiber aggregation** (`fiber_aggregation`, model setting, default `fc`): per-fiber outputs `z_f` are in asinh units (the range the network learns in), but a bulk track is linear in its molecules in fold change. So the average is taken in FC: `bulk = asinh(mean_f sinh(z_f))` (float32, `z_f` clamped at 15). It equals `z` when all fibers agree, and `z_f` reads as asinh of the FC a population of molecules like this one would show. `asinh` = the plain mean of `z_f` (V0); checkpoints saved before the option existed load as `asinh`. Targets, loss and metrics stay in asinh(FC). Everything that mixes tracks also averages in FC: mixture targets and the cross-cell baseline.
 
 **Fiber mask**: each fiber only counts inside its *scored span*: its alignment trimmed to its first..last nucleosome (read ends beyond the outermost nucleosomes are neither MSP nor nucleosome, so their msp/nuc channels are uninformative). The loader returns this as `fiber_mask` `(L, N)`; the model zeroes per-fiber predictions outside it, so empty parts of a fiber row and padding rows get no output, no gradient and do not count in the average. The trimmed read ends are still part of the input, as context. Fibers with no nucleosome are skipped.
 
@@ -22,7 +24,7 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 
 **Two dataset modes** (`dataset_type`):
 - **Single-cell** (`single`): each sample is fibers from one cell type predicting that cell type's bulk signal. With several cell types listed, each training sample picks one cell type at random.
-- **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target. Eval in this mode also reports per-cell-type deconvolution MSE.
+- **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target (mixed in fold change, then asinh). Eval in this mode also reports per-cell-type deconvolution MSE.
 
 **Where we train, validate and test** comes from **region files** built during data setup (`configs/README.md` → Regions):
 - **Training** draws regions at runtime from pools on `chr20` (cCRE centres with jitter, optionally mixed with uniform random regions).
@@ -188,10 +190,11 @@ python data_prep/setup_data.py                # run interactively
 |---|---|---|---|
 | 1. ENCODE tracks | `setup_encode.py` | `encode_spec.yaml` (cell lines, assays, fiber samples) | `<encode_root>/<cell>/*_fc.bigWig` + `manifest.json`, `encode_lock.yaml`, `configs/metapaths.yaml` |
 | 2. Regions | `build_regions.py` | `regions_spec.yaml` (chromosomes, region rule, val/test window sets) | `<regions_root>/`: `exclude.bed`, `allowed_centres.bed`, `strata/`, `pools/`, `windows/`, `manifest.json` |
+| 3. Cell-specific loci | `build_loci.py` | `loci_spec.yaml` (dev/test cell lines, heuristic) | `<regions_root>/loci/`: `<split>/table.tsv`, `<split>/<cell>.bed`, `manifest.json` (see `configs/README.md`) |
 
-- **Skipping:** ENCODE files already on disk with the right md5 are skipped, and `encode_lock.yaml` pins which file each cell + assay uses. Region files are rebuilt only when `regions_spec.yaml`, `build_regions.py` or an input (FASTA index, cCRE file, blacklist) changes; `manifest.json` stores a fingerprint of all of them.
-- **Flags:** `--dry-run`, `--workers N` (parallel downloads), `--verify` (re-hash ENCODE files), `--force-regions`.
-- **To change the data:** edit a spec and re-run. Never edit generated files. Each step can also run on its own (`python data_prep/setup_encode.py`, `python data_prep/build_regions.py`).
+- **Skipping:** ENCODE files already on disk with the right md5 are skipped, and `encode_lock.yaml` pins which file each cell + assay uses. Region files are rebuilt only when `regions_spec.yaml`, `build_regions.py` or an input (FASTA index, cCRE file, blacklist) changes; `manifest.json` stores a fingerprint of all of them. Loci are rebuilt only when `loci_spec.yaml`, `build_loci.py`, the region files or an ENCODE manifest changes.
+- **Flags:** `--dry-run`, `--workers N` (parallel downloads), `--verify` (re-hash ENCODE files), `--force-regions`, `--force-loci`.
+- **To change the data:** edit a spec and re-run. Never edit generated files. Each step can also run on its own (`python data_prep/setup_encode.py`, `python data_prep/build_regions.py`, `python data_prep/build_loci.py`).
 - **ENCODE file selection** (`encode_api.py`): released, unperturbed GRCh38 "fold change over control" bigWigs; per experiment the file with the most biological replicates; experiments ranked by audit severity, then replicates, then recency. Audits rank candidates, never exclude them.
 
 ---
@@ -231,7 +234,7 @@ Prints, per cell type, how many samples were evaluated (regions without fibers a
 
 ### Cross-cell-average baseline
 
-The reference a model has to beat: for each eval sample, the mean of the **training cells'** tracks at the same window (asinh space, one vote per cell line, the evaluated cell line excluded; assays only from the lines that have them). It is scored exactly like a model: same samples, same scored positions, same region-type breakdown.
+The reference a model has to beat: for each eval sample, the mean of the **training cells'** tracks at the same window (averaged in fold change, then asinh, like a pooled population of cells; one vote per cell line, the evaluated cell line excluded; assays only from the lines that have them). Numbers from before 2026-10-20 used the mean of asinh tracks and are not comparable. It is scored exactly like a model: same samples, same scored positions, same region-type breakdown.
 
 ```bash
 # Baseline only: no checkpoint, CPU is enough (sbatch slurm_batch_command_baseline.sh)

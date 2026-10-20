@@ -66,6 +66,9 @@ def get_args():
                             help="dna_type to use as input")
     model_group.add_argument("--output_assays", type=str, nargs="+", default=["atac"],
                             help="List of assay keys the model predicts (keys of 'assays' in data_prep/encode_spec.yaml)")
+    model_group.add_argument("--fiber_aggregation", type=str, default="fc", choices=["fc", "asinh"],
+                            help="How per-fiber outputs (asinh units) form the bulk: 'fc' = asinh(mean sinh), averaged "
+                                 "in fold change; 'asinh' = plain mean (V0; assumed for checkpoints without this key)")
 
     # Individual input feature flags for hyperparameter sweeps
     model_group.add_argument("--use_individual_input_flags", action="store_true",

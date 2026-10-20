@@ -4,13 +4,14 @@ so re-running is cheap and safe.
 
   1. setup_encode.py   ENCODE bulk tracks (from encode_spec.yaml) + configs/metapaths.yaml
   2. build_regions.py  region files for training pools and val/test window sets (from regions_spec.yaml)
+  3. build_loci.py     cell-specific loci from the ENCODE tracks on the test tiles (from loci_spec.yaml)
 
 Usage (from the repo root):
     python data_prep/setup_data.py --dry-run   # report what each step would do, write nothing
     python data_prep/setup_data.py             # run every step
     sbatch data_prep/slurm_setup_data.sh       # same, as a CPU job (needs internet: ENCODE + GitHub)
 
-Steps are independent: if one fails, the others still run, and the exit code is non-zero.
+If a step fails, the later ones still run (step 3 needs steps 1 and 2), and the exit code is non-zero.
 """
 
 import argparse
@@ -29,6 +30,7 @@ def parse_args():
     p.add_argument("--workers", type=int, default=4, help="parallel ENCODE downloads")
     p.add_argument("--verify", action="store_true", help="re-hash existing ENCODE files")
     p.add_argument("--force-regions", action="store_true", help="rebuild the region files even if up to date")
+    p.add_argument("--force-loci", action="store_true", help="rebuild the cell-specific loci even if up to date")
     return p.parse_args()
 
 
@@ -40,6 +42,8 @@ def main():
                                        "--workers", str(args.workers)] + (["--verify"] if args.verify else []) + dry),
         ("Regions", ["build_regions.py", "--spec", "data_prep/regions_spec.yaml"]
                     + (["--force"] if args.force_regions else []) + dry),
+        ("Cell-specific loci", ["build_loci.py", "--spec", "data_prep/loci_spec.yaml"]
+                               + (["--force"] if args.force_loci else []) + dry),
     ]
 
     results = []

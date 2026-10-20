@@ -204,3 +204,36 @@ Old keys `num_sample_ccres` and `val_chrs` are rejected with an error pointing h
   `test/<cell>/baseline_pearson…` and `partial_pearson…`. See the root README.
 - **wandb:** the usual `test/<cell>/loss…` and `pearson…` keys, plus `test/<cell>/pearson@<region type>`
   and `loss@<region type>` (means over assays).
+
+## Cell-specific loci
+
+Tiles where one cell line's ENCODE track departs strongly from the other cell lines', the places where the
+cross-cell average is weakest and a model must read the fibers. Built by data setup step 3
+(`data_prep/build_loci.py`) from `data_prep/loci_spec.yaml` into `DATA_FIBER/regions/loci/`, from the ENCODE
+tracks alone (no fibers, no model). Not read by the runtime yet (planned: the I3 breakdown in eval).
+
+**Splits** keep the held-out cell lines independent:
+
+| Split | Cell lines | Each line compared with | Use |
+|---|---|---|---|
+| `dev` | GM12878, K562, HepG2, Panc1, H1 | the other 4 dev lines | Development and model decisions; tune the heuristic here |
+| `test` | all 8 | the other 7 lines | Milestone reports only, with the heuristic fixed on dev |
+
+Both use the chr21 tiles (`test_chr21_tiles`); the dev cells' chr21 numbers already guide decisions, which we
+accept for now (other chromosomes when we get to them).
+
+**Heuristic** (per cell line × assay × tile): cut the tile into 1 kb bins; per bin, `d = asinh(cell FC) −
+asinh(mean FC of the other lines)` (leave-one-out, averaged in FC like the baseline). Bins count only where
+the cell or the average has signal (`max ≥ 1.5` in asinh, ~FC 2). The tile's `d` is the counting bin with the
+largest `|d|`, sign kept (gain / loss). Cell-specific: `|d| ≥ 0.5`. Lines without an assay (H1/H9 ATAC) are
+skipped for it.
+
+| File | Contents |
+|---|---|
+| `loci/<split>/table.tsv` | Every tile × cell line × assay with signal: `chrom start end region_id cell assay d bin_start cell_asinh others_asinh n_others`; change the threshold without rebuilding |
+| `loci/<split>/<cell>.bed` | The line's cell-specific tiles: `chrom start end region_id assay d direction`, one row per tile and assay |
+| `loci/manifest.json` | Spec, fingerprint, counts per split × cell × assay × direction |
+
+Counts per cell × assay are in the hundreds out of 6,843 tiles. Global scale differences between ENCODE
+experiments show up as one-sided sets (e.g. HepG2 H3K9me3: ~2,600 gains, ~70 losses on dev), the per-track
+scale issue noted in `reports/TODO.md` (T4).

@@ -45,19 +45,26 @@ Update this section as the work moves on. Detailed numbers go in the dated repor
 - Pipeline: reproducible data setup (ENCODE fold-change tracks, 8 assays × 8 cell lines; region files), cell-type
   split (5 dev, 3 held out), train/val/test regions (chr20 / chr22 / chr21 tiles), fiber masks trimmed to the
   nucleosome span, scoring at positions with ≥ 5 fibers, cross-cell-average baseline and cell-specific r.
+- **V1 output aggregation is the default:** per-fiber outputs stay in asinh units, the bulk averages them in fold
+  change (asinh(mean sinh)); mixture targets and the baseline also average in FC. Results so far are V0, and
+  the baseline numbers so far used the mean of asinh tracks.
+- **Cell-specific loci** (dev: 5 dev lines, leave-one-out; test: all 8) built on the chr21 tiles by data setup.
 - **T1 (bulk recovery):** works. With enough training the dev-split model is close to the cross-cell average on
   Pearson (ahead in some dev cells, behind in Panc1 and the held-out cells) and better on MSE in most cells.
 - **T2 (held-out cell types):** the cell-specific r is positive in every cell type, held-out ones included, so the
   model carries cell-specific information from the fibers that generalizes to new cell types (supports H over
-  H0 at the population level). Wrong-cell control and cell-type-specific loci still to do.
+  H0 at the population level). Wrong-cell control and the cell-specific-loci breakdown still to do.
 
 **Known weak points**
 - Broad marks, H3K36me3 above all (far below the baseline in several cell types); likely needs longer context.
 - Training plateaus after ~60 × 1000 samples with the current LR schedule.
 
-**Next**
-- T3 (mixture-only supervision), the main test of H, with the current target scale; then T4 (scale variants).
-- Single-molecule references for the ladder (4a).
+**Next** (priority: single-molecule correctness)
+- Short V1 check run against the V0 short run (bulk should hold); rerun the baseline numbers with the FC mean.
+- T3 (mixture-only supervision), the main test of H, with V1 (I1). Its single-cell-trained upper bound doubles
+  as the V1 single-cell reference.
+- Cell-specific-loci breakdown in eval (I3), used for T2 and T3.
+- Later: per-assay scale (V2), T4 V3, single-molecule references for the ladder (4a).
 
 ## 3. Tests
 
@@ -104,8 +111,10 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
     populations fit equally well, so varying proportions is what makes per-population signal identifiable.
   - Train on chr20, evaluate on chr21 (unseen loci).
   - Evaluate: apply the model to each cell type's fibers alone; compare with that cell type's own track.
-  - First version with the current target scale (mixture = weighted mean of asinh tracks, as the code does
-    now); then repeat with the scale fixes (T4) and compare.
+  - With V1 (default): the model averages fibers in FC and the mixture target is mixed in FC, so one fixed
+    per-fiber output fits every proportion. (Under V0 with FC-mixed targets no per-fiber output would fit every
+    proportion, since the right output would depend on the proportion.) Weight the composite by each cell's
+    realized fiber coverage per position, not the nominal ratio (part of I1).
 - **Readouts.**
   - Per-cell recovery: r and MSE of each cell's prediction vs its own track, **compared with the mixture track's
     r and MSE against that cell** (the "bulk on every molecule" reference).
@@ -123,7 +132,9 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Caveat.** The model may separate populations by library-level features (global m6A density, fiber length,
   global CpG methylation) and output a cell-typical pattern, without reading local accessibility. The
   two-library control quantifies this; pairs of cell types with similar library statistics reduce it.
-- **Status.** Not started. Needs I1, I2 (and I4 for the second round).
+- **Status.** Not started. Needs I1; differential readouts can be computed in one eval pass over both cells'
+  fibers at the same window; only the fiber-origin AUC needs per-fiber outputs (I2). Differential windows come
+  from the loci tables.
 
 ### T4. Output parameterization and assay model (methodology comparison)
 
@@ -138,8 +149,9 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   cell beyond its fibers.
 - **Variants to compare.**
   - V0 (current): softplus outputs, mean compared with asinh(FC), mixtures mixed in asinh space.
-  - V1: aggregate in linear FC space, asinh of prediction and target only inside the loss; mixtures mixed in FC
-    space, then transformed.
+  - V1 (**default since 2026-10-20**, `fiber_aggregation: fc`): per-fiber outputs z_f stay in asinh units (the
+    range the network learns in); bulk = asinh(mean_f sinh(z_f)), i.e. averaged in FC, equal to z when fibers
+    agree. Mixture targets and the baseline are averaged in FC too.
   - V2: V1 + sigmoid per-fiber outputs (probability of the mark) + one affine calibration per **assay** (shared by
     all cells), and/or per-track linear target normalization in data setup (a single scale per ENCODE track, from
     the track alone; choose carefully so real global differences are not removed).
@@ -152,7 +164,8 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Readouts.** T3's fiber-level readouts (main), plus T1/T2 bulk readouts (should not get worse).
 - **Prediction.** V1–V3 improve T3/T5 readouts at equal or better bulk recovery; V3 most, because it restricts
   per-molecule outputs to physically meaningful units and lets them be sharp while the bulk stays smooth.
-- **Status.** Deferred until after T3 with V0. Needs I4 (V1/V2) and I14 (V3).
+- **Status.** V1 implemented and default (V0 = `fiber_aggregation: asinh`, also how old checkpoints load).
+  V2 (per-assay scale) and V3 after T3. Needs I4 (V2) and I14 (V3).
 
 ### T5. Within-population structure
 
@@ -280,8 +293,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 |---|---|---|---|
 | I1 | Mixture training with **variable proportions** per sample; mixture evaluator reporting per-cell-type group averages (apply to each cell's fibers alone) and the T3 readouts | T3 | `MixedCellFiberDataset` exists (fixed ratios, composite target); per-group reporting is not wired up in the current evaluator |
 | I2 | `eval.py --save_predictions`: per sample bulk prediction, target, scored-position mask (float16), plus a per-fiber summary (mean predicted mark per assay over its span); offline analysis script for pairwise / mixture readouts | T3, T5, T7 | Full per-fiber tracks are too large to save |
-| I3 | Cell-type-specific-loci breakdown in eval: windows where the target departs strongly from the cross-cell average (large \|t − b\|) | T1, T2 | Needs the baseline in the same pass |
-| I4 | Target scale: aggregate in linear FC, asinh only in the loss; mix targets in FC space; optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | Changes training: rerun references after |
+| I3 | Cell-type-specific-loci breakdown in eval: report MSE, sign accuracy and cell-specific r on each cell's loci tiles (gain / loss) | T1, T2, T3 | Loci files done (`data_prep/build_loci.py`, `regions/loci/`); eval side to do. Plain r is depressed there (range restricted on the target), so don't compare it with genome-wide r |
+| I4 | Output scale: ~~average fibers in FC (V1), mix targets and baseline in FC~~ (done); per-assay scale (V2); optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | V2 changes training: rerun references after |
 | I5 | Wrong-cell control for the cell-specific r | T2 | Score cell A's target with cell B's prediction |
 | I6 | No-CpG model run (`input_flags` with cpg = 0) + molecule-level correlation with held-out methylation | T5a | One training run |
 | I7 | chrX window set (regions spec) + bimodality analysis | T5b | Spec entry only for the windows |

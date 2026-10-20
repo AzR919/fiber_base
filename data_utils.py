@@ -231,17 +231,19 @@ class SingleCellFiberDataset(IterableDataset):
     def get_baseline(self, cell_idx, chrom, start, end):
         """
         Cross-cell-average baseline for an evaluated cell: per assay, the mean over the training cell lines (all
-        except the evaluated cell's own line) of their asinh signal at this window, i.e. in the same space as the
-        targets. Returns (bulk (K, L), mask (K,)); mask 0 where no training cell line has the assay.
+        except the evaluated cell's own line) of their fold change at this window, then asinh, i.e. averaged where
+        tracks are linear (as a pooled population of cells) and reported in the same space as the targets.
+        Returns (bulk (K, L), mask (K,)); mask 0 where no training cell line has the assay.
         """
         K, L = len(self.output_assays), end - start
-        total, count = np.zeros((K, L), dtype=np.float32), np.zeros(K, dtype=np.float32)
+        total, count = np.zeros((K, L), dtype=np.float64), np.zeros(K, dtype=np.float64)
         for i in self.baseline_index[cell_idx]:
             for k, bw in enumerate(self.baseline_bws[i]):
                 if bw is not None:
-                    total[k] += np.arcsinh(self._read_track(bw, chrom, start, end))
+                    total[k] += self._read_track(bw, chrom, start, end)
                     count[k] += 1
-        return (torch.from_numpy(total / np.maximum(count, 1)[:, None]),
+        mean_fc = total / np.maximum(count, 1)[:, None]
+        return (torch.from_numpy(np.arcsinh(mean_fc).astype(np.float32)),
                 torch.from_numpy((count > 0).astype(np.float32)))
 
     def strata_for(self, locus):
@@ -436,10 +438,11 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             cell_type_masks[ct] = mask
             current_fiber_offset += n_fibers
 
-        composite_bulk = torch.stack(
-            [self.cell_ratios[ct] * individual_bulk_targets[ct] for ct in individual_bulk_targets],
+        # Mixed in fold change, where a bulk track is linear in its molecules, then back to asinh units
+        composite_bulk = torch.asinh(torch.stack(
+            [self.cell_ratios[ct] * torch.sinh(individual_bulk_targets[ct].double()) for ct in individual_bulk_targets],
             dim=0
-        ).sum(dim=0)
+        ).sum(dim=0)).float()
 
         out_dict = {
             "fiber_features": torch.from_numpy(mixed_fiber_tensors),

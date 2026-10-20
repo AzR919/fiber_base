@@ -1,0 +1,27 @@
+# Cell-specific loci spec: tiles where one cell line's ENCODE track departs strongly from the other cell lines'.
+# data_prep/build_loci.py reads this and writes <regions_root>/loci/ (see configs/README.md, "Cell-specific loci").
+# Edit this file, never the outputs. Built from the ENCODE tracks only (no fibers, no model).
+
+# --- Inputs ---
+regions_spec: data_prep/regions_spec.yaml   # regions_root (outputs go to <regions_root>/loci/) and the tiles
+encode_spec:  data_prep/encode_spec.yaml    # encode_root: one folder per cell line with manifest.json
+tiles: test_chr21_tiles                     # window set (in <regions_root>/windows/) whose tiles are scored
+assays: [atac, h3k4me3, h3k27ac, h3k27me3, h3k4me1, h3k36me3, h3k9me3, ctcf]
+
+# --- Heuristic (per cell line x assay x tile) ---
+# Each tile is cut into bins of bin_size bp. Per bin: cell = asinh(mean FC of the cell line), others = asinh(mean
+# over the other cell lines of the split of their mean FC) (leave-one-out, averaged in FC like the baseline),
+# d = cell - others. Only bins where max(cell, others) >= min_signal count (FC ~ 1 is background, asinh(1) = 0.88;
+# 1.5 ~ FC 2.1). The tile's d is the counting bin with the largest |d| (sign kept: > 0 gain, < 0 loss).
+# A tile is cell-specific for that assay when |d| >= threshold. Tune bin_size / min_signal / threshold on dev only.
+bin_size: 1000
+min_signal: 1.5
+threshold: 0.5
+
+# --- Splits (ENCODE folder names under encode_root) ---
+# dev:  the 5 dev cell lines, each against the other 4; never touches the held-out lines' tracks. Used for
+#       development and model decisions.
+# test: all 8 cell lines, each against the other 7. For milestone reports only, with the heuristic fixed on dev.
+splits:
+  dev:  [GM12878, K562, HepG2, Panc1, H1]
+  test: [GM12878, K562, HepG2, Panc1, H1, HCT116, MCF-7, H9]

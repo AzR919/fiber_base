@@ -69,8 +69,11 @@ autocorrelated signal); use it to read plots, never to compare models.
 
 ## A7. Cross-cell-average baseline
 
-For an eval sample (cell *c*, window), per assay: **b = mean over the training cell lines except c's own line
-of asinh(their track)** at the same positions (`SingleCellFiberDataset.get_baseline`).
+For an eval sample (cell *c*, window), per assay: **b = asinh(mean over the training cell lines except c's own
+line of their fold change)** at the same positions (`SingleCellFiberDataset.get_baseline`). Averaging in FC, where
+tracks are linear, treats the lines as one pooled population, the same way the model averages its fibers
+(`fiber_aggregation: fc`). Until 2026-10-20 the baseline was the mean of asinh tracks; those numbers (e.g.
+`reports/Oct_23.md`) are not comparable with later ones.
 
 - Training cells come from the run being compared (`--baseline`: from the checkpoint; `--baseline_only`: from
   `--train_data_config`). One vote per cell line (K562_100U and K562_200U share a track). Lines without the

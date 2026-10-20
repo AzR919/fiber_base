@@ -20,14 +20,18 @@ class BaseModel(nn.Module):
     Abstract base class providing unified save and load functionality
     for all fiber-seq models.
     """
-    def __init__(self, input_flags, dna_type, output_assays=None):
+    def __init__(self, input_flags, dna_type, output_assays=None, fiber_aggregation="fc"):
         super().__init__()
         if output_assays is None:
             output_assays = ["atac"]
+        if fiber_aggregation not in FIBER_AGGREGATIONS:
+            raise ValueError(f"fiber_aggregation must be one of {FIBER_AGGREGATIONS}, got {fiber_aggregation!r}.")
+        self.fiber_aggregation = fiber_aggregation
         self.init_args = {
             "input_flags": input_flags,
             "dna_type": dna_type,
             "output_assays": output_assays,
+            "fiber_aggregation": fiber_aggregation,
         }
 
     def save_model(self, dir_name, epoch, external_config=None):
@@ -189,12 +193,22 @@ class SinusoidalPositionalEncoding(nn.Module):
         return x + self.pe[:, :seq_len, :]
 
 
-def average_fibers(processed_fibers, fiber_mask=None, fiber_coverage=None):
+FIBER_AGGREGATIONS = ("fc", "asinh")
+MAX_FIBER_ASINH = 15.0   # per-fiber clamp before sinh (float32 overflows past ~89; real targets stay below ~8)
+
+
+def average_fibers(processed_fibers, fiber_mask=None, fiber_coverage=None, aggregation="fc"):
     """
-    Bulk prediction = mean of the per-fiber predictions over the fibers present at each position.
-    processed_fibers: [B, K, L, N]. fiber_mask: [B, L, N] bool, each fiber's scored span (alignment trimmed to its
-    first..last nucleosome). Outputs outside it are zeroed, so they get no gradient, cannot carry signal and do not
-    count; the denominator is the number of fibers present. Without a mask, falls back to sum / fiber_coverage.
+    Bulk prediction from per-fiber predictions, averaged over the fibers present at each position.
+    processed_fibers: [B, K, L, N], in asinh units. fiber_mask: [B, L, N] bool, each fiber's scored span (alignment
+    trimmed to its first..last nucleosome). Outputs outside it are zeroed, so they get no gradient, cannot carry
+    signal and do not count; the denominator is the number of fibers present. Without a mask, falls back to
+    fiber_coverage as the denominator.
+    aggregation:
+      'fc'    (default): bulk = asinh(mean_f sinh(z_f)). Each fiber's output z_f is asinh of the fold change a
+              population of molecules like it would show; the average is taken in FC, where a bulk track is linear
+              in its molecules, then mapped back to asinh units. Equals z when all fibers agree. Computed in float32.
+      'asinh' (V0, old checkpoints): bulk = mean_f z_f.
     Returns (bulk [B, K, L], masked per-fiber predictions [B, K, L, N]).
     """
     if fiber_mask is not None:
@@ -205,15 +219,21 @@ def average_fibers(processed_fibers, fiber_mask=None, fiber_coverage=None):
         cov = fiber_coverage.float().unsqueeze(1)                  # [B, 1, L]
     else:
         raise ValueError("Forward pass needs fiber_mask (or fiber_coverage) to average per-fiber predictions.")
-    return processed_fibers.sum(-1) / cov.clamp(min=1), processed_fibers
+    if aggregation == "fc":
+        # sinh(0) = 0, so masked-out outputs still contribute nothing
+        fc = torch.sinh(processed_fibers.float().clamp(max=MAX_FIBER_ASINH))
+        return torch.asinh(fc.sum(-1) / cov.float().clamp(min=1)), processed_fibers
+    if aggregation == "asinh":
+        return processed_fibers.sum(-1) / cov.clamp(min=1), processed_fibers
+    raise ValueError(f"Unknown fiber aggregation {aggregation!r}; expected one of {FIBER_AGGREGATIONS}.")
 
 #--------------------------------------------------------------------------------------------------
 # Complete Model Implementations
 
 class Base01DebugModel(BaseModel):
 
-    def __init__(self, input_flags, dna_type, kernel_size=15, output_assays=None):
-        super().__init__(input_flags, dna_type, output_assays)
+    def __init__(self, input_flags, dna_type, kernel_size=15, output_assays=None, fiber_aggregation="fc"):
+        super().__init__(input_flags, dna_type, output_assays, fiber_aggregation)
 
         self.init_args["kernel_size"] = kernel_size
 
@@ -235,7 +255,7 @@ class Base01DebugModel(BaseModel):
         out_flat = self.out_conv(feat)                                   # [B*N, K, L]
         raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)       # [B, K, L, N]
         processed_fibers = self.fiber_act(raw_fibers)                    # [B, K, L, N]
-        return average_fibers(processed_fibers, fiber_mask, fiber_coverage)
+        return average_fibers(processed_fibers, fiber_mask, fiber_coverage, self.fiber_aggregation)
 
 class UNet03ConvTransformerWithDNA(BaseModel):
     """
@@ -250,8 +270,8 @@ class UNet03ConvTransformerWithDNA(BaseModel):
 
     def __init__(self, input_flags, dna_type="none",
                  kernel_size=15, emb_dims=[8, 32, 64, 128], tf_heads=4,
-                 tf_layers=2, max_len=1000, output_assays=None):
-        super().__init__(input_flags, dna_type, output_assays)
+                 tf_layers=2, max_len=1000, output_assays=None, fiber_aggregation="fc"):
+        super().__init__(input_flags, dna_type, output_assays, fiber_aggregation)
 
         assert dna_type in ("none", "ref"), f"dna_type must be 'none' or 'ref', got '{dna_type}'."
 
@@ -391,7 +411,7 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         raw_fibers = out_flat.view(B, N, K, L).permute(0, 2, 3, 1)  # [B, K, L, N]
 
         processed_fibers = self.fiber_act(raw_fibers)               # [B, K, L, N]
-        return average_fibers(processed_fibers, fiber_mask, fiber_coverage)
+        return average_fibers(processed_fibers, fiber_mask, fiber_coverage, self.fiber_aggregation)
 
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory
@@ -400,6 +420,8 @@ def model_selector(model_arg, args):
     if isinstance(args, dict):
         args = SimpleNamespace(**args)
     model_name = model_arg.lower()
+    # Checkpoints from before the option existed were trained with the V0 average in asinh space
+    fiber_aggregation = getattr(args, "fiber_aggregation", "asinh")
 
     if model_name == "base01":
         return Base01DebugModel(
@@ -407,6 +429,7 @@ def model_selector(model_arg, args):
                     dna_type=args.dna_type,
                     kernel_size=args.kernel_size,
                     output_assays=args.output_assays,
+                    fiber_aggregation=fiber_aggregation,
                 )
 
     elif model_name == "unet03":
@@ -419,6 +442,7 @@ def model_selector(model_arg, args):
                     tf_heads=args.tf_heads,
                     tf_layers=args.tf_layers,
                     output_assays=args.output_assays,
+                    fiber_aggregation=fiber_aggregation,
                 )
 
     raise NotImplementedError(f"Model not implemented: {model_arg}")
