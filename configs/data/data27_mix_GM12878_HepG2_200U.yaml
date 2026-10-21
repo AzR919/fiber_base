@@ -1,0 +1,18 @@
+# Mixture-only supervision (T3 in reports/TODO.md): every training sample pools fibers from GM12878 and HepG2_200U
+# at the same window; the target is that mixture's track (fold-change mixture weighted by each cell type's fibers
+# present at each position). Neither cell type's own track is used in training or validation. 5kb context,
+# 100 fibers per sample; GM12878's share of the fibers is drawn uniformly from [0.2, 0.8] per sample.
+# Evaluate each cell type's fibers alone against its own track: eval24 (paired), eval25 (library control).
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: mixed
+mix_range: [0.2, 0.8]
+
+# Regions (configs/README.md, Regions). Same as the dev configs. Validation mixes too (seeded per region).
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  GM12878:
+  HepG2_200U:

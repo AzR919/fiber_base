@@ -1,0 +1,17 @@
+# Library control for the mixture test (T3): HepG2_100U (A) and HepG2_200U (B), two Fiber-seq libraries of the same
+# cell line, so the same true track. Any difference the model predicts between them comes from library effects
+# (e.g. m6A labeling density), not biology: fiber-origin AUC should be ~0.5 and RMS(p_A - p_B) small next to
+# eval24's. AUC is measured at the GM12878 vs HepG2 differential bins (where eval24 measures it), on all chr21 tiles.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_tiles
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/GM12878__HepG2
+loci: [pairs/GM12878__HepG2]
+
+cell_types:
+  HepG2_100U:
+  HepG2_200U:

@@ -1,12 +1,18 @@
 """
 Data setup step 3: cell-specific loci, i.e. tiles where one cell line's ENCODE track departs strongly from the
-other cell lines' (leave-one-out). Normally run through data_prep/setup_data.py, which runs every step.
+other cell lines' (leave-one-out), and pairwise differential loci between two cell lines (for mixture tests, T3).
+Normally run through data_prep/setup_data.py, which runs every step.
 
 Reads data_prep/loci_spec.yaml (heuristic in its comments) and writes into <regions_root>/loci/:
   <split>/table.tsv     every tile x cell line x assay with signal   chrom start end region_id cell assay d
                                                                       bin_start cell_asinh others_asinh n_others
   <split>/<cell>.bed    the cell line's cell-specific tiles           chrom start end region_id assay d direction
-                        (|d| >= threshold), one row per tile and assay; direction = gain / loss
+                        (|d| >= threshold), one row per tile and assay;  bin_start
+                        direction = gain / loss, bin_start = the 1 kb bin d was measured in
+  pairs/<A>__<B>.tsv    every tile x assay with signal, d = A - B     chrom start end region_id assay d bin_start
+                                                                      a_asinh b_asinh
+  pairs/<A>__<B>.bed    differential tiles (|d| >= threshold)         chrom start end region_id assay d direction
+                                                                      bin_start (direction gain = higher in A)
   manifest.json         how everything was built, counts per split x cell x assay x direction (written last)
 
 table.tsv holds every tile where some bin passes min_signal, so the threshold can be changed without a rebuild.
@@ -94,13 +100,45 @@ def score_tiles(cell_fc, others_fc, min_signal):
     return counts.any(axis=1), d[rows, pick], pick, a[rows, pick], b[rows, pick]
 
 
+def tile_bins(t, bin_size):
+    """(T, B) indices of each tile's bins in the chromosome's bin-mean array."""
+    n_sub = int((t["end"] - t["start"]).iloc[0]) // bin_size                         # bins per tile
+    return (t["start"].to_numpy(np.int64) // bin_size)[:, None] + np.arange(n_sub)
+
+
+def build_pair(a, b, tiles, tracks, fc_cache, spec):
+    """pairs/<a>__<b>.tsv rows: d = asinh(a) - asinh(b) per tile and assay (same bins and signal rule)."""
+    out = []
+    for chrom, t in tiles.groupby("chrom", sort=False):
+        idx = tile_bins(t, spec["bin_size"])
+        for assay in spec["assays"]:
+            if assay not in tracks[a] or assay not in tracks[b]:
+                continue
+            ok, d, pick, x, y = score_tiles(fc_cache[(a, assay, chrom)][idx], fc_cache[(b, assay, chrom)][idx],
+                                            spec["min_signal"])
+            sel = t[ok]
+            out.append(pd.DataFrame({
+                "chrom": chrom, "start": sel["start"].to_numpy(), "end": sel["end"].to_numpy(),
+                "region_id": sel["region_id"].to_numpy(), "assay": assay, "d": d[ok].round(4),
+                "bin_start": sel["start"].to_numpy() + pick[ok] * spec["bin_size"],
+                "a_asinh": x[ok].round(4), "b_asinh": y[ok].round(4),
+            }))
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+
+
+def selected(table, threshold):
+    """Rows with |d| >= threshold, with direction (gain / loss)."""
+    sel = table[table["d"].abs() >= threshold].copy()
+    sel["direction"] = np.where(sel["d"] > 0, "gain", "loss")
+    return sel
+
+
 def build_split(cells, tiles, tracks, fc_cache, spec):
     """table.tsv rows for one split: each cell line against the mean of the split's other lines with the assay."""
     bin_size = spec["bin_size"]
     out = []
     for chrom, t in tiles.groupby("chrom", sort=False):
-        n_sub = int((t["end"] - t["start"]).iloc[0]) // bin_size                         # bins per tile
-        idx = (t["start"].to_numpy(np.int64) // bin_size)[:, None] + np.arange(n_sub)    # (T, B) bin indices
+        idx = tile_bins(t, bin_size)
         for assay in spec["assays"]:
             have = [c for c in cells if assay in tracks[c]]
             for cell in have:
@@ -136,9 +174,14 @@ def fingerprint(spec, regions_root, tracks):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
+def pair_name(pair):
+    return f"{pair[0]}__{pair[1]}"
+
+
 def output_paths(spec):
     return [f"{split}/table.tsv" for split in spec["splits"]] + \
-           [f"{split}/{cell}.bed" for split, cells in spec["splits"].items() for cell in cells]
+           [f"{split}/{cell}.bed" for split, cells in spec["splits"].items() for cell in cells] + \
+           [f"pairs/{pair_name(p)}.{ext}" for p in spec.get("pairs", []) for ext in ("tsv", "bed")]
 
 
 def rebuild_reason(spec, root, fp, force):
@@ -165,6 +208,11 @@ def print_summary(manifest):
             cells = "".join(f"{(str(per_assay[a]['gain']) + '/' + str(per_assay[a]['loss'])) if a in per_assay else '-':>12s}"
                             for a in assays)
             print(f"    {cell:8s}{cells}")
+    for name, info in manifest.get("pairs", {}).items():
+        print(f"  pair {name}: {info['table_rows']:,} table rows; differential tiles (higher in first / second):")
+        print("    " + "".join(f"{a:>12s}" for a in manifest["assays"]))
+        print("    " + "".join(f"{(str(info['counts'][a]['gain']) + '/' + str(info['counts'][a]['loss'])) if a in info['counts'] else '-':>12s}"
+                               for a in manifest["assays"]))
 
 
 #--------------------------------------------------------------------------------------------------
@@ -176,7 +224,8 @@ def main():
     encode_root = load_yaml(spec["encode_spec"])["encode_root"]
     root = os.path.join(regions_root, "loci")
     manifest_path = os.path.join(root, "manifest.json")
-    all_cells = list(dict.fromkeys(c for cells in spec["splits"].values() for c in cells))
+    all_cells = list(dict.fromkeys([c for cells in spec["splits"].values() for c in cells]
+                                   + [c for pair in spec.get("pairs", []) for c in pair]))
     print(f"Spec: {args.spec} | loci root: {root} | tiles: {spec['tiles']} | cell lines: {', '.join(all_cells)}",
           flush=True)
 
@@ -217,25 +266,45 @@ def main():
                    "columns: " + " ".join(table.columns)])
         counts = {}
         for cell in cells:
-            sel = table[(table["cell"] == cell) & (table["d"].abs() >= spec["threshold"])].copy()
-            sel["direction"] = np.where(sel["d"] > 0, "gain", "loss")
+            sel = selected(table[table["cell"] == cell], spec["threshold"])
             write_bed(os.path.join(root, split, f"{cell}.bed"),
-                      sel[["chrom", "start", "end", "region_id", "assay", "d", "direction"]],
+                      sel[["chrom", "start", "end", "region_id", "assay", "d", "direction", "bin_start"]],
                       [f"{cell}-specific tiles, split {split}: |d| >= {spec['threshold']} against the mean of "
                        f"{', '.join(c for c in cells if c != cell)}. Built {built} by data_prep/build_loci.py.",
                        "One row per tile and assay (a tile can appear for several assays).",
-                       "columns: chrom start end region_id assay d direction (0-based, half-open)"])
+                       "columns: chrom start end region_id assay d direction bin_start (0-based, half-open)"])
             counts[cell] = {a: {"gain": int((g["d"] > 0).sum()), "loss": int((g["d"] < 0).sum())}
                             for a, g in sel.groupby("assay")}
             for a in tracks[cell]:
                 counts[cell].setdefault(a, {"gain": 0, "loss": 0})
         splits_info[split] = {"cells": cells, "table_rows": len(table), "counts": counts}
 
+    pairs_info = {}
+    for pair in spec.get("pairs", []):
+        a, b = pair
+        name = pair_name(pair)
+        table = build_pair(a, b, tiles, tracks, fc_cache, spec)
+        write_bed(os.path.join(root, "pairs", f"{name}.tsv"), table,
+                  [f"Pairwise loci table {a} vs {b}. Built {built} by data_prep/build_loci.py from {args.spec}.",
+                   f"Rows: tiles of {spec['tiles']} with a {spec['bin_size']} bp bin where max(a, b) >= "
+                   f"{spec['min_signal']} (asinh); d = asinh(a) - asinh(b) at the counting bin with the largest |d|.",
+                   "columns: " + " ".join(table.columns)])
+        sel = selected(table, spec["threshold"])
+        write_bed(os.path.join(root, "pairs", f"{name}.bed"),
+                  sel[["chrom", "start", "end", "region_id", "assay", "d", "direction", "bin_start"]],
+                  [f"Differential tiles {a} vs {b}: |d| >= {spec['threshold']}, d = asinh({a}) - asinh({b}); "
+                   f"gain = higher in {a}. Built {built} by data_prep/build_loci.py.",
+                   "One row per tile and assay (a tile can appear for several assays).",
+                   "columns: chrom start end region_id assay d direction bin_start (0-based, half-open)"])
+        pairs_info[name] = {"cells": [a, b], "table_rows": len(table),
+                            "counts": {a_: {"gain": int((g["d"] > 0).sum()), "loss": int((g["d"] < 0).sum())}
+                                       for a_, g in sel.groupby("assay")}}
+
     manifest = {
         "built": built, "builder": "data_prep/build_loci.py", "spec": args.spec, "fingerprint": fp,
         "tiles": spec["tiles"], "n_tiles": len(tiles), "assays": spec["assays"], "bin_size": spec["bin_size"],
         "min_signal": spec["min_signal"], "threshold": spec["threshold"],
-        "encode_root": encode_root, "splits": splits_info,
+        "encode_root": encode_root, "splits": splits_info, "pairs": pairs_info,
     }
     tmp = manifest_path + ".tmp"
     with open(tmp, "w") as f:

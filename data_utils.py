@@ -58,7 +58,7 @@ class SingleCellFiberDataset(IterableDataset):
                  mode, input_flags, seed=919,
                  dna_type="none", output_assays=None,
                  samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None,
-                 baseline_cells=None):
+                 baseline_cells=None, baseline_include_own=False):
 
         if output_assays is None:
             output_assays = ["atac"]
@@ -133,7 +133,8 @@ class SingleCellFiberDataset(IterableDataset):
         self.active_feature_indices = [i for i in range(5) if self.input_flags[i]]
 
         # Cross-cell-average baseline: one source per training cell line (samples sharing an ENCODE folder, like
-        # K562_100U and K562_200U, count once); each evaluated cell averages every source except its own cell line.
+        # K562_100U and K562_200U, count once); each evaluated cell averages every source except its own cell line,
+        # or every source with baseline_include_own (the mixture reference of T3: the training mixture's track).
         self.baseline_sources, self.baseline_bws = None, None
         if baseline_cells:
             if mode != "eval":
@@ -143,7 +144,8 @@ class SingleCellFiberDataset(IterableDataset):
                 by_line.setdefault(entry["encode_dir"], [entry["bulk"].get(a) for a in self.output_assays])
             self.baseline_sources = list(by_line.items())                    # [(encode_dir, [path or None per assay])]
             own = [metadata["cell_types"][c].get("encode_dir") for c in self.cell_type_names]
-            self.baseline_index = [[i for i, (d, _) in enumerate(self.baseline_sources) if d != own_dir]
+            self.baseline_index = [[i for i, (d, _) in enumerate(self.baseline_sources)
+                                    if baseline_include_own or d != own_dir]
                                    for own_dir in own]
 
     def set_epoch(self, epoch):
@@ -231,7 +233,8 @@ class SingleCellFiberDataset(IterableDataset):
     def get_baseline(self, cell_idx, chrom, start, end):
         """
         Cross-cell-average baseline for an evaluated cell: per assay, the mean over the training cell lines (all
-        except the evaluated cell's own line) of their fold change at this window, then asinh, i.e. averaged where
+        except the evaluated cell's own line, unless baseline_include_own) of their fold change at this window,
+        then asinh, i.e. averaged where
         tracks are linear (as a pooled population of cells) and reported in the same space as the targets.
         Returns (bulk (K, L), mask (K,)); mask 0 where no training cell line has the assay.
         """
@@ -310,19 +313,27 @@ class SingleCellFiberDataset(IterableDataset):
 
 class MixedCellFiberDataset(SingleCellFiberDataset):
     """
-    Dataset that samples fibers from multiple cell types at a shared locus, concatenating
-    them into a synthetic mixed stack with per-cell-type masks and bulk targets.
+    Composite samples for mixture training (T3 in reports/TODO.md): fibers from several cell types at the same
+    window, with the bulk target that mixture would have.
 
-    mode='train': draws regions from the training pools (as SingleCellFiberDataset), retries if any
-                  cell type fails.
-    mode='eval':  iterates a fixed window set, one composite per region, skipping regions where any
-                  required cell type has insufficient fibers.
+    Proportions: with mix_range [lo, hi] (exactly 2 cell types), the first cell type's share of the fibers is drawn
+    uniformly from [lo, hi] for every sample (eval mode: seeded per region, so validation is reproducible);
+    otherwise fixed from each cell type's `ratio` in the config (uniform if absent).
+    Fibers: each cell type contributes a random subset of its fibers at the window, round(share × fibers_per_entry),
+    or all it has if fewer (the sample is then smaller, not skipped). Windows where a cell type has no fiber are
+    retried (train) or skipped (eval).
+    Target: per position x, the fold-change mixture of the cell types' tracks weighted by the fibers actually
+    present there, asinh(sum_c q_c(x) sinh(t_c(x))) with q_c(x) = cell c's fibers covering x / all fibers covering
+    x. This is exactly what the model's fiber average (fiber_aggregation fc) can match if every fiber carried its
+    cell type's value; the nominal share only decides how fibers are sampled (spans differ along the window).
+    Extra keys: fiber_origin (N,) int64 (index into cell_type_names, -1 = padding), mix_fraction (n_cells,) the
+    realized share of fibers, cell_targets (n_cells, K, L) each cell type's own track.
     """
 
     def __init__(self, metadata, fibers_per_entry, context_length,
                  input_flags, mode='eval', seed=919,
                  dna_type="none", output_assays=None,
-                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None):
+                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None, mix_range=None):
 
         super().__init__(
             metadata=metadata,
@@ -339,176 +350,103 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             max_regions=max_regions,
         )
 
-        try:
-            meta_cell_ratios = {ct: metadata["cell_types"][ct]["ratio"] for ct in metadata["cell_types"].keys()}
-        except Exception:
-            print("Failed to extract cell ratio from meta. Falling back to uniform distribution")
-            meta_cell_ratios = None
-
-        self.cell_ratios = self._setup_mixing_ratios(meta_cell_ratios)
-        self.fiber_counts_per_cell = self._calculate_fiber_counts()
+        if mix_range is not None:
+            lo, hi = (float(v) for v in mix_range)
+            if self.num_cell_types != 2 or not 0 <= lo <= hi <= 1:
+                raise ValueError(f"mix_range {mix_range} needs exactly 2 cell types and 0 <= lo <= hi <= 1 "
+                                 f"(cell types: {self.cell_type_names}).")
+            self.mix_range = (lo, hi)
+        else:
+            self.mix_range = None
+            ratios = [(metadata["cell_types"][ct] or {}).get("ratio", 1.0) for ct in self.cell_type_names]
+            self.fixed_shares = [r / sum(ratios) for r in ratios]
 
     @property
     def expected_samples(self):
         """Eval mode: one composite per region if none is skipped."""
         return len(self.region_list)
 
-    def _setup_mixing_ratios(self, cell_ratios):
-        if cell_ratios is None:
-            uniform_p = 1.0 / self.num_cell_types
-            return {ct: uniform_p for ct in self.cell_type_names}
-        total_p = sum(cell_ratios.values())
-        return {ct: cell_ratios[ct] / total_p for ct in self.cell_type_names}
+    def _draw_shares(self, rng):
+        if self.mix_range is None:
+            return self.fixed_shares
+        p = rng.uniform(*self.mix_range)
+        return [p, 1.0 - p]
 
-    def _calculate_fiber_counts(self):
-        counts = {}
-        allocated = 0
-        sorted_cts = sorted(self.cell_type_names)
-        for i, ct in enumerate(sorted_cts):
-            if i == len(sorted_cts) - 1:
-                counts[ct] = self.fibers_per_entry - allocated
-            else:
-                c = int(round(self.cell_ratios[ct] * self.fibers_per_entry))
-                counts[ct] = c
-                allocated += c
-        return counts
+    def _sample(self, rng, locus):
+        """One composite at a window, or None if some cell type has no fiber there."""
+        N = self.fibers_per_entry
+        shares = self._draw_shares(rng)
+        wanted = [int(round(s * N)) for s in shares[:-1]]
+        wanted.append(N - sum(wanted))
 
-    def _sample_single_cell_type(self, cell_idx, ct, locus):
-        n_fibers_needed = self.fiber_counts_per_cell[ct]
-        if n_fibers_needed == 0:
-            return None
+        picked = []
+        for cell_idx, n_want in enumerate(wanted):
+            fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
+            if fibers["n_fibers"] == 0:
+                return None
+            take = min(n_want, fibers["n_fibers"])
+            idx = sorted(rng.sample(range(fibers["n_fibers"]), take))   # random subset, not the first by start
+            picked.append((cell_idx, fibers, torch.tensor(idx, dtype=torch.long)))
 
-        fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
+        C, L, K = len(self.input_features), self.context_length, len(self.output_assays)
+        features = torch.zeros(C, L, N)
+        mask = torch.zeros(L, N, dtype=torch.bool)
+        origin = torch.full((N,), -1, dtype=torch.long)
+        dna = torch.zeros(4, L, N) if self.return_fiber_dna else None
+        cell_targets = torch.zeros(self.num_cell_types, K, L)
+        offset = 0
+        for cell_idx, fibers, idx in picked:
+            n = len(idx)
+            if n:
+                features[:, :, offset:offset + n] = fibers["fiber_features"][:, :, idx]
+                mask[:, offset:offset + n] = fibers["fiber_mask"][:, idx]
+                if dna is not None:
+                    dna[:, :, offset:offset + n] = fibers["fiber_dna_tensor"][:, :, idx]
+            origin[offset:offset + n] = cell_idx
+            cell_targets[cell_idx] = self.get_other_bw_data(cell_idx, *locus)
+            offset += n
 
-        if fibers["n_fibers"] < n_fibers_needed:
-            return None
+        # Per-position share of each cell type among the fibers present -> fold-change mixture of their tracks
+        cov = torch.stack([mask[:, origin == c].sum(-1) for c in range(self.num_cell_types)]).double()   # (n_cells, L)
+        q = cov / cov.sum(0).clamp(min=1)
+        target = torch.asinh((q[:, None, :] * torch.sinh(cell_targets.double())).sum(0)).float()      # (K, L)
 
-        bw_tensor = self.get_other_bw_data(cell_idx, *locus)
-
-        fiber_dna_tensor = fibers["fiber_dna_tensor"]
-        trimmed_dna_tensor = (
-            fiber_dna_tensor[:, :, :n_fibers_needed]
-            if (self.return_fiber_dna and fiber_dna_tensor is not None)
-            else None
-        )
-        trimmed_mask = fibers["fiber_mask"][:, :n_fibers_needed]
-
-        return {
-            "cell_type": ct,
-            "fiber_features": fibers["fiber_features"][:, :, :n_fibers_needed],
-            "target_bulk": bw_tensor,
-            "assay_mask": self.assay_masks[cell_idx],
-            "fiber_dna_tensor": trimmed_dna_tensor,
-            "n_fibers": n_fibers_needed,
-            "fiber_mask": trimmed_mask,
-            "fiber_coverage": trimmed_mask.sum(dim=-1).float(),  # only the fibers kept in the mix
-        }
-
-    def _build_composite_sample(self, locus, cell_samples):
-        mixed_fiber_tensors = np.zeros(
-            (len(self.input_features), self.context_length, self.fibers_per_entry), dtype=np.float32
-        )
-        mixed_dna_tensors = (
-            np.zeros((4, self.context_length, self.fibers_per_entry), dtype=np.float32)
-            if self.return_fiber_dna else None
-        )
-
-        cell_type_masks = {}
-        individual_bulk_targets = {}
-        mixed_fiber_mask = torch.zeros(self.context_length, self.fibers_per_entry, dtype=torch.bool)
-        current_fiber_offset = 0
-
-        for sample in cell_samples:
-            ct = sample["cell_type"]
-            n_fibers = sample["n_fibers"]
-
-            individual_bulk_targets[ct] = sample["target_bulk"]
-            mixed_fiber_tensors[:, :, current_fiber_offset:current_fiber_offset + n_fibers] = (
-                sample["fiber_features"][:, :, :n_fibers]
-            )
-            mixed_fiber_mask[:, current_fiber_offset:current_fiber_offset + n_fibers] = sample["fiber_mask"][:, :n_fibers]
-
-            if self.return_fiber_dna and sample["fiber_dna_tensor"] is not None:
-                mixed_dna_tensors[:, :, current_fiber_offset:current_fiber_offset + n_fibers] = (
-                    sample["fiber_dna_tensor"][:, :, :n_fibers]
-                )
-
-            mask = torch.zeros(self.fibers_per_entry, dtype=torch.bool)
-            mask[current_fiber_offset:current_fiber_offset + n_fibers] = True
-            cell_type_masks[ct] = mask
-            current_fiber_offset += n_fibers
-
-        # Mixed in fold change, where a bulk track is linear in its molecules, then back to asinh units
-        composite_bulk = torch.asinh(torch.stack(
-            [self.cell_ratios[ct] * torch.sinh(individual_bulk_targets[ct].double()) for ct in individual_bulk_targets],
-            dim=0
-        ).sum(dim=0)).float()
-
-        out_dict = {
-            "fiber_features": torch.from_numpy(mixed_fiber_tensors),
-            "target_bulk": composite_bulk,
+        out = {
+            "fiber_features": features,
+            "target_bulk": target,
             # A mixed target is only valid for assays every contributing cell type has
-            "assay_mask": torch.stack([s["assay_mask"] for s in cell_samples]).prod(dim=0),
-            "cell_type": "mixed",
-            "cell_type_targets": individual_bulk_targets,
-            "cell_type_masks": cell_type_masks,
-            "n_fibers": current_fiber_offset,
-            "fiber_mask": mixed_fiber_mask,
-            "fiber_coverage": mixed_fiber_mask.sum(dim=-1).float(),
+            "assay_mask": torch.stack([self.assay_masks[c] for c in range(self.num_cell_types)]).prod(dim=0),
+            "n_fibers": offset,
+            "fiber_mask": mask,
+            "fiber_coverage": mask.sum(-1).float(),
+            "fiber_origin": origin,
+            "mix_fraction": torch.tensor([(origin == c).sum().item() / offset for c in range(self.num_cell_types)]),
+            "cell_targets": cell_targets,
             "locus": locus,
-            "mixing_ratios": self.cell_ratios,
+            "cell_type": "mixed",
         }
-
         if self.return_ref_genome:
-            out_dict["ref_dna"] = self.onehot_for_locus(locus).T
-
-        if self.return_fiber_dna:
-            out_dict["fiber_dna_tensor"] = torch.from_numpy(mixed_dna_tensors)
-
-        return out_dict
+            out["ref_dna"] = self.onehot_for_locus(locus).T
+        if dna is not None:
+            out["fiber_dna_tensor"] = dna
+        return out
 
     def __iter__(self):
         self.init_worker_resources()
 
         if self.mode == "train":
             for _ in range(self._train_samples()):
-                found = False
-                while not found:
-                    locus = self.window_at(*self.sampler.sample_centre(self.rng))
+                sample = None
+                while sample is None:
+                    sample = self._sample(self.rng, self.window_at(*self.sampler.sample_centre(self.rng)))
+                yield sample
 
-                    cell_samples = []
-                    failed = False
-                    for cell_idx, ct in enumerate(self.cell_type_names):
-                        sample = self._sample_single_cell_type(cell_idx, ct, locus)
-                        if sample is None and self.fiber_counts_per_cell[ct] > 0:
-                            failed = True
-                            break
-                        if sample is not None:
-                            cell_samples.append(sample)
-
-                    if not failed and cell_samples:
-                        found = True
-
-                yield self._build_composite_sample(locus, cell_samples)
-
-        else:  # eval mode: deterministic, no retry
+        else:  # eval mode: deterministic (proportions and fiber subsets seeded per region), no retry
             for region in self._eval_regions():
                 locus = self.window_for_region(region)
-                cell_samples = []
-                failed_sampling = False
-
-                for cell_idx, ct in enumerate(self.cell_type_names):
-                    sample = self._sample_single_cell_type(cell_idx, ct, locus)
-                    if sample is None and self.fiber_counts_per_cell[ct] > 0:
-                        failed_sampling = True
-                        break
-                    if sample is not None:
-                        cell_samples.append(sample)
-
-                if failed_sampling or not cell_samples:
+                sample = self._sample(random.Random(f"{self.seed}:{region[0]}:{region[1]}"), locus)
+                if sample is None:
                     continue
-
-                sample = self._build_composite_sample(locus, cell_samples)
                 sample["strata"] = self.strata_for(locus)
                 yield sample
 

@@ -53,6 +53,9 @@ def get_args():
     data_group.add_argument("--dataset_type", type=str, default="single",
                             choices=["single", "mixed"],
                             help="Dataset mode: 'single' (one cell type per sample) or 'mixed' (composite)")
+    data_group.add_argument("--mix_range", type=float, nargs=2, default=None,
+                            help="Mixed datasets with 2 cell types: the first cell type's share of the fibers is drawn "
+                                 "uniformly from [lo, hi] per sample (default: fixed ratios from the data config)")
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")

@@ -1,0 +1,14 @@
+# Mixture composites, MINI: GM12878 + HepG2_200U fibers pooled at each of the 2,000 test_chr21_mini2000 tiles, with
+# GM12878's share drawn from [0.2, 0.8] (seeded per tile), scored against the mixture target. Checks that a model
+# trained with data27 learned its training objective on unseen loci (the mixture analogue of the single-cell eval).
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_mini2000
+seed: 919
+dataset_type: mixed
+mix_range: [0.2, 0.8]
+
+cell_types:
+  GM12878:
+  HepG2_200U:

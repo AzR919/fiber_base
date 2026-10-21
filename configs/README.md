@@ -11,7 +11,7 @@ cell-type split. Update this file whenever that logic changes.
 | `reference.yaml` | Reference genome, `regions_root`, training chromosomes | Hand-edited (merged into metapaths by `load_metapaths`) |
 | *(cluster)* `DATA_FIBER/regions/` | Region files: training pools, val/test window sets (see Regions below) | **Generated** by data setup (step 2) from `data_prep/regions_spec.yaml`; referenced from configs by name |
 | `data/dataNN_*.yaml` | Training data: which fiber samples, context length, fibers per sample, training regions, validation window set | Hand |
-| `evals/evalNN_*.yaml` | Evaluation: one sample + a test window set each (`_mini` = `test_chr21_mini2000`) | Hand |
+| `evals/evalNN_*.yaml` | Evaluation: one sample (or a pair, for the mixture test) + a test window set each (`_mini` = `test_chr21_mini2000`) | Hand |
 | `models/modelNN_*.yaml` | Architecture, inputs, output assays | Hand |
 | `training/trainNN.yaml` | Epochs, iterations, batch size, lr, seed | Hand |
 | `old_configs/` | Retired configs, kept for reproducing old runs | — |
@@ -210,7 +210,8 @@ Old keys `num_sample_ccres` and `val_chrs` are rejected with an error pointing h
 Tiles where one cell line's ENCODE track departs strongly from the other cell lines', the places where the
 cross-cell average is weakest and a model must read the fibers. Built by data setup step 3
 (`data_prep/build_loci.py`) from `data_prep/loci_spec.yaml` into `DATA_FIBER/regions/loci/`, from the ENCODE
-tracks alone (no fibers, no model). Not read by the runtime yet (planned: the I3 breakdown in eval).
+tracks alone (no fibers, no model). Read at eval time through the eval config keys `loci` / `pair_loci`
+(`regions.Loci`).
 
 **Splits** keep the held-out cell lines independent:
 
@@ -231,9 +232,34 @@ skipped for it.
 | File | Contents |
 |---|---|
 | `loci/<split>/table.tsv` | Every tile × cell line × assay with signal: `chrom start end region_id cell assay d bin_start cell_asinh others_asinh n_others`; change the threshold without rebuilding |
-| `loci/<split>/<cell>.bed` | The line's cell-specific tiles: `chrom start end region_id assay d direction`, one row per tile and assay |
+| `loci/<split>/<cell>.bed` | The line's cell-specific tiles: `chrom start end region_id assay d direction bin_start`, one row per tile and assay (`bin_start`: the 1 kb bin `d` was measured in) |
 | `loci/manifest.json` | Spec, fingerprint, counts per split × cell × assay × direction |
+
+**Pairs** (`pairs:` in the spec; mixture test T3): `loci/pairs/<A>__<B>.{tsv,bed}` with `d = asinh(A) −
+asinh(B)` on the same bins and rules (gain = higher in A). `pairs/GM12878__HepG2` is the one we use.
+
+Eval configs use them through `loci:` (breakdown, e.g. `[pairs/GM12878__HepG2, "dev/{line}"]`, `{line}` = each
+evaluated cell's own line) and `pair_loci:` (differential bins of the paired readouts); see the root README.
 
 Counts per cell × assay are in the hundreds out of 6,843 tiles. Global scale differences between ENCODE
 experiments show up as one-sided sets (e.g. HepG2 H3K9me3: ~2,600 gains, ~70 losses on dev), the per-track
 scale issue noted in `reports/TODO.md` (T4).
+
+## Mixture test (T3)
+
+Does the model resolve molecules, or paint the bulk onto every one? Train with **mixtures only** and check that
+each cell type's own fibers give back its own track (design and readouts: `reports/TODO.md`, T3; how to run: root
+README, "Mixture test").
+
+| Config | Role |
+|---|---|
+| `data27_mix_GM12878_HepG2_200U` | Mixture training: every sample pools GM12878 + HepG2_200U fibers, GM12878's share drawn from [0.2, 0.8]; target = the mixture's track (weighted by the fibers present at each position); validation mixes too, so neither own track is ever seen |
+| `data28_GM12878_HepG2_200U` | Upper bound: the same cells trained as single cell types on their own tracks |
+| `eval24_pair_GM12878_HepG2_200U` (+ `_mini`) | Each cell's fibers alone, paired at every chr21 tile: recovery, differential r, sign accuracy, fiber-origin AUC |
+| `eval25_pair_HepG2_100U_200U` (+ `_mini`) | Library control: two HepG2 libraries, one true track |
+| `eval26_mix_GM12878_HepG2_200U_mini` | Composites against the mixture target (did the model learn its objective?) |
+
+Pair choice: GM12878 + HepG2 are both dev cells with very different chromatin. GM12878's library comes from a
+different Fiber-seq experiment than the HepG2 "PS013xx" series, so library effects could separate them on their
+own; the library control (`eval25`) measures how much of a difference library effects alone produce.
+

@@ -1,0 +1,18 @@
+# Paired eval for the mixture test (T3), MINI: as eval24 on the 2,000 chr21 tiles of test_chr21_mini2000. GM12878 (A),
+# HepG2_200U (B), each cell type's fibers alone. Per cell type: recovery of its own track (run eval.py with --baseline
+# --mixture_reference for the mixture track as reference and the cell-specific r given it). Paired: differential
+# r corr(p_A - p_B, t_A - t_B), sign accuracy and fiber-origin AUC at the GM12878 vs HepG2 differential bins.
+# Breakdown by the pairwise loci and by each cell type's own dev loci.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_mini2000
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/GM12878__HepG2
+loci: [pairs/GM12878__HepG2, "dev/{line}"]
+
+cell_types:
+  GM12878:
+  HepG2_200U:

@@ -1,0 +1,14 @@
+# Debug/test mixture eval (smoke tests of eval26-style configs): GM12878 + HepG2_200U composites on 5 tiles of
+# test_chr21_mini2000, GM12878's share from [0.2, 0.8], 5kb context, 100 fibers.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_mini2000
+max_regions: 5
+seed: 919
+dataset_type: mixed
+mix_range: [0.2, 0.8]
+
+cell_types:
+  GM12878:
+  HepG2_200U:

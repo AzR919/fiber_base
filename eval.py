@@ -16,7 +16,9 @@ Usage:
                    --eval_configs configs/evals/eval21_GM12878.yaml [more...]
 
 --baseline adds the baseline (training cells read from the checkpoint) next to the model, plus the cell-specific
-correlation (partial correlation of prediction and target given the baseline). The baseline reads every training cell's tracks for
+correlation (partial correlation of prediction and target given the baseline). With --mixture_reference the
+baseline includes the evaluated cell's own line: for a model trained on mixtures of its training cells (T3) it is
+the mixture track, i.e. what predicting the mixture bulk on every molecule would score. The baseline reads every training cell's tracks for
 each sample, so it is slow; it depends only on the data, so run it once per training set with --baseline_only.
 """
 
@@ -47,6 +49,9 @@ def parse_args():
                         help="One or more eval YAML config paths, one per cell type.")
     parser.add_argument("--baseline", action="store_true",
                         help="Also score the cross-cell-average baseline of the checkpoint's training cells.")
+    parser.add_argument("--mixture_reference", action="store_true",
+                        help="Baseline = mean of all training cells including the evaluated cell's own line "
+                             "(the mixture reference of T3) instead of the cross-cell average without it.")
     parser.add_argument("--baseline_only", action="store_true",
                         help="Score only the cross-cell-average baseline (no checkpoint); needs --train_data_config.")
     parser.add_argument("--train_data_config", type=str, default=None,
@@ -134,6 +139,7 @@ def main():
     summary = run_final_eval(
         model, args.eval_configs, train_args_ns, wandb_run, args.device,
         plots_output_dir=plots_dir, baseline_cells=baseline_cells, output_assays=output_assays,
+        output_dir=output_dir, baseline_include_own=args.mixture_reference,
     )
 
     if wandb_run is not None:
@@ -145,6 +151,7 @@ def main():
     out_json = os.path.join(output_dir, "eval_summary.json")
     with open(out_json, "w") as f:
         json.dump({"checkpoint": args.checkpoint, "baseline_train_cells": baseline_cells,
+                   "baseline_include_own": args.mixture_reference,
                    "train_data_config": args.train_data_config, "results": summary}, f, indent=4)
     print(f"Summary saved to: {out_json}")
 

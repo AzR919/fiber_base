@@ -25,3 +25,8 @@ threshold: 0.5
 splits:
   dev:  [GM12878, K562, HepG2, Panc1, H1]
   test: [GM12878, K562, HepG2, Panc1, H1, HCT116, MCF-7, H9]
+
+# --- Pairs (mixture tests, T3): d = asinh(A) - asinh(B) per bin, same bins / min_signal / threshold.
+# Writes pairs/<A>__<B>.{tsv,bed}; gain = higher in A.
+pairs:
+  - [GM12878, HepG2]

@@ -3,6 +3,7 @@ Runtime access to the region files built by data_prep/build_regions.py (see conf
 
 - Regions:      reads <regions_root>/: manifest, allowed centres, fixed window sets, per-bp cCRE classes.
 - TrainSampler: draws training region centres from the pools on the training chromosomes.
+- Loci:         a cell-specific / pairwise loci set (data_prep/build_loci.py) for breakdowns in eval.
 
 A region is the scored interval stored in the files; the dataset builds its input window
 (context_length bp) centred on the region.
@@ -74,6 +75,32 @@ class Regions:
             if b > start:
                 masks[cls, max(a, start) - start:min(b, end) - start] = True
         return masks
+
+
+class Loci:
+    """
+    One cell-specific or pairwise loci set built by data_prep/build_loci.py (configs/README.md, "Cell-specific
+    loci"): <regions_root>/loci/<name>.bed, e.g. 'dev/HepG2' or 'pairs/GM12878__HepG2'. lookup(chrom, tile_start,
+    assays) -> (d (K,), bin_start (K,)): the tile's d per assay (0 = not in the set for that assay) and the start
+    of the 1 kb bin it was measured in (-1 if not in the set).
+    """
+    def __init__(self, regions_root, name):
+        path = os.path.join(regions_root, "loci", f"{name}.bed")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Loci set '{name}' not found ({path}); build it with data_prep/build_loci.py.")
+        with open(os.path.join(regions_root, "loci", "manifest.json")) as f:
+            self.bin_size = json.load(f)["bin_size"]
+        df = _read_bed(path, ["chrom", "start", "end", "region_id", "assay", "d", "direction", "bin_start"])
+        self.name = name
+        self.tiles = {}
+        for chrom, start, assay, d, b in zip(df["chrom"], df["start"], df["assay"], df["d"], df["bin_start"]):
+            self.tiles.setdefault((chrom, int(start)), {})[assay] = (float(d), int(b))
+
+    def lookup(self, chrom, tile_start, assays):
+        entry = self.tiles.get((chrom, int(tile_start)), {})
+        d = np.array([entry.get(a, (0.0, -1))[0] for a in assays], dtype=np.float32)
+        b = np.array([entry.get(a, (0.0, -1))[1] for a in assays], dtype=np.int64)
+        return d, b
 
 
 class TrainSampler:

@@ -1,0 +1,15 @@
+# Upper bound for the mixture test (T3): the same two cell types as data27 (GM12878, HepG2_200U) trained as single
+# cell types, each sample on its own track. Same windows, context and fibers as data27; compare on eval24/eval25.
+# Single-cell training (each sample drawn from one randomly chosen cell type). 5kb context, 100 fibers per sample.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+# Regions (configs/README.md, Regions). Same as the dev configs.
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  GM12878:
+  HepG2_200U:

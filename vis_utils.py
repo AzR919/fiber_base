@@ -5,6 +5,7 @@ Base functions accept numpy arrays; _t wrapper functions accept torch tensors.
 
 import os
 import math
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -641,3 +642,193 @@ def plot_dna_tensor_logo_t(dna_tensor_t, region_slice=None, title="Fiber Consens
         dna_tensor_t = dna_tensor_t[0]
     dna_arr = dna_tensor_t.cpu().detach().float().numpy()
     return plot_dna_tensor_logo(dna_arr, region_slice, title)
+
+
+#--------------------------------------------------------------------------------------------------
+# Paired readouts (two cell types at the same windows; mixture test T3, see evaluator.py)
+
+PAIR_COLORS = ["tab:blue", "tab:red"]
+PAIR_PRED_COLORS = ["navy", "darkred"]    # predictions: darker shades of the same hues
+
+
+def _np(x):
+    return x.detach().cpu().float().numpy() if hasattr(x, "detach") else np.asarray(x)
+
+
+PAIRED_FILL_ORDER = ["atac", "h3k27ac", "h3k4me3", "h3k4me1", "ctcf", "h3k27me3", "h3k36me3", "h3k9me3"]
+
+
+def _paired_assays(d, output_assays, max_assays):
+    """Assays for a paired dashboard: the differential ones by |d| (largest first), then the rest in a fixed order
+    (PAIRED_FILL_ORDER, then any other), up to max_assays."""
+    picked = [int(k) for k in np.argsort(-np.abs(d), kind="stable") if d[k] != 0]
+    rank = {a: i for i, a in enumerate(PAIRED_FILL_ORDER)}
+    rest = sorted((k for k in range(len(output_assays)) if k not in picked),
+                  key=lambda k: rank.get(output_assays[k], len(rank) + k))
+    return (picked + rest)[:max_assays]
+
+
+def _render_paired_assay(fig, cell_spec, rec, k, assay, cells, bs):
+    """One assay of a paired dashboard in one grid cell: track panel above, per-fiber heatmap below."""
+    sub = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=cell_spec, height_ratios=[2, 3], hspace=0.08)
+    d = float(rec["d"][k])
+    tA, tB = _np(rec["target"][0][k]), _np(rec["target"][1][k])
+    pA, pB = _np(rec["pred"][0][k]), _np(rec["pred"][1][k])
+    mix = np.arcsinh(0.5 * np.sinh(tA.astype(np.float64)) + 0.5 * np.sinh(tB.astype(np.float64)))
+    b0 = int(rec["rel_bins"][k])
+
+    ax = fig.add_subplot(sub[0])
+    if b0 >= 0:
+        ax.axvspan(b0, b0 + bs, color="gold", alpha=0.25, lw=0, label="Differential bin")
+    # Tracks as light filled areas, predictions as bold lines, so the two read apart at a glance
+    x = np.arange(len(tA))
+    for t, c, name in ((tA, PAIR_COLORS[0], cells[0]), (tB, PAIR_COLORS[1], cells[1])):
+        ax.fill_between(x, 0, t, color=c, alpha=0.18, lw=0, label=f"{name} track")
+        ax.plot(x, t, color=c, lw=0.7, alpha=0.6)
+    ax.plot(x, mix, color="black", lw=1.0, ls="--", alpha=0.7, label="50:50 mixture track")
+    for p, c, name in ((pA, PAIR_PRED_COLORS[0], cells[0]), (pB, PAIR_PRED_COLORS[1], cells[1])):
+        ax.plot(x, p, color=c, lw=2.4, label=f"{name} prediction (own fibers)")
+    ax.set_ylabel("asinh FC", fontsize=FS_LABEL)
+    diff = f"d = {d:+.2f}" if d != 0 else "not differential here"
+    ax.set_title(f"{assay}  |  {diff}", fontsize=FS_TITLE, fontweight="bold")
+    ax.tick_params(labelsize=FS_TICK, labelbottom=False)
+    ax.set_xlim(0, len(tA))
+
+    blocks = []
+    for c in range(2):
+        f, m = _np(rec["fibers"][c][k]), _np(rec["fiber_mask"][c]).astype(bool)   # (L, n), (L, n)
+        vals = np.where(m, f, np.nan)
+        lo, hi = (b0, b0 + bs) if b0 >= 0 else (0, vals.shape[0])   # sort by the bin, or the whole window
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)   # fibers not covering the bin: NaN key
+            key = np.nanmean(vals[lo:hi], axis=0)
+        vals = vals[:, np.argsort(-np.nan_to_num(key, nan=-np.inf), kind="stable")]
+        blocks.append(vals.T)
+    mat = np.concatenate(blocks, axis=0)
+    axh = fig.add_subplot(sub[1], sharex=ax)
+    cmap = plt.get_cmap("magma").copy()
+    cmap.set_bad("white")
+    img = axh.imshow(np.ma.masked_invalid(mat), aspect="auto", cmap=cmap, interpolation="nearest",
+                     extent=[0, mat.shape[1], mat.shape[0], 0])
+    n_a = blocks[0].shape[0]
+    axh.axhline(n_a, color="cyan", lw=2)
+    if b0 >= 0:
+        for x in (b0, b0 + bs):
+            axh.axvline(x, color="gold", lw=1, ls="--")
+    axh.set_yticks([n_a / 2, n_a + blocks[1].shape[0] / 2])
+    axh.set_yticklabels([f"{cells[0]}\n({n_a})", f"{cells[1]}\n({blocks[1].shape[0]})"], fontsize=FS_TICK)
+    for lab, c in zip(axh.get_yticklabels(), PAIR_COLORS):
+        lab.set_color(c)
+    axh.set_xlabel("Position in window (bp)", fontsize=FS_LABEL)
+    axh.tick_params(labelsize=FS_TICK)
+    # Colorbar in an inset outside the axes, so the heatmap keeps the track panel's width (shared x stays aligned)
+    cax = axh.inset_axes([1.01, 0, 0.015, 1])
+    fig.colorbar(img, cax=cax).set_label("Per-fiber prediction", fontsize=FS_LABEL - 2)
+    return ax
+
+
+def plot_paired_locus(rec, output_assays, max_assays=4, ncols=2):
+    """
+    One window seen through both cell types' fibers, as a grid of assays (default 2 x 2; max_assays=8 for all).
+    Assays: those differential at this window (pairwise loci), largest |d| first, then filled in a fixed order
+    (ATAC, H3K27ac, H3K4me3, H3K4me1, ...), so a dashboard always shows max_assays panels. Per assay:
+      track panel: each cell's ENCODE track (light filled area), their 50:50 fold-change mixture (dashed: what a
+                   model predicting the mixture bulk on every molecule would give both), and the model's prediction
+                   from each cell's own fibers (bold line); the differential bin is shaded.
+      heatmap:     every fiber's prediction, A's fibers above B's (each block sorted by its mean over the bin, or
+                   the window if the assay has no bin); white = outside the fiber's span. Separation by origin at
+                   the bin is the single-molecule signal.
+    rec: a paired dashboard record from Evaluator (_complete_pair).
+    """
+    d = np.asarray(rec["d"])
+    order = _paired_assays(d, output_assays, max_assays)
+    cells, bs = rec["cells"], rec["bin_size"]
+    nrows = int(math.ceil(len(order) / ncols))
+    height = 7 * nrows
+    fig = plt.figure(figsize=(11 * ncols, height))
+    # Fixed space (in inches) at the top for the title and legend, whatever the number of rows
+    grid = gridspec.GridSpec(nrows, ncols, figure=fig, hspace=0.32, wspace=0.32, top=1 - 1.6 / height)
+    first = None
+    for j, k in enumerate(order):
+        ax = _render_paired_assay(fig, grid[j // ncols, j % ncols], rec, k, output_assays[k], cells, bs)
+        first = first or ax
+    chrom, start, end = rec["locus"]
+    fig.suptitle(f"{chrom}:{start:,}-{end:,}  |  {cells[0]} vs {cells[1]}  |  d = asinh {cells[0]} - asinh {cells[1]}",
+                 fontsize=FS_SUPTITLE, fontweight="bold", y=1 - 0.25 / height)
+    handles, labels = first.get_legend_handles_labels()
+    if "Differential bin" not in labels:   # first panel not differential: still explain the shading
+        handles.insert(0, plt.Rectangle((0, 0), 1, 1, color="gold", alpha=0.25))
+        labels.insert(0, "Differential bin")
+    fig.legend(handles, labels, loc="upper center", ncol=6, frameon=False, fontsize=FS_LEGEND,
+               bbox_to_anchor=(0.5, 1 - 0.75 / height))
+    return fig
+
+
+def plot_differential_scatter(tiles, output_assays, cells):
+    """
+    Per assay: each window's mean target difference t_A - t_B (x) against the mean predicted difference p_A - p_B
+    (y), over positions scored in both. A model predicting the same thing for both cell types sits on y = 0;
+    a model reading each cell's fibers follows the diagonal trend. Differential tiles of the pairwise loci are
+    coloured by the cell type with the higher track. r = Pearson over windows.
+    """
+    K = len(output_assays)
+    ncol = min(4, K)
+    nrow = int(math.ceil(K / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 4.0 * nrow), squeeze=False)
+    for k, a in enumerate(output_assays):
+        ax = axes[k // ncol][k % ncol]
+        ok = tiles["n_win"][:, k] > 0
+        x, y, d = tiles["dt_win"][ok, k], tiles["dp_win"][ok, k], tiles["d"][ok, k]
+        if len(x) < 3:
+            ax.set_title(f"{a}: no data", fontsize=FS_LABEL)
+            ax.axis("off")
+            continue
+        ax.scatter(x[d == 0], y[d == 0], s=3, color="lightgray", alpha=0.5, lw=0, label="other windows")
+        for sign, c, name in ((1, PAIR_COLORS[0], f"higher in {cells[0]}"), (-1, PAIR_COLORS[1], f"higher in {cells[1]}")):
+            m = np.sign(d) == sign
+            ax.scatter(x[m], y[m], s=6, color=c, alpha=0.6, lw=0, label=name)
+        ax.axhline(0, color="k", lw=0.6)
+        ax.axvline(0, color="k", lw=0.6)
+        r = np.corrcoef(x, y)[0, 1] if np.std(x) > 0 and np.std(y) > 0 else float("nan")
+        ax.set_title(f"{a}  |  r = {_fmt_r(r)}  (n = {len(x):,})", fontsize=FS_LABEL)
+        ax.set_xlabel(f"target {cells[0]} - {cells[1]}", fontsize=FS_TICK)
+        ax.set_ylabel("predicted difference", fontsize=FS_TICK)
+        if k == 0:
+            ax.legend(fontsize=FS_TICK - 3, frameon=False, markerscale=2)
+    for k in range(K, nrow * ncol):
+        axes[k // ncol][k % ncol].axis("off")
+    fig.suptitle(f"Window-level differences: {cells[0]} vs {cells[1]} (each from its own fibers)",
+                 fontsize=FS_TITLE, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
+def plot_fiber_auc(auc, output_assays, cells):
+    """
+    Per assay: distribution over differential bins of the fiber-origin AUC, oriented by the sign of d (1 = every
+    fiber of the cell type with the higher track ranks above every fiber of the other; 0.5 = no separation).
+    auc: (M, 7) rows (tile, assay, auc, oriented auc, n_a, n_b, d) from Evaluator.
+    """
+    K = len(output_assays)
+    ncol = min(4, K)
+    nrow = int(math.ceil(K / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 3.4 * nrow), squeeze=False)
+    bins = np.linspace(0, 1, 26)
+    for k, a in enumerate(output_assays):
+        ax = axes[k // ncol][k % ncol]
+        v = auc[auc[:, 1] == k, 3] if len(auc) else np.zeros(0)
+        if len(v) == 0:
+            ax.set_title(f"{a}: no bins", fontsize=FS_LABEL)
+            ax.axis("off")
+            continue
+        ax.hist(v, bins=bins, color="tab:purple", alpha=0.8)
+        ax.axvline(0.5, color="k", lw=1, ls="--")
+        ax.axvline(v.mean(), color="tab:orange", lw=2)
+        ax.set_title(f"{a}  |  mean AUC {v.mean():.3f}  (n = {len(v):,})", fontsize=FS_LABEL)
+        ax.set_xlabel("fiber-origin AUC (oriented)", fontsize=FS_TICK)
+    for k in range(K, nrow * ncol):
+        axes[k // ncol][k % ncol].axis("off")
+    fig.suptitle(f"Can one fiber's prediction tell its origin? {cells[0]} vs {cells[1]} at differential bins",
+                 fontsize=FS_TITLE, fontweight="bold")
+    fig.tight_layout()
+    return fig

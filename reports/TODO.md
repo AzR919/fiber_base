@@ -46,24 +46,27 @@ Update this section as the work moves on. Detailed numbers go in the dated repor
   split (5 dev, 3 held out), train/val/test regions (chr20 / chr22 / chr21 tiles), fiber masks trimmed to the
   nucleosome span, scoring at positions with ≥ 5 fibers, cross-cell-average baseline and cell-specific r.
 - **V1 output aggregation is the default:** per-fiber outputs stay in asinh units, the bulk averages them in fold
-  change (asinh(mean sinh)); mixture targets and the baseline also average in FC. Results so far are V0, and
-  the baseline numbers so far used the mean of asinh tracks.
+  change (asinh(mean sinh)); mixture targets and the baseline also average in FC. Bulk within noise of V0. The
+  bulk results in `Oct_23.md` are V0, with the old baseline (mean of asinh tracks).
 - **Cell-specific loci** (dev: 5 dev lines, leave-one-out; test: all 8) built on the chr21 tiles by data setup.
 - **T1 (bulk recovery):** works. With enough training the dev-split model is close to the cross-cell average on
   Pearson (ahead in some dev cells, behind in Panc1 and the held-out cells) and better on MSE in most cells.
 - **T2 (held-out cell types):** the cell-specific r is positive in every cell type, held-out ones included, so the
   model carries cell-specific information from the fibers that generalizes to new cell types (supports H over
   H0 at the population level). Wrong-cell control and the cell-specific-loci breakdown still to do.
+- **T3 (mixture-only supervision), first run (GM12878 + HepG2):** supports H at the single-molecule level. Trained
+  only on mixtures, the model separates the two cell types' molecules (fiber-origin AUC 0.64, sign accuracy 0.78)
+  as well as the single-cell-trained upper bound, locus-specifically, with no separation of two HepG2 libraries
+  (`Oct_23_T3.md`).
 
 **Known weak points**
 - Broad marks, H3K36me3 above all (far below the baseline in several cell types); likely needs longer context.
 - Training plateaus after ~60 × 1000 samples with the current LR schedule.
 
 **Next** (priority: single-molecule correctness)
-- Short V1 check run against the V0 short run (bulk should hold); rerun the baseline numbers with the FC mean.
-- T3 (mixture-only supervision), the main test of H, with V1 (I1). Its single-cell-trained upper bound doubles
-  as the V1 single-cell reference.
-- Cell-specific-loci breakdown in eval (I3), used for T2 and T3.
+- Rerun the baseline numbers with the FC mean.
+- T3 follow-ups: a second seed for both models, the random-split noise floor, a second pair from the same
+  Fiber-seq series (e.g. K562 + HepG2).
 - Later: per-assay scale (V2), T4 V3, single-molecule references for the ladder (4a).
 
 ## 3. Tests
@@ -132,9 +135,11 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Caveat.** The model may separate populations by library-level features (global m6A density, fiber length,
   global CpG methylation) and output a cell-typical pattern, without reading local accessibility. The
   two-library control quantifies this; pairs of cell types with similar library statistics reduce it.
-- **Status.** Not started. Needs I1; differential readouts can be computed in one eval pass over both cells'
-  fibers at the same window; only the fiber-origin AUC needs per-fiber outputs (I2). Differential windows come
-  from the loci tables.
+- **Status.** Implemented (I1, I3): `data27` (mixtures, share [0.2, 0.8]), `data28` (upper bound), paired eval
+  `eval24` (GM12878 vs HepG2_200U) and library control `eval25` (HepG2_100U vs 200U), mixture eval `eval26`,
+  report `t3_report.py`. Differential bins from `loci/pairs/GM12878__HepG2`. The fiber-origin AUC is computed
+  during eval (per fiber, the mean prediction over the bin), so I2 is not needed for it. First runs submitted
+  2026-10-21. Random-split noise floor not implemented yet.
 
 ### T4. Output parameterization and assay model (methodology comparison)
 
@@ -291,9 +296,9 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 
 | ID | Change | For | Notes |
 |---|---|---|---|
-| I1 | Mixture training with **variable proportions** per sample; mixture evaluator reporting per-cell-type group averages (apply to each cell's fibers alone) and the T3 readouts | T3 | `MixedCellFiberDataset` exists (fixed ratios, composite target); per-group reporting is not wired up in the current evaluator |
+| I1 | ~~Mixture training with variable proportions; paired eval with the T3 readouts~~ (done 2026-10-21: `mix_range`, target weighted by the fibers present, `paired` eval configs, `t3_report.py`); random-split noise floor still to do | T3 | |
 | I2 | `eval.py --save_predictions`: per sample bulk prediction, target, scored-position mask (float16), plus a per-fiber summary (mean predicted mark per assay over its span); offline analysis script for pairwise / mixture readouts | T3, T5, T7 | Full per-fiber tracks are too large to save |
-| I3 | Cell-type-specific-loci breakdown in eval: report MSE, sign accuracy and cell-specific r on each cell's loci tiles (gain / loss) | T1, T2, T3 | Loci files done (`data_prep/build_loci.py`, `regions/loci/`); eval side to do. Plain r is depressed there (range restricted on the target), so don't compare it with genome-wide r |
+| I3 | Cell-type-specific-loci breakdown in eval: report MSE, sign accuracy and cell-specific r on each cell's loci tiles (gain / loss) | T1, T2, T3 | Done: loci files (`data_prep/build_loci.py`) and eval config key `loci` (region types `loci:...`); gain / loss split not reported separately yet. Plain r is depressed there (range restricted on the target), so don't compare it with genome-wide r |
 | I4 | Output scale: ~~average fibers in FC (V1), mix targets and baseline in FC~~ (done); per-assay scale (V2); optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | V2 changes training: rerun references after |
 | I5 | Wrong-cell control for the cell-specific r | T2 | Score cell A's target with cell B's prediction |
 | I6 | No-CpG model run (`input_flags` with cpg = 0) + molecule-level correlation with held-out methylation | T5a | One training run |

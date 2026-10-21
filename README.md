@@ -20,11 +20,11 @@ No ground truth exists at that resolution, so the model is trained with **weak s
 
 **Scored positions**: loss and every metric only use positions covered by at least `min_coverage` fibers (default 5; `--min_coverage`), since averages over fewer fibers are noisy. Dashboards shade the unscored positions. The model returns both: `y` (bulk, `(B, K, L)`, used for the loss) and `processed_fibers` (single-molecule predictions, `(B, K, L, N)`, the imputation we ultimately care about).
 
-**Validating the single-molecule output**: low bulk MSE is necessary but not sufficient — a model can match the bulk average while spreading signal uniformly across fibers. Mixed-cell deconvolution (below) is one indirect check that per-fiber predictions carry molecule-specific information.
+**Validating the single-molecule output**: low bulk MSE is necessary but not sufficient — a model can match the bulk average while spreading signal uniformly across fibers. The mixture test (T3, below: train on mixtures of two cell types only, recover each from its own fibers) is the main check that per-fiber predictions carry molecule-specific information.
 
 **Two dataset modes** (`dataset_type`):
 - **Single-cell** (`single`): each sample is fibers from one cell type predicting that cell type's bulk signal. With several cell types listed, each training sample picks one cell type at random.
-- **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus, with a ratio-weighted bulk target (mixed in fold change, then asinh). Eval in this mode also reports per-cell-type deconvolution MSE.
+- **Mixed-cell** (`mixed`): each sample is a composite fiber stack from several cell types at the same locus (a random subset of each one's fibers; with `mix_range: [lo, hi]` and 2 cell types the first one's share is drawn per sample), with the bulk target of that mixture: per position, the fold-change mixture of the cell types' tracks weighted by the fibers actually present there, then asinh. Validation mixes too, so no cell type's own track is ever used.
 
 **Where we train, validate and test** comes from **region files** built during data setup (`configs/README.md` → Regions):
 - **Training** draws regions at runtime from pools on `chr20` (cCRE centres with jitter, optionally mixed with uniform random regions).
@@ -44,14 +44,15 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 | `eval.py` | Standalone evaluation of a saved checkpoint |
 | `args.py` | Argument parsing and config loading (CLI > config files > defaults) |
 | `trainer.py` | Training loop, validation, checkpointing, wandb logging |
-| `evaluator.py` | `Evaluator` (inference + metrics) and `run_final_eval` (loops over eval configs) |
+| `evaluator.py` | `Evaluator` (inference + metrics per cell type, loci breakdown, paired readouts for the mixture test) and `run_final_eval` (loops over eval configs) |
+| `t3_report.py` | Mixture-test (T3) report: mixture model vs single-cell upper bound vs the mixture track, from eval JSONs |
 | `data_utils.py` | `SingleCellFiberDataset`, `MixedCellFiberDataset`, `make_fiber_dataset()`: build windows around regions, load fibers + targets |
-| `regions.py` | Reads the region files at runtime: window sets, allowed centres, training pools (`TrainSampler`), per-bp cCRE-class masks |
+| `regions.py` | Reads the region files at runtime: window sets, allowed centres, training pools (`TrainSampler`), per-bp cCRE-class masks, loci sets (`Loci`) |
 | `fiber_utils.py` | Low-level per-fiber feature extraction from CRAM files |
 | `models.py` | `BaseModel` (save/load), `Base01DebugModel`, `UNet03ConvTransformerWithDNA`, `model_selector()` |
 | `metrics/` | Losses and metrics (`metrics.py`: masked MSE, pooled Pearson/MSE meter, partial correlation). `metrics/README.md` explains every reported number; `metrics/APPENDIX.md` has definitions, formulas and caveats |
 | `utils.py` | Seeding, config + metapaths resolution, run naming, wandb setup, meters |
-| `vis_utils.py` | Fiber-stack and evaluation dashboard plots |
+| `vis_utils.py` | Fiber-stack and evaluation dashboard plots; paired plots for the mixture test |
 | `configs/` | YAML configs: `data/`, `models/`, `training/`, `evals/`, `metapaths.yaml`, `reference.yaml`; retired ones in `old_configs/`. `configs/README.md` explains the cell-type split and the regions |
 | `data_prep/` | Data setup: one command downloads ENCODE tracks, regenerates `metapaths.yaml` and builds the region files (see Data Setup) |
 | `slurm_batch_command.sh` | Slurm script for training runs |
@@ -104,8 +105,9 @@ val_windows: val_chr22_n200                          # per-epoch validation wind
 
 cell_types:
   GM12878:                 # single: no ratio needed
-  K562_200U:               # mixed: optionally add  ratio: 0.5
+  K562_200U:               # mixed: optionally add  ratio: 0.5 (fixed shares) ...
   HepG2_200U:
+# mix_range: [0.2, 0.8]    # ... or, mixed with 2 cell types: the first one's share drawn per sample
 ```
 
 ### Model Config (`configs/models/`)
@@ -148,7 +150,16 @@ dataset_type: single
 
 cell_types:
   GM12878:
+
+# Optional:
+# loci: [pairs/GM12878__HepG2, "dev/{line}"]   # breakdown by loci sets (regions/loci/<name>.bed; {line} = each
+#                                              # cell's own ENCODE line), reported as region types 'loci:...'
+# paired: true                                 # exactly 2 cell types: paired readouts (mixture test, below)
+# pair_loci: pairs/GM12878__HepG2              # differential bins for sign accuracy and fiber-origin AUC
+# mix_range: [0.2, 0.8]                        # dataset_type mixed: composites, seeded per region
 ```
+
+An eval config may list several cell types; each gets its own metrics (keyed `<config>/<cell type>` in the JSON).
 
 > `input_flags`, `dna_type` and `output_assays` are **not** read from eval configs — they always come from the checkpoint (`model.init_args`).
 
@@ -168,6 +179,12 @@ cell_types:
 | `data20` | All 5 dev cell types (split v1, 200U); training regions half cCRE, half random |
 | `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type); same regions as `data20` |
 | `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |
+| `data27` | Mixture test (T3): GM12878 + HepG2_200U mixtures only, GM12878's share from [0.2, 0.8] |
+| `data28` | T3 upper bound: the same two cell types trained as single cell types |
+| `eval24` (+ `_mini`) | T3 paired eval: GM12878 vs HepG2_200U, each from its own fibers, with pairwise / dev loci |
+| `eval25` (+ `_mini`) | T3 library control: HepG2_100U vs HepG2_200U (same true track) |
+| `eval26_mini` | T3 mixture composites (GM12878 + HepG2_200U) against the mixture target |
+| `eval00_pair`, `eval00_mix` | Debug versions of `eval24` (20 tiles) and `eval26` (5 tiles) |
 | `old_configs/data/data12`–`data19` | Retired pre-split configs (still run: no `train_windows` means cCRE-only) |
 | `eval21` / `eval22` / `eval23` (+ `_mini`) | Eval on dev cells GM12878 / K562_200U / HepG2_200U |
 | `eval16` / `eval17` (+ `_mini`) | Eval on dev cells Panc1_200U / H1_200U |
@@ -247,6 +264,24 @@ python eval.py --checkpoint results/<run_dir>/Model_epoch_25.pt --baseline --eva
 
 - With a model, eval also reports the **cell-specific r**: the partial correlation of prediction and target given the baseline, i.e. how much of the target the model explains beyond the cross-cell average (0 = nothing beyond it). Correlating prediction − baseline with target − baseline would be misleading: both share −baseline, so even a constant prediction scores high.
 - The baseline reads every training cell's tracks for each sample, which is slow without a bigWig cache. It depends only on the data (training cells, window set, coverage rule), not on the model, so run it once per training set with `--baseline_only` and reuse the numbers. The JSON gets a `baseline` block per cell type (and `partial` with a model).
+- `--mixture_reference` includes the evaluated cell's own line: for a model trained on mixtures of its training cells, the baseline is then the mixture track (what predicting the mixture bulk on every molecule gives), and the cell-specific r is the partial correlation given the mixture.
+
+### Mixture test (T3): paired eval and report
+
+Train on mixtures only (`data27`), and the upper bound on the same cells as single cell types (`data28`); evaluate both with the paired configs:
+
+```bash
+python eval.py --checkpoint results/<run_dir>/Model_epoch_25.pt --baseline --mixture_reference \
+  --eval_configs configs/evals/eval24_pair_GM12878_HepG2_200U.yaml configs/evals/eval25_pair_HepG2_100U_200U.yaml \
+                 configs/evals/eval26_mix_GM12878_HepG2_200U_mini.yaml --num_workers 7 --wandb
+python t3_report.py --mixture results/<mix eval>/eval_summary.json --upper results/<upper eval>/eval_summary.json
+```
+
+- **Per cell type** (each from its own fibers, against its own track): r / MSE, the mixture track as the H0 reference, the cell-specific r given the mixture (H0 = 0), and the loci breakdown (`loci:GM12878__HepG2`, `loci:dev`).
+- **Paired** (`<config>/paired` in the JSON): differential r `corr(p_A − p_B, t_A − t_B)` and RMS of both differences per region type; at the pairwise differential bins, sign accuracy and the **fiber-origin AUC** (per fiber its mean prediction over the 1 kb bin; AUC of A's fibers vs B's, oriented by the sign of d; 0.5 = no separation).
+- **Library control** (`eval25`): two libraries of HepG2 share one true track, so their fiber-origin |AUC − 0.5| and RMS(p_A − p_B) are the floor that library effects alone produce.
+- **Saved to the eval run folder**: `<config>_paired.npz` (per-window mean differences, per-bin AUCs) and figures: `differential_scatter` (window-level predicted vs true difference per assay), `fiber_auc` (AUC distributions), `paired_locus_*` (the windows with the largest |d|: both tracks, the 50:50 mixture, each cell's prediction, and every fiber's prediction stacked by origin). Also logged to wandb.
+- `t3_report.py` puts the mixture model, the upper bound and H0 side by side (markdown table + bar chart).
 
 ---
 
@@ -279,4 +314,4 @@ Run the stop script before closing the laptop to avoid fail2ban bans from dangli
 | `single` | `single` | Standard fiber → bulk learning |
 | `single` | `mixed` | Does a single-cell-trained model generalize to mixed inputs? (zero-shot) |
 | `mixed` | `mixed` | Does training on mixed inputs improve mixed-input eval? |
-| `mixed` | `single` | Can a mixed-trained model handle single-cell inference? |
+| `mixed` | `single` | Mixture test (T3): trained on mixtures only, does each cell type's own fibers give its own track? |
