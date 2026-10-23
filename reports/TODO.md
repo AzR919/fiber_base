@@ -67,6 +67,7 @@ Update this section as the work moves on. Detailed numbers go in the dated repor
 - Rerun the baseline numbers with the FC mean.
 - T3 follow-ups: a second seed for both models, the random-split noise floor, a second pair from the same
   Fiber-seq series (e.g. K562 + HepG2).
+- T3b (mixture test on unseen cell types): rules out the "cell-type classifier" shortcut that T3 cannot.
 - Later: per-assay scale (V2), T4 V3, single-molecule references for the ladder (4a).
 
 ## 3. Tests
@@ -140,6 +141,31 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   report `t3_report.py`. Differential bins from `loci/pairs/GM12878__HepG2`. The fiber-origin AUC is computed
   during eval (per fiber, the mean prediction over the bin), so I2 is not needed for it. First runs submitted
   2026-10-21. Random-split noise floor not implemented yet.
+
+### T3b. Mixture test on unseen cell types
+
+- **Hypothesis.** A model trained on mixtures of two cell types separates the molecules of two *other* cell types
+  it never saw, at the loci where those two differ.
+- **Why it adds to T3.** T3 cannot rule out a shortcut: the model infers each molecule's cell type from global
+  features (overall CpG methylation, m6A pattern) and predicts that cell type's typical chromatin at the locus from
+  DNA. With two training cell types this separates molecules locus by locus, passes the direction-split check and
+  generalizes to new loci. For unseen cell types there is no profile to recall: at best the shortcut pushes each
+  new cell type towards the training cell type it resembles. Fibers are processed independently, so testing on a
+  mixture of unseen cell types is the paired eval of the two cell types (no composite needed).
+- **Design.**
+  - Pairs: K562 vs Panc1 (dev cell types the T3 models never saw; both from the same Fiber-seq series, so no
+    cross-experiment library concern); H1 vs K562. Held-out pair (HCT116 vs MCF-7) at milestones only.
+  - Models: the T3 mixture model, the T3 single-cell reference (GM12878 + HepG2, also unseen), and DEV5 (trained
+    on K562 / Panc1 / H1's own tracks) as the reference that has seen the pair.
+  - Readouts: as T3 (differential r, sign accuracy, fiber-origin AUC at the pair's differential bins).
+  - **Shortcut check:** correlate the predicted difference with the unseen pair's true difference (reading) and
+    with the training pair's difference at the same windows (shortcut). Reading predicts the first.
+- **Prediction (H).** Clearly positive readouts, close to DEV5's, following the unseen pair's difference, not the
+  training pair's. **(Shortcut)** readouts near chance, or tracking the GM12878 - HepG2 axis.
+- **Caveat.** A failure is ambiguous: no molecule reading, or reading learned from two cell types does not transfer
+  (compare with DEV5 and with mixture training on more cell types, M2). A success is clear. Does not replace T5
+  (within one cell type no identity shortcut exists at all).
+- **Status.** Not started; eval only on existing checkpoints. Needs I15.
 
 ### T4. Output parameterization and assay model (methodology comparison)
 
@@ -310,6 +336,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I12 | DNA-only model run; similar-cell average baseline | 4b | Allow all-zero `input_flags`; baseline with a chosen cell subset |
 | I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
 | I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
+| I15 | Unseen-pair mixture test: `pairs` entries in `loci_spec.yaml` (K562 / Panc1, H1 / K562), paired eval configs, and the shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | Eval only, existing checkpoints |
+| I16 | *(Low priority)* Oracle-identity reference for T3: one model per cell type (trained on its own track), each fiber routed through its own cell type's model. Quantifies how much separation knowing the cell type alone buys; not a ceiling for molecule reading (origin is given, so it scores high even without reading fibers) | T3 | Two extra training runs + routing in the paired eval |
 
 ## 6. Engineering backlog (performance and quality)
 
