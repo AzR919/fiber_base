@@ -44,7 +44,7 @@
 %% for your publication.
 %%
 %%
-\documentclass[acmtog]{acmart}
+\documentclass[acmtog,nonacm]{acmart}   % nonacm: no ACM reference box, no journal footer
 %%
 %% \BibTeX command to typeset BibTeX logo in the docs
 \AtBeginDocument{%
@@ -52,10 +52,12 @@
     Bib\TeX}}}
 
 %% Rights management information.
-% \setcopyright{acmlicensed}
+%% No ACM boilerplate: no copyright/permission block, no "Authors' Contact Information" footnote
+\setcopyright{none}
+\authorsaddresses{}
 % \copyrightyear{2026}
-\acmYear{2026}
-\acmDOI{XXXXXXX.XXXXXXX}
+% \acmYear{2026}
+% \acmDOI{XXXXXXX.XXXXXXX}
 
 \citestyle{acmauthoryear}
 \usepackage{booktabs}

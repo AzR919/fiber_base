@@ -1,0 +1,14 @@
+# latexmk settings for reports/latex (LaTeX sources). Run `latexmk` here, or `latexmk proposal.tex` for one file.
+# The PDF goes to ../paper/; aux, log and bibliography files go to build/ (gitignored), so neither source nor
+# paper folder gets cluttered.
+@default_files = ('*.tex');
+$pdf_mode = 1;           # pdflatex
+$out_dir = '../paper';
+$aux_dir = 'build';
+$bibtex_use = 2;         # run bibtex when needed; clean up .bbl with latexmk -c
+# bibtex runs inside build/, so it must be told where the .bib files are. MiKTeX's tools are Windows programs:
+# search paths are joined with ';' (Git Bash's perl would use ':'), and the paths latexmk adds itself are
+# /c/Users/... style under Git Bash, which MiKTeX cannot read. '..' (the source folder, relative to build/) works
+# from any shell.
+$search_path_separator = ';';
+$ENV{BIBINPUTS} = '..;' . ($ENV{BIBINPUTS} // '');
