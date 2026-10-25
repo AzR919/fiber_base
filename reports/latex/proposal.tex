@@ -114,46 +114,164 @@
 
 \section{Research problem}
 
-\textbf{Question.} Can we impute histone modifications and CTCF binding on \emph{individual} DNA molecules from their single-molecule chromatin accessibility and DNA sequence, when the only supervision available is population-averaged (bulk) data? And can such imputations be verified without molecule-level ground truth?
+\textbf{The problem setup.} We study a weakly supervised regression problem from genomics.
+  In weak supervision, labels are coarser than the predictions we want: they come at the
+  level of groups of instances, not the instances themselves. Even through this resolution
+  mismatch, we want to learn a model that predicts at the instance level. Each example is a
+  \emph{bag} of up to 100 sequences (100 instances), one per DNA molecule, aligned to
+  the same window of a 1-D coordinate axis over the genome. The label is a real-valued signal
+  over that window, but it describes only the \emph{average} over a huge population of such
+  molecules, never a single one. We want a model whose \emph{per-molecule} outputs are
+  correct. \textbf{Main Question:} can per-instance predictions be learned from bag-average
+  labels alone, and can they be verified when no instance-level labels exist? Below we
+  describe the data formats, the biological context, and a falsifiable evaluation plan.
+  Further details on the biology are in Appendix~\ref{app:bio}. The data is summarized in
+  Table~\ref{tab:data}.
 
-\textbf{Background for non-biologists.} (Jump to computational problem to come to more CS terms)
-\begin{itemize}
-  \item \emph{Chromatin and nucleosomes.} In a cell, DNA is wrapped around protein spools called \emph{nucleosomes}, about 147 bases each, like beads on a string. The DNA plus its proteins is \emph{chromatin}. A \emph{fiber} is one such DNA molecule, which in our case is a few thousand to tens of thousands of bases long.
-  \item \emph{Accessibility.} Stretches of DNA between nucleosomes are \emph{accessible}: proteins can reach them. Regulatory elements (switches that turn genes on or off) are usually accessible in the cells where they are active. ATAC-seq measures accessibility in bulk.
-  \item \emph{Histone marks.} Nucleosomes carry chemical tags (e.g.\ H3K27ac, H3K4me3, H3K27me3), named after the protein (histone H3), the position (lysine 27) and the tag (acetyl, methyl). Different marks indicate active promoters, active enhancers, transcribed genes or silenced regions. \emph{CTCF} is a DNA-binding protein that organizes the genome into loops. Although the cells share the same genome, the histone marks vary significantly for different types of cells.
-  \item \emph{Bulk assays.} ChIP-seq and ATAC-seq pool DNA from millions of cells and report, at each position, how enriched a mark is relative to a control (\emph{fold change}). The result is a \emph{track}: one number per base, averaged over all molecules. ENCODE provides such tracks for many cell lines (cultured cell populations such as GM12878, a B-cell line, and HepG2, a liver line).
-  \item \emph{Fiber-seq.} A new assay that uses an enzyme that adds a chemical tag (m6A) to accessible bases. Long-read sequencing then reads each molecule end to end, along with its tags, so accessibility, nucleosome positions and DNA methylation (at CpG sites) are known for \emph{every individual molecule}, not just on average.
-\end{itemize}
+\textbf{Stage 1: coordinates and the reference.} The human genome is a string of $3\times10^9$
+letters over $\{A,C,G,T\}$; a position $x$ is an index into it. We work on windows given as
+(\emph{chromosome, start, end}), with $L=\text{end}-\text{start}=5{,}000$ positions. The window's reference string is given to the model one-hot,
+$S\in\{0,1\}^{4\times L}$. It is the same in every cell and molecule, so it tells the model
+\emph{where} it is, but not \emph{which} cell type it is looking at.
 
-\textbf{Motivation.} Fiber-seq \citep{Stergachis20} reads multi-kilobase chromatin fibers and records accessibility (m6A), CpG methylation and nucleosome positions on each molecule, with haplotype phase. Histone marks, by contrast, are measured almost only in bulk (ChIP-seq). Bulk averages over millions of molecules and hides heterogeneity: allele-specific states, sub-populations, and which marks co-occur on one molecule. Deconvolving bulk assays onto single molecules would turn existing Fiber-seq data into a multi-mark single-molecule atlas.
+\textbf{Stage 2: reads, the instances.} In a cell, DNA is wound around protein spools
+(\emph{nucleosomes}); the stretches between spools are \emph{accessible} to the cell's
+machinery. Which stretches are open differs between cell types, and between individual
+molecules of one cell type. The Fiber-seq assay chemically marks the open bases of every
+molecule, then reads each molecule (a \emph{fiber}, here 5--25\,kb long) end to end
+\citep{Stergachis20}. After standard processing \citep{Jha24}, a read becomes $C=5$
+event channels along the coordinate axis: marked base (an A), methylated CpG (a second chemical
+mark, at C-G letter pairs), open patch, nucleosome, and strongly open regulatory element.
+Each channel takes $+1$ (event present), $-1$ (measurable and absent) or $0$ (not measurable:
+outside the read, or a letter where the event cannot occur). The $N\le100$ reads
+overlapping a window form a tensor of \emph{instances} $X\in\{-1,0,1\}^{C\times L\times N}$,
+with a coverage mask $M\in\{0,1\}^{L\times N}$. The reads are an unordered set.
 
-\textbf{Computational problem.} The overview is as such: We start with ternary three-dimensional tensor and predict a real valued three-dimensional vector. We don't have any ground truth on this resolution so we average over one dimension to get a two-dimensional vector where we do have the ground truth, and from there we derive the loss and backpropagate in a weakly-supervised fashion. For a genomic window of $L=5$\,kb, the input is a stack of $N\le100$ fibers, $X\in\{-1,0,1\}^{C\times L\times N}$, with $C=5$ channels (m6A, CpG, accessible patch, nucleosome, FIRE element; called with fibertools \citep{Jha24}), plus the one-hot reference sequence $S\in\{0,1\}^{4\times L}$. For each fiber $f$ and assay $k$ ($K=8$: ATAC, CTCF and six histone marks), the model outputs a per-base value $z_{f,k}\in\mathbb{R}_{\ge0}^{L}$. Fibers are processed independently, and only their average is supervised, against the ENCODE fold-change (FC) track $y_k\in\mathbb{R}_{\ge0}^{L}$ \citep{ENCODE20} which acts as the ground truth; a real valued one dimensional signal over the genome. Bulk read counts add up over molecules, so the average is taken in FC space:
+\textbf{Stage 3: targets, the bag labels.} We want $K=8$ other properties for every read;
+the experiments that measure such properties are called \emph{assays}. Six are chemical tags on the nucleosomes (\emph{histone marks},
+e.g.\ H3K27ac) that indicate whether nearby genes are on or off. The other two are binding
+of the protein CTCF and accessibility as measured by a second assay (ATAC-seq). No technology
+measures these at single-molecule resolution. They are measured in \emph{bulk}: an assay
+pools millions of cells of one cell type and reports, per position, how enriched the property
+is relative to a control (\emph{fold change}, FC). The result is a track $y_k\in\mathbb{R}_{\ge0}^{L}$
+per property. ENCODE \citep{ENCODE20} provides these tracks for our 8 cell types, which are
+cultured cell lines such as GM12878 (blood) and HepG2 (liver). Since all cell types share one
+genome, every difference between their tracks has to come from cell-specific factors.
+
+\textbf{Stage 4: per-molecule output and aggregation.} The model maps each read, with
+the reference as context, to $K$ per-position values $z_f\in\mathbb{R}_{\ge0}^{K\times L}$;
+these are the imputation (predictions). Reads are processed independently, so no information
+passes between instances, and the stacked output $Z\in\mathbb{R}_{\ge0}^{K\times L\times N}$
+is a set of per-molecule predictions. The label exists only at bag level, so the outputs are
+averaged over the reads covering each position and compared with the track. Values are kept in
+$\operatorname{asinh}$ space, which compresses the signal's range and makes it easier to learn,
+but the average is taken in FC space, where bulk signal adds up over molecules:
+
 \begin{equation}
 \hat y_k(x) = \operatorname{asinh}\Big(\tfrac{1}{|F_x|}\textstyle\sum_{f\in F_x}\sinh z_{f,k}(x)\Big),
 \end{equation}
 \begin{equation}
 \mathcal{L}=\textstyle\sum_{k,x} w_{k,x}\,\big(\hat y_k(x)-\operatorname{asinh} y_k(x)\big)^2 .
 \end{equation}
-Here $F_x$ is the set of fibers covering position $x$, each trimmed to its first through last nucleosome, and $w$
-restricts the loss to positions covered by at least 5 fibers. The per-fiber outputs $z_{f,k}$ are the imputation results.
+Here $F_x=\{f: M_{x,f}=1\}$ is the set of reads covering $x$, and the weight $w$ keeps only
+positions covered by at least 5 reads, to avoid noisy averages. Training therefore
+sees a 2-D label ($K\times L$), while the deliverable is the 3-D per-molecule tensor $Z$.
 
-\textbf{Assumptions.} (A1) A molecule's accessibility and nucleosome pattern, together with its sequence, carry information about its marks. (A2) A FC track is linear in the fraction of marked molecules, up to a per-experiment scale. (A3) The Fiber-seq and ENCODE samples of a cell line describe the same population.
+\begin{table}[h]
+\caption{The data for one window ($L=5{,}000$ positions, $x$ the genomic position).}
+\label{tab:data}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Object & Shape & Values & Role \\
+\midrule
+Reference $S$ & $4\times L$ & one-hot & input, shared by cell types \\
+Reads $X$ & $C\times L\times N$ & $\{-1,0,1\}$ & input, $C=5$, $N\le100$ \\
+Coverage $M$ & $L\times N$ & $\{0,1\}$ & which reads cover $x$ \\
+Output $Z$ & $K\times L\times N$ & $\mathbb{R}_{\ge0}$ & per-molecule imputation \\
+Aggregate $\hat Y$ & $K\times L$ & $\mathbb{R}_{\ge0}$ & bag prediction (Eq.~1) \\
+Track $Y$ & $K\times L$ & $\mathbb{R}_{\ge0}$ & bag label (bulk) \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\textbf{Evidence plan.} Our hypothesis (H) is that the per-fiber outputs carry information specific to each molecule. A model can also fit bulk tracks by predicting the bulk on every molecule (our null, H0), so bulk accuracy is necessary but not sufficient. Throughout, $p$ is a predicted bulk track (the average of a cell type's fibers, $\hat y_k$ in Eq.~1), $t$ is that cell type's ENCODE track ($\operatorname{asinh} y_k$), and all metrics pool every scored base of the test chromosome. We test H against H0 at three levels.
+\textbf{Why it matters.} Bulk tracks hide what happens on individual molecules:
+differences between the two parental copies of a gene, sub-populations of cells,
+and which properties co-occur on the same molecule. Fiber-seq already reads millions
+of molecules. Imputing the bulk properties onto each of them would turn existing
+Fiber-seq data into a single-molecule atlas of many properties at once.
 
-(i) \emph{Bulk recovery} on held-out chromosomes and cell types. We use 5 development and 3 held-out cell lines; the held-out ones range from near to far from the development set. We report the Pearson correlation $r_{pt}\in[-1,1]$ (1: the predicted shape along the genome matches the target up to scale and offset; 0: no linear relation; $-1$: inverted) and the mean squared error between $p$ and $t$ ($\ge0$, in squared asinh units; 0 is a perfect prediction). As a baseline we use the \emph{cross-cell average} $b$: at each position, the mean of the training cell lines' tracks, which needs no information about the evaluated cell type. Much of every track is shared across cell types, so $b$ is a strong baseline. To isolate what is specific to the cell type, we report the \emph{cell-specific correlation}, the partial correlation of $p$ and $t$ given $b$. Both are regressed on $b$, and their residuals are correlated: $r(p,t\mid b)=\operatorname{corr}\big(p-\hat p(b),\,t-\hat t(b)\big)=(r_{pt}-r_{bt}r_{pb})/\sqrt{(1-r_{bt}^2)(1-r_{pb}^2)}$. It lies in $[-1,1]$: 1 means the model predicts exactly where and how this cell type departs from the average; 0 means nothing beyond the average (the baseline itself, or any rescaling of it, scores exactly 0); negative values mean the predicted departures point the wrong way.
+\textbf{Assumptions.} (A1) A molecule's accessibility and nucleosome pattern,
+together with its sequence, carry information about its marks. (A2) A FC track
+is linear in the fraction of marked molecules, up to a per-experiment scale.
+(A3) The Fiber-seq and ENCODE samples of a cell line describe the same population.
 
-(ii) \emph{Mixture-only supervision} (main test). We train only on in-silico mixtures of two cell types $A$ and $B$ with varying proportions. Each training sample pools both types' fibers at one locus, and its target is the mixture's track; neither type's own track is ever used. We then run each cell type's fibers alone, giving $p_A$ and $p_B$, and compare them with $t_A$ and $t_B$. Under H0 the model predicts the mixture for both, so $p_A\approx p_B$. Each readout has a known value under H0:
+\textbf{Evidence plan.} Our hypothesis (H) is that the per-fiber outputs carry
+information specific to each molecule. A model can also fit bulk tracks by predicting
+the bulk on every molecule (our null, H0), so bulk accuracy is necessary but not
+sufficient. Throughout, $p$ is a predicted bulk track (the average of a cell type's
+fibers, $\hat y_k$ in Eq.~1), $t$ is that cell type's ENCODE track ($\operatorname{asinh} y_k$),
+and all metrics pool every scored base of the test chromosome. We test H against H0 at three levels.
+
+(i) \emph{Bulk recovery} on held-out chromosomes and cell types. We use 5 development
+and 3 held-out cell lines; the held-out ones range from near to far from the development
+set. We report the Pearson correlation $r_{pt}\in[-1,1]$ (1: the predicted shape along
+the genome matches the target up to scale and offset; 0: no linear relation; $-1$: inverted)
+and the mean squared error between $p$ and $t$ ($\ge0$, in squared asinh units; 0 is
+a perfect prediction). As a baseline we use the \emph{cross-cell average} $b$: at each
+position, the mean of the training cell lines' tracks, which needs no information about
+the evaluated cell type. Much of every track is shared across cell types, so $b$ is a
+strong baseline. To isolate what is specific to the cell type, we report the
+\emph{cell-specific correlation}, the partial correlation of $p$ and $t$ given $b$.
+Both are regressed on $b$, and their residuals are correlated:
+\[ r(p,t\mid b)=\operatorname{corr}\big(p-\hat p(b),\,t-\hat t(b)\big). \]
+A simpler way to compute the same quantity exactly is
+\[ r(p,t\mid b)=\frac{r_{pt}-r_{bt}r_{pb}}{\sqrt{(1-r_{bt}^2)(1-r_{pb}^2)}}. \]
+It lies in $[-1,1]$: 1 means the model predicts exactly where and how this cell
+type departs from the average; 0 means nothing beyond the average (the baseline itself,
+or any rescaling of it, scores exactly 0); negative values mean the predicted departures
+point the wrong way.
+
+(ii) \emph{Mixture-only supervision} (main test). We train only on bags that mix reads
+from two cell types $A$ and $B$ in varying proportions, labelled with the mixture's track.
+Neither cell type's own track is ever used, so the model never sees a label for either
+population on its own. We then run each cell type's fibers alone, giving $p_A$ and $p_B$,
+and compare them with $t_A$ and $t_B$. Under H0 the model predicts the mixture for both,
+so $p_A\approx p_B$. Each of the following metrics has a known value under H0:
 \begin{itemize}
-  \item \emph{Differential correlation} $\operatorname{corr}(p_A-p_B,\,t_A-t_B)$, per base over positions scored in both cell types: does the predicted difference between the two cell types follow the true one? Range $[-1,1]$: 1 means the predicted differences follow the true ones exactly (up to scale), 0 means no relation (value for H0), and $-1$ means they are systematically reversed.
-  \item \emph{Sign accuracy}: over \emph{differential bins} (1\,kb bins where $|t_A-t_B|\ge0.5$), the fraction where the mean of $p_A-p_B$ over the bin has the same sign as $t_A-t_B$. Range $[0,1]$: 1 means the higher cell type is identified at every bin, 0.5 is chance (value under H0), and 0 means it is always reversed.
-  \item \emph{Fiber-origin AUC}: at each differential bin, score each fiber by its mean output $z_f$ over the bin. The AUC is the probability that a random fiber from the cell type with the higher track scores above a random fiber from the other; we average it over bins. It asks whether a \emph{single molecule's} prediction reveals where it came from. Range $[0,1]$: 1 means every fiber of the cell type with the mark outranks every fiber of the other (perfect separation), 0.5 means no separation (value under H0), and 0 means perfect separation in the wrong direction. Even a perfect model stays below 1, because not every molecule of a cell type carries its mark.
+  \item \emph{Differential correlation} $\operatorname{corr}(p_A-p_B,\,t_A-t_B)$,
+    per base over positions scored in both cell types: does the predicted difference
+    between the two cell types follow the true one? Range $[-1,1]$: 1 means the predicted
+    differences follow the true ones exactly (up to scale), 0 means no relation (value
+    for H0), and $-1$ means they are systematically reversed.
+
+  \item \emph{Sign accuracy}: over \emph{differential bins} (1\,kb bins where $|t_A-t_B|\ge0.5$),
+    the fraction where the mean of $p_A-p_B$ over the bin has the same sign as $t_A-t_B$.
+    Range $[0,1]$: 1 means the higher cell type is identified at every bin, 0.5 is chance
+    (value under H0), and 0 means it is always reversed.
+
+  \item \emph{Fiber-origin AUC}: at each differential bin, score each fiber by its mean
+  output $z_f$ over the bin. The AUC is the probability that a random fiber from the cell
+  type with the higher track scores above a random fiber from the other; we average it
+  over bins. It asks whether a \emph{single molecule's} prediction reveals where it came
+  from. Range $[0,1]$: 1 means every fiber of the cell type with the mark outranks every
+  fiber of the other (perfect separation), 0.5 means no separation (value under H0), and
+  0 means perfect separation in the wrong direction. Even a perfect model stays below 1,
+  because not every molecule of a cell type carries its mark.
 \end{itemize}
-As a control for library effects, we use two Fiber-seq libraries of one cell line, which share one true track: any separation between them comes from library differences, not biology.
+As a control for library effects, we use two Fiber-seq libraries of one cell line, which
+share one true track: any separation between them comes from library differences, not biology.
 
-(iii) \emph{Within-population structure}, from held-out CpG methylation and X inactivation, where molecules of a single cell line must differ.
+(iii) \emph{Within-bag structure.} We use properties known to differ between molecules
+of one cell type. Examples are an input channel held out and checked against the outputs
+(CpG methylation), and the X chromosome in female cells, where one of the two copies is
+switched off. The outputs must vary in the same way.
 
-\textbf{Preliminary results.} Over all 6,843 test tiles of chr21, the cell-specific correlation is positive in all 8 cell lines ($+0.19$ to $+0.41$; $+0.19$ to $+0.27$ in cell lines never seen in training). In the mixture test (GM12878 + HepG2), the model trained only on mixtures separates the two populations' molecules as well as a model trained on each cell type's own track (Table~\ref{tab:t3}). The separation is locus-specific: it reverses with the direction of the difference. For two libraries of one cell line, $|\mathrm{AUC}-0.5|=0.04$, against $0.18$ for GM12878 vs HepG2.
+\textbf{Preliminary results.} (i) Over all 6,843 test tiles of chr21, the cell-specific
+correlation is positive in all 8 cell lines ($+0.19$ to $+0.41$; $+0.19$ to $+0.27$
+in cell lines never seen in training). (ii) In the mixture test (GM12878 + HepG2), the model
+trained only on mixtures separates the two populations' molecules as well as a model
+trained on each cell type's own track (Table~\ref{tab:t3}).
 
 \begin{table}[h]
 \caption{Mixture test, mean over 8 assays.}
@@ -172,33 +290,83 @@ Fiber-origin AUC & 0.50 & 0.64 & 0.60 \\
 
 \section{Literature review}
 
-\textbf{Single-molecule chromatin profiling.} Fiber-seq \citep{Stergachis20} marks accessible DNA with a methyltransferase and reads it with long reads, giving accessibility for every molecule. DiMeLo-seq \citep{Altemose22} maps one protein or histone mark per experiment directly on single molecules. Single-cell CUT\&Tag \citep{Bartosovic21} profiles marks in single cells, but with sparse coverage and only one or a few marks per cell. Together, these show that \emph{measuring} many marks on one molecule is still out of reach. We instead \emph{impute} them, and DiMeLo-seq data are the natural ground truth for one mark at a time.
+\textbf{Single-molecule chromatin profiling.} Fiber-seq \citep{Stergachis20} marks
+accessible DNA with a methyltransferase and reads it with long reads, giving accessibility
+for every molecule. Single-cell CUT\&Tag \citep{Bartosovic21} profiles marks in single
+cells, but with sparse coverage and only one or a few marks per cell. Together, these
+show that \emph{measuring} many marks on one molecule is still out of reach. We instead
+\emph{impute} them from Fiber-seq reads.
 
-\textbf{Epigenome imputation.} ChromImpute \citep{Ernst15}, PREDICTD \citep{Durham18} and Avocado \citep{Schreiber20Avocado} predict missing bulk tracks from other tracks of the same cell type. They use regression or tensor factorization over cell types $\times$ assays $\times$ positions. CANDI \citep{Foroozandeh25} imputes and denoises bulk assays with self-supervision and calibrated confidence. All of them output population averages and need existing tracks of the target cell type. FiberCANDI keeps the target (ENCODE assays) but changes the unit of prediction from a track to a molecule, and needs only the target cell type's fibers. \citet{Schreiber20Pitfall} showed that models predicting across cell types often fail to beat the average across training cell types. We adopt that baseline and score the partial correlation given it.
+\textbf{Epigenome imputation.} ChromImpute \citep{Ernst15}, PREDICTD \citep{Durham18}
+and Avocado \citep{Schreiber20Avocado} predict missing bulk tracks from other tracks
+of the same cell type. They use regression or tensor factorization over cell types
+$\times$ assays $\times$ positions. CANDI \citep{Foroozandeh25} imputes and denoises
+bulk assays with self-supervision and calibrated confidence. dHICA \citep{Wen24} shows
+that a single input assay can be enough: it predicts several histone-mark tracks from
+bulk chromatin accessibility (ATAC-seq or DNase-seq) and DNA sequence alone, the bulk
+analogue of our input. All of them output population averages and need bulk tracks of
+the target cell type. FiberCANDI keeps the target (ENCODE assays) but changes the unit
+of prediction from a track to a molecule: its input is accessibility measured on each
+molecule, so it needs only the target cell type's fibers. \citet{Schreiber20Pitfall}
+showed that models predicting across cell types often fail to beat the average across
+training cell types. We adopt that baseline and score the partial correlation given it.
 
-\textbf{Sequence-to-function models.} Enformer \citep{Avsec21} predicts thousands of tracks from DNA alone, using long-range attention. Its cell-type specificity comes from one output head per training cell type, so it cannot describe a new cell type or individual molecules. In our model the DNA is shared context, and the fibers carry everything specific to the cell and the molecule. A pretrained DNA encoder is a planned extension.
+\textbf{Sequence-to-function models.} Enformer \citep{Avsec21} predicts thousands of
+tracks from DNA alone, using long-range attention. Its cell-type specificity comes from
+one output head per training cell type, so it cannot describe a new cell type or individual
+molecules. In our model the DNA is shared context, and the fibers carry everything specific
+to the cell and the molecule.
 
-\textbf{Weak supervision.} Learning from label proportions \citep{Quadrianto09} recovers labels of individual instances from bag-level aggregates, which is possible only when bags differ in composition. Our setting is a regression analogue: a bag is a fiber stack and its label is the bulk track. This is why the mixture test varies the proportions: varying them makes each population's signal identifiable.
+\textbf{Weak supervision.} Learning from label proportions \citep{Quadrianto09}
+recovers labels of individual instances from bag-level aggregates, which is possible
+only when bags differ in composition. Our setting is a regression analogue: a bag is
+a fiber stack and its label is the bulk track. This is why the mixture test varies the
+proportions: varying them makes each population's signal identifiable.
 
-Compared with these works, we connect bulk-assay imputation (the second theme) to single-molecule inputs (the first), and we give a falsifiable verification protocol for a setting with no molecule-level labels.
+Compared with these works, we connect bulk-assay imputation (the second theme) to
+single-molecule inputs (the first), and we give a falsifiable verification protocol
+for a setting with no molecule-level labels.
 
 \section{Venue, contributions, and bibliography}
 
-\textbf{Venue.} MLCB 2027 (Machine Learning in Computational Biology). Its focus on new machine-learning formulations with biological evaluation matches our contribution: a weakly supervised model and a falsifiable test of what the model learns.
+\textbf{Venue.} MLCB 2027 (Machine Learning in Computational Biology).
+Its focus on new machine-learning formulations with biological evaluation
+matches our contribution: a weakly supervised model and a falsifiable test of
+what the model learns.
 
-\textbf{Prior work.} Two lines of prior work underlie this project. Bulk-assay imputation with CANDI \citep{Foroozandeh25} defines the assay-imputation setting we extend to single molecules. Fiber-seq \citep{Stergachis20} provides the single-molecule chromatin data and its processing \citep{Jha24}. Bulk targets and cCRE annotations come from ENCODE \citep{ENCODE20}.
+\textbf{Prior work.} Two lines of prior work underlie this project. Bulk-assay
+imputation with CANDI \citep{Foroozandeh25} defines the assay-imputation setting
+we extend to single molecules. Fiber-seq \citep{Stergachis20} provides the
+single-molecule chromatin data and its processing \citep{Jha24}. Bulk targets
+and cCRE annotations come from ENCODE \citep{ENCODE20}.
 
-\textbf{Contributions.} The work in this proposal is mine (A.R.):
+\textbf{Contributions.} The work in this proposal is mine (Azaan Rehman):
 \begin{enumerate}
-  \item The problem formulation, and a reproducible data pipeline: ENCODE track selection; train, validation and test regions on separate chromosomes that avoid blacklisted regions and assembly gaps; and a principled split of cell types into 5 for development and 3 held out.
-  \item Fiber aggregation consistent with fold change (Eq.~1). It gives each per-molecule output a physical meaning and makes mixtures exact.
-  \item An evaluation framework that separates bulk recovery from single-molecule information: the cross-cell baseline with partial correlation, cell-specific and pairwise loci, and the mixture-only test with a library control.
+  \item The problem formulation, and a reproducible data pipeline.
+  \item Fiber aggregation consistent with fold change (Eq.~1). It gives
+    each per-molecule output a physical meaning and makes mixtures exact.
+  \item An evaluation framework that separates bulk recovery from single-molecule
+    information: the cross-cell baseline with partial correlation, cell-specific
+    and pairwise loci, and the mixture-only test with a library control.
   \item First evidence that the per-molecule imputations carry molecule-specific signal.
 \end{enumerate}
-To our knowledge, this is the first method to impute several histone marks per single molecule. Unlike CANDI and earlier imputation methods, its output is one track per molecule rather than one per cell type.
+To our knowledge, this is the first method to impute several histone marks
+per single molecule. Unlike CANDI and earlier imputation methods, its output
+is one track per molecule rather than one per cell type.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{proposal}
+
+\appendix
+\section{Biology background}
+\label{app:bio}
+\begin{itemize}
+  \item \emph{Chromatin and nucleosomes.} In a cell, DNA is wrapped around protein spools called \emph{nucleosomes}, about 147 bases each, like beads on a string. The DNA plus its proteins is \emph{chromatin}. A \emph{fiber} is one such DNA molecule, which in our case is a few thousand to tens of thousands of bases long.
+  \item \emph{Accessibility.} Stretches of DNA between nucleosomes are \emph{accessible}: proteins can reach them. Regulatory elements (switches that turn genes on or off) are usually accessible in the cells where they are active. ATAC-seq measures accessibility in bulk.
+  \item \emph{Histone marks.} Nucleosomes carry chemical tags (e.g.\ H3K27ac, H3K4me3, H3K27me3), named after the protein (histone H3), the position (lysine 27) and the tag (acetyl, methyl). Different marks indicate active promoters, active enhancers, transcribed genes or silenced regions. \emph{CTCF} is a DNA-binding protein that organizes the genome into loops.
+  \item \emph{Bulk assays.} ChIP-seq and ATAC-seq pool DNA from millions of cells and report, at each position, how enriched a mark is relative to a control (\emph{fold change}). The result is a \emph{track}: one number per base, averaged over all molecules. ENCODE provides such tracks for many cell lines (cultured cell populations such as GM12878, a B-cell line, and HepG2, a liver line).
+  \item \emph{Fiber-seq.} An enzyme adds a chemical tag (m6A) to accessible bases. Long-read sequencing then reads each molecule end to end, along with its tags, so accessibility, nucleosome positions and DNA methylation (at CpG sites) are known for \emph{every individual molecule}, not just on average. The five input channels are: m6A-marked bases, methylated CpGs, accessible patches (MSPs), nucleosomes, and FIRE elements (accessible patches classified as regulatory elements).
+\end{itemize}
 
 \end{document}
 
