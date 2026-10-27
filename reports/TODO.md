@@ -68,6 +68,12 @@ Update this section as the work moves on. Detailed numbers go in the dated repor
 - T3 follow-ups: a second seed for both models, the random-split noise floor, a second pair from the same
   Fiber-seq series (e.g. K562 + HepG2).
 - T3b (mixture test on unseen cell types): rules out the "cell-type classifier" shortcut that T3 cannot.
+- Reference values for r (what counts as a good Pearson / cell-type r): neither can reach 1, because the ENCODE
+  target is itself noisy (worst at bp resolution, on broad marks and H3K9me3), and the cell-specific residual is
+  mostly noise. Measure per assay (1) the replicate ceiling, replicate 1 vs replicate 2, with both plain r and
+  cell-type r given the baseline (I11), and (2) a related-cell reference, a sibling cell type's real track used as
+  the prediction, e.g. H1 for H9 (I12). Then report our numbers as a fraction of the ceiling, and note that r
+  rises with coarser bins, so bp-level values are not comparable with 25 bp imputation papers.
 - Later: per-assay scale (V2), T4 V3, single-molecule references for the ladder (4a).
 
 ## 3. Tests
@@ -97,6 +103,9 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   plain r and MSE at cell-type-specific loci (I3), where the baseline is weakest.
 - **Controls.** "Wrong cell" control: score cell A's target with cell B's prediction (given the baseline). If that
   scores as well, the gain is a better estimate of shared signal, not cell-specific information.
+- **Reference values.** Replicate ceiling of the cell-specific r (replicate 1 vs 2, given the baseline; I11) and a
+  related-cell reference (H1's real track as the prediction for H9; I12), so the cell-specific r reads as a fraction
+  of what is achievable rather than as r² of the total.
 - **Prediction (H).** Cell-specific r clearly > 0 on held-out cells and close to the dev cells; the wrong-cell
   control near 0. **(H0)** cell-specific r ≈ 0, or the wrong-cell control as high as the right one.
 - **Status.** Cell-specific r done for DEV5 (supports H); wrong-cell control and cell-specific-loci breakdown TODO.
@@ -332,8 +341,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I8 | Check CRAMs for haplotype (HP) tags; phasing otherwise | T5c | |
 | I9 | Aggregated-input bulk model | T6 | New model variant |
 | I10 | Rule-based single-molecule imputer + "bulk on every molecule" reference, scored with T3/T5 | 4a | Analysis only, on saved predictions (I2) |
-| I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b | Extend the spec/lock to per-replicate FC files |
-| I12 | DNA-only model run; similar-cell average baseline | 4b | Allow all-zero `input_flags`; baseline with a chosen cell subset |
+| I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b, T2 | Extend the spec/lock to per-replicate FC files. Score replicate vs replicate per assay and cell type with plain r, MSE and cell-specific r (given the baseline), on the same scored positions |
+| I12 | DNA-only model run; similar-cell average baseline; related-cell reference | 4b, T2 | Allow all-zero `input_flags`; baseline with a chosen cell subset; related-cell reference = one sibling cell's real track as the prediction (H1 → H9), scored with cell-specific r |
 | I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
 | I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
 | I15 | Unseen-pair mixture test: `pairs` entries in `loci_spec.yaml` (K562 / Panc1, H1 / K562), paired eval configs, and the shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | Eval only, existing checkpoints |
