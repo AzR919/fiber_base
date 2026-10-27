@@ -156,6 +156,68 @@ assay table). H1 and H9 have 3 sharp assays (no ATAC). Model / baseline; **bold*
 - Caveat: these numbers use the earlier fiber averaging and baseline (both since updated); a rerun is pending.
   The picture is not expected to change.
 
+#### Single-molecule examples (dev and held-out)
+
+- **How loci were found:**
+  - Data: chr21 test tiles. Each 1 kb bin is scored as the cell's ENCODE signal minus the cross-cell average
+    (asinh FC).
+  - Categories:
+    - **gain**: the cell is ≥ 0.5 above the average;
+    - **loss**: the cell is ≥ 0.5 below the average;
+    - **agree**: within 0.25 of the average, at a peak ≥ 1.5.
+  - The top candidates per cell type were run through the model and ranked by:
+    - how much of the gap to the average the model recovers;
+    - the model's r over the 5 kb tile.
+  - Plots: per cell type and group, the best few plus random picks. 224 figures in total, all on fir in
+    `results/26-10-27_T10-57-03_single_molecule_dev5/` (redrawn with tile MSE; ranking from `..._T06-06-09_...`).
+  - Code: `plots_code/26_oct_30/single_molecule_dev5.py`.
+- **Each figure:**
+  - Two panels: the flagged assay and its partner (ATAC↔CTCF, H3K4me3↔H3K27ac, H3K4me1↔H3K36me3,
+    H3K27me3↔H3K9me3; for H1/H9, which have no ATAC, CTCF is paired with H3K27ac).
+  - Top: the ENCODE track, the model's average over fibers, and the baseline, with the tile MSE of each (scored
+    positions, ≥ 5 fibers).
+  - Then a heatmap of every fiber's prediction, sorted by the flagged bin.
+  - Then five fibers across that ranking, with their inputs (m6A, MSP, nucleosomes, FIRE). Each fiber's prediction
+    is drawn against the baseline (dashed): a bulk baseline gives every fiber that same curve, while the model gives
+    each fiber its own.
+- **Over all 799 ranked candidates** (not just the plotted ones):
+
+  | | Model r > baseline r | Gap recovered (median) |
+  |---|---|---|
+  | Sharp gain (dev / held-out) | 84% / 81% | 29% / 28% |
+  | Broad gain (dev / held-out) | 71% / 72% | 14% / 14% |
+  | Loss, sharp and broad | 45–70% | 81–95% |
+  | Agree | 13–23% | — |
+
+  - At gain loci the model beats the baseline on shape in most cases, held-out cell types included, but recovers
+    only part of the height (more for sharp marks).
+  - At loss loci it mostly removes the peak the baseline wrongly predicts.
+  - Where the cell matches the average, the baseline is already right and is hard to beat (r 0.88 vs 0.92 for
+    sharp marks), but the model is close.
+- **Figures to show** (`figures/oct30/sm_*.png`):
+  - `sm_test_mcf7_atac_gain.png`: MCF-7 (held out), ATAC peak absent from the average.
+    - The model finds it (tile MSE 0.13 vs 1.06 for the baseline).
+    - The heatmap shows which fibers are open; closed fibers predict ~0.
+  - `sm_test_mcf7_h3k4me1_gain.png`: same locus, H3K4me1. A broad mark that works (MSE 0.39 vs 1.94), with a
+    gradient across fibers.
+  - `sm_dev_hepg2_h3k4me3_gain.png`: HepG2 promoter, H3K4me3 and H3K27ac.
+    - The model tracks the track (MSE 0.25 vs 2.22).
+    - The bottom fiber is fully nucleosome-covered and predicts nothing: a silent copy.
+  - `sm_test_h9_h3k4me3_gain.png`: H9 (held out, no ATAC).
+    - H3K4me3 is right (MSE 0.16 vs 0.84).
+    - H3K27ac is over-called at the same spot (MSE 0.84 vs 0.16, worse than the baseline): the model ties the two
+      promoter marks together.
+  - `sm_test_hct116_atac_agree.png`: HCT116 ATAC in line with the average.
+    - Same shape (r 0.98 vs 1.00), but the baseline is closer in level (MSE 0.155 vs 0.018): the model sits
+      slightly high across the whole tile.
+    - CTCF is over-called at the accessible site (MSE 0.30 vs 0.19): CTCF follows accessibility (also visible in
+      the MCF-7 figure, MSE 0.42 vs 0.29).
+  - `sm_test_hct116_h3k4me1_loss.png`: HCT116 lacks the H3K4me1 domain the average predicts.
+    - The model stays low (MSE 0.26 vs 1.62).
+    - It misses the one real peak at ~2 kb.
+  - `sm_test_hct116_h3k27me3_random_fail.png` (random pick): a failure (MSE 0.88 vs 0.78). The HCT116 H3K27me3
+    domain is missed; the prediction is flat and uniform across fibers, the broad-mark weakness from Table 2.
+
 ### Mixture test (T3): are single molecules resolved?
 
 (Details: `Oct_23_T3.md`; design: `TODO.md`, T3.)
@@ -235,6 +297,88 @@ two apart, so we need a test where the answer per group of molecules is known.
   - `t3_mix_differential_scatter.png`: per chr21 window, predicted vs true difference (H0: all on y = 0).
   - `t3_mix_fiber_auc.png` and `t3_mix_library_fiber_auc.png`: fiber-origin AUC per differential bin, pair vs library
     control.
+- **Single-molecule examples** (`figures/oct30/t3_sm_*.png`, code: `plots_code/26_oct_30/t3_single_molecule.py`).
+  - What each figure shows:
+    - The mixture model is run on each cell type's fibers alone, at chr21 bins where GM12878 and HepG2 differ.
+    - Each figure has two panels: the differential assay and its partner.
+    - Top of each panel: both ENCODE tracks, the 50:50 mixture (what H0 gives both cell types), and each cell type's
+      predicted average.
+    - Bottom: a heatmap of every fiber's prediction, GM12878 fibers above the cyan line and HepG2 below.
+  - How they were picked:
+    - "Best" is the top bin by fiber-origin AUC for each assay and direction.
+    - "Random" is drawn from the 7,838 eligible bins (≥ 10 fibers per cell type).
+    - All 24 are on fir in `results/26-10-27_T04-55-25_t3_single_molecule/`.
+  - `t3_sm_best_atac_hepg2_high.png` (chr21:45.41 Mb, AUC 0.98):
+    - HepG2 fibers open at the ATAC peak; GM12878 fibers stay closed.
+    - CTCF (partner) follows the same split.
+  - `t3_sm_best_h3k27ac_gm_high.png` (chr21:14.76 Mb, AUC 0.95):
+    - The GM12878-only H3K27ac / H3K4me3 domain is predicted on GM12878 fibers only.
+    - Within GM12878, about half the fibers carry it, which is the per-molecule heterogeneity we want.
+  - `t3_sm_best_h3k4me1_hepg2_high.png` (AUC 0.98) is a broad mark that works: a 5 kb HepG2 H3K4me1 domain, with
+    the GM12878 average flat near 0.
+  - `t3_sm_best_h3k27me3_hepg2_high.png` (AUC 0.94):
+    - This is a repressive mark that works: HepG2 H3K27me3 is separated by fiber.
+    - The predicted average undershoots the track, at ~1 vs ~2.
+  - `t3_sm_random_h3k27ac_gm_high.png` (random pick, AUC 0.80) is a typical case: same pattern as the best H3K27ac
+    example, a little noisier.
+  - `t3_sm_random_h3k9me3_fail.png` (random pick, AUC 0.30) is a failure:
+    - Both cell types get the same flat H3K9me3 prediction.
+    - The fiber heatmap is driven by the shared sequence (vertical stripes), not by the fiber.
+    - This matches H3K9me3 being the weakest assay in Table 4.
 - Caveats: one training run per model (second seed pending); the AUC checks separation by cell of origin, a proxy
   for "this molecule carries the mark"; GM12878 and HepG2 come from different Fiber-seq experiments (a same-series
   pair, e.g. K562 + HepG2, would remove that concern).
+
+## Future directions
+
+Full plan and IDs (T = test, I = implementation, M = model change) in `reports/TODO.md`.
+
+### Immediate (next 1–2 weeks: firm up what is on these slides)
+
+1. **Rerun the bulk numbers with the current setup:**
+   - fiber averaging in FC (V1) and the FC-mean baseline;
+   - this removes the caveat under Bulk recovery;
+   - add the gain / loss loci breakdown to the eval (I3), which turns the single-molecule candidate table into a
+     proper metric.
+2. **Reference values for r**, so "0.5" can be read as good or bad:
+   - replicate ceiling: ENCODE replicate 1 vs 2 per assay, with plain r and cell-type r (I11);
+   - related-cell reference: H1's real track as the prediction for H9 (I12);
+   - report our numbers as a fraction of the ceiling.
+3. **Wrong-cell control for the cell-type r** (I5): score cell A's target with cell B's prediction. If that is also
+   positive, the cell-type r is not cell-specific. Cheap, eval only.
+4. **T3 robustness:**
+   - a second seed for the mixture model and the upper bound;
+   - the random-split noise floor;
+   - a second pair from the same Fiber-seq series (K562 + HepG2), which rules out batch differences between
+     GM12878 and HepG2.
+5. **T3b, the mixture test on unseen cell types** (I15):
+   - setup: the GM12878 / HepG2 mixture model, evaluated on fibers of other pairs (K562 / Panc1, H1 / K562);
+   - why: rules out the shortcut T3 cannot, a model that only recognises the cell type and returns its bulk;
+   - cost: eval only, on existing checkpoints.
+
+### Next (model and test changes)
+
+- **Broad marks** (the weak spot in Tables 2 and 4 and in the failure examples):
+  - Use the whole read as context (M3): fibers are ~18 kb but cropped to the 5 kb window.
+  - H3K36me3 sits on gene bodies, and H3K27me3 / H3K9me3 domains are wider than the window.
+- **Outputs in physical units** (T4: V2 per-assay scale, then V3 / M1):
+  - Predict per nucleosome and model the ChIP blurring once per assay, rather than painting a bulk-shaped peak
+    onto every molecule.
+- **Separating marks that travel together.** The examples show CTCF following accessibility and H3K27ac following
+  H3K4me3. Possible fixes:
+  - supervision that distinguishes molecules (M2): more cell types at the same loci, mixtures alongside single
+    cell types, both libraries;
+  - DNA as modulation rather than an extra input (M5);
+  - same-molecule constraints (M6).
+- **FIRE as an input** (M4): the fire_msp model treats FIRE as a switch. Feed continuous FIRE scores and m6A / CpG
+  call probabilities instead of thresholded channels.
+- **Single-molecule ground truth within a cell type** (T5):
+  - T5a: a no-CpG model whose per-fiber predictions are checked against the fiber's measured CpG methylation;
+  - T5b: X inactivation in female lines (two populations of molecules at X-linked promoters);
+  - T5c: imprinted loci.
+- **Comparison ladder:**
+  - single-molecule references (I10, after saving predictions, I2): a rule-based "accessible = active" imputer and
+    "bulk on every molecule" (H0);
+  - bulk references: a DNA-only model and CANDI (on ATAC and on aggregated Fiber-seq accessibility).
+- **Engineering:** training throughput (bigWig cache, less frequent validation, more training chromosomes), so the
+  runs above are cheaper.

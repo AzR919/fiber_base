@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-10-27_00_single_molecule_dev5
+#SBATCH --job-name=2026-10-27_02_single_molecule_dev5_baseline_ref
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --output=logs/%x.out
@@ -9,7 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=5
 #SBATCH --mem-per-cpu=8G
-#SBATCH --time=0-4:00:00
+#SBATCH --time=0-2:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 

@@ -4,7 +4,8 @@ behind the bulk-recovery numbers), on chr21 test tiles, for the 5 dev and the 3 
 
 Every figure shows one tile and a pair of assays (the flagged assay and its partner, PARTNER), with the ENCODE
 track, the model's average over fibers and the cross-cell-average baseline on top, a heatmap of every fiber's
-prediction, and NUM_FIBERS example fibers (input channels + prediction, with the average as a reference line).
+prediction, and NUM_FIBERS example fibers (input channels + prediction, with the baseline as a reference line: what
+a bulk baseline would give every fiber).
 
 Three passes in one job:
   0. Screen (ENCODE tracks only, no fibers, no model): per cell type, tile and assay, cut the tile into BIN bp bins;
@@ -70,6 +71,9 @@ MIN_SPAN = 0.6                                       # fraction of the window an
 NUM_WORKERS = 4
 SEED = 919
 RUN_NAME = "single_molecule_dev5"
+# A previous run dir (env var, set by replot_single_molecule_cpu.sh): skip screen + ranking, re-plot only the
+# figures listed in its ranking.tsv
+REPLOT_FROM = os.environ.get("REPLOT_FROM")
 # -----------------
 
 FS_SUPTITLE = 30
@@ -94,7 +98,8 @@ ASSAY_LABELS = {"atac": "ATAC", "h3k4me3": "H3K4me3", "h3k27ac": "H3K27ac", "h3k
                 "h3k4me1": "H3K4me1", "h3k36me3": "H3K36me3", "h3k9me3": "H3K9me3", "ctcf": "CTCF"}
 TSV_FIELDS = ["split", "cell", "group", "category", "flagged", "partner", "chrom", "start", "end", "bin", "d_screen",
               "n_fibers", "target_bin", "model_bin", "baseline_bin", "frac_recovered", "r_model", "r_baseline",
-              "r_model_partner", "r_baseline_partner", "fiber_spread", "score", "selected", "figure"]
+              "r_model_partner", "r_baseline_partner", "mse_model", "mse_baseline", "mse_model_partner",
+              "mse_baseline_partner", "fiber_spread", "score", "selected", "figure"]
 
 
 def cell_label(cell):
@@ -226,6 +231,10 @@ def _pearson(a, b):
     return float(np.corrcoef(a, b)[0, 1])
 
 
+def _mse(a, b):
+    return float(np.mean((a - b) ** 2)) if len(a) else float("nan")
+
+
 def _bin_value(x, sl):
     """asinh of the mean FC over a bin (tracks are asinh FC)."""
     return float(np.arcsinh(np.sinh(x[sl].astype(np.float64)).mean()))
@@ -253,6 +262,10 @@ def score_candidate(cand, out, output_assays):
                r_model=r_m, r_baseline=r_b,
                r_model_partner=_pearson(out["bulk"][kp][w], out["target"][kp][w]),
                r_baseline_partner=_pearson(out["baseline"][kp][w], out["target"][kp][w]),
+               mse_model=_mse(out["bulk"][k][w], out["target"][k][w]),
+               mse_baseline=_mse(out["baseline"][k][w], out["target"][k][w]),
+               mse_model_partner=_mse(out["bulk"][kp][w], out["target"][kp][w]),
+               mse_baseline_partner=_mse(out["baseline"][kp][w], out["target"][kp][w]),
                fiber_spread=float(fm.std()) if len(fm) >= 3 else float("nan"))
     r0 = 0.0 if np.isnan(r_m) else r_m
     if cand["category"] == "agree":
@@ -341,10 +354,10 @@ def plot_locus(out, row, output_assays, split):
         title = ASSAY_LABELS[assay]
         if col == 0:
             title += f"  (flagged: d = {row['d_screen']:+.2f})"
-        r_m = row["r_model"] if col == 0 else row["r_model_partner"]
-        r_b = row["r_baseline"] if col == 0 else row["r_baseline_partner"]
+        m_m = row["mse_model"] if col == 0 else row["mse_model_partner"]
+        m_b = row["mse_baseline"] if col == 0 else row["mse_baseline_partner"]
         ax_b.set_title(title, fontsize=FS_TITLE, fontweight="bold", loc="left", pad=8)
-        ax_b.text(1.0, 1.02, f"tile r: model {r_m:.2f}, baseline {r_b:.2f}", transform=ax_b.transAxes,
+        ax_b.text(1.0, 1.02, f"tile MSE: model {m_m:.3f}, baseline {m_b:.3f}", transform=ax_b.transAxes,
                   ha="right", va="bottom", fontsize=FS_TICK, color="0.3")
         ax_b.tick_params(labelbottom=False)
 
@@ -362,7 +375,7 @@ def plot_locus(out, row, output_assays, split):
         fig.colorbar(im, cax=cax).ax.tick_params(labelsize=FS_TICK - 2)
         ax_h.tick_params(labelbottom=False)
 
-        ymax = max(1.0, float(np.nanmax(out["bulk"][k])), max(float(np.max(pf[:, f])) for f in picks)) * 1.08
+        ymax = max(1.0, float(np.nanmax(out["baseline"][k])), max(float(np.max(pf[:, f])) for f in picks)) * 1.08
         for i, f in enumerate(picks):
             sub = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[2 + i, col], hspace=0.0,
                                                    height_ratios=[1, 1.3])
@@ -374,7 +387,7 @@ def plot_locus(out, row, output_assays, split):
             ax_p = fig.add_subplot(sub[1, 0], sharex=ax_b)
             ax_p.axvspan(b0, b1, color=BIN_COLOR, alpha=0.2, lw=0)
             y = np.where(mask[:, f], pf[:, f], np.nan)
-            ax_p.plot(x, out["bulk"][k], color="0.35", ls="--", lw=1.4)
+            ax_p.plot(x, out["baseline"][k], color="black", ls="--", lw=1.4)   # what a bulk baseline gives every fiber
             ax_p.fill_between(x, 0, y, color=MODEL_COLOR, alpha=0.2, lw=0)
             ax_p.plot(x, y, color=MODEL_COLOR, lw=1.8)
             ax_p.set_ylim(0, ymax)
@@ -386,8 +399,8 @@ def plot_locus(out, row, output_assays, split):
 
     handles = [Patch(color=TARGET_COLOR, alpha=0.45, label="ENCODE (this cell type)"),
                Line2D([], [], color=MODEL_COLOR, lw=2.8, label="Model: average over fibers"),
-               Line2D([], [], color="black", ls="--", lw=1.8, label="Baseline: cross-cell average"),
-               Line2D([], [], color="0.35", ls="--", lw=1.4, label="Average (on each fiber)"),
+               Line2D([], [], color="black", ls="--", lw=1.8, label="Baseline: cross-cell average (also on each fiber)"),
+               Line2D([], [], color=MODEL_COLOR, lw=1.8, label="Model: this fiber"),
                Patch(color=BIN_COLOR, alpha=0.4, label="Flagged 1 kb bin")]
     handles += [Patch(color=c, alpha=0.7, label=l) for c, l in zip(FEATURE_COLORS, FEATURE_LABELS)]
     fig.legend(handles=handles, loc="upper center", ncol=5, frameon=False, bbox_to_anchor=(0.5, 1 - 0.75 / (7.5 + 2.6 * n)))
@@ -421,6 +434,8 @@ def main():
     cells = DEV_CELLS + HELD_OUT
     meta_all = resolve_config_with_metapaths({"cell_types": {c: None for c in cells}}, mp, output_assays)
     baseline_meta = resolve_baseline_cells(DEV_CELLS, mp, output_assays)
+    if REPLOT_FROM:
+        return replot(model, output_assays, mp, baseline_meta, cfg, device, out_dir)
     from regions import Regions
     region_list = Regions(meta_all["regions_root"]).window_set(WINDOWS)
 
@@ -480,6 +495,40 @@ def main():
         write_table(rows, os.path.join(out_dir, "ranking.tsv"))
 
     print(f"\nDone. {len(rows)} candidates ranked, figures and ranking.tsv in {out_dir}", flush=True)
+
+
+def replot(model, output_assays, mp, baseline_meta, cfg, device, out_dir):
+    """Re-plots the figures listed in REPLOT_FROM/ranking.tsv (same loci, names and folders), re-scoring each one."""
+    by_label = {cell_label(c): c for c in DEV_CELLS + HELD_OUT}
+    with open(os.path.join(REPO_ROOT, REPLOT_FROM, "ranking.tsv")) as f:
+        old = [r for r in csv.DictReader(f, delimiter="\t") if r["figure"]]
+    print(f"[replot] {len(old)} figures from {REPLOT_FROM}", flush=True)
+    rows = []
+    for cell in DEV_CELLS + HELD_OUT:
+        jobs = {}
+        for r in old:
+            if by_label[r["cell"]] == cell:
+                region = (r["chrom"], int(r["start"]), int(r["end"]))
+                cand = dict(cell=cell, group=r["group"], category=r["category"], flagged=r["flagged"],
+                            partner=r["partner"], region=region, bin=int(r["bin"]), d_screen=float(r["d_screen"]))
+                jobs.setdefault(region, []).append((cand, r["selected"], r["figure"]))
+        print(f"\n[plot] {cell}: {sum(len(v) for v in jobs.values())} figures on {len(jobs)} tiles", flush=True)
+        for out in run_model(model, cell, list(jobs), mp, baseline_meta, cfg, device):
+            for cand, sel, figure in jobs[out["region"]]:
+                r = score_candidate(cand, out, output_assays)
+                r["selected"] = sel
+                fig = plot_locus(out, r, output_assays, "dev" if cell in DEV_CELLS else "test")
+                if fig is None:
+                    print(f"  {out['window']} {r['flagged']}: no fiber covers the flagged bin; skipped", flush=True)
+                    continue
+                os.makedirs(os.path.join(out_dir, os.path.dirname(figure)), exist_ok=True)
+                fig.savefig(os.path.join(out_dir, figure), dpi=DPI)
+                plt.close(fig)
+                r["figure"] = figure
+                rows.append(r)
+                print(f"  saved {figure}  (MSE {r['mse_model']:.3f} vs {r['mse_baseline']:.3f})", flush=True)
+        write_table(rows, os.path.join(out_dir, "ranking.tsv"))
+    print(f"\nDone. {len(rows)} figures and ranking.tsv in {out_dir}", flush=True)
 
 
 def write_table(rows, path):
