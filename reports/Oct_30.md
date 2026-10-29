@@ -169,15 +169,17 @@ assay table). H1 and H9 have 3 sharp assays (no ATAC). Model / baseline; **bold*
     - how much of the gap to the average the model recovers;
     - the model's r over the 5 kb tile.
   - Plots: per cell type and group, the best few plus random picks. 224 figures in total, all on fir in
-    `results/26-10-27_T10-57-03_single_molecule_dev5/` (redrawn with tile MSE; ranking from `..._T06-06-09_...`).
+    `results/26-10-28_T21-22-02_single_molecule_dev5/` (latest version; ranking from `..._T06-06-09_...`).
   - Code: `plots_code/26_oct_30/single_molecule_dev5.py`.
 - **Each figure:**
   - Two panels: the flagged assay and its partner (ATAC↔CTCF, H3K4me3↔H3K27ac, H3K4me1↔H3K36me3,
     H3K27me3↔H3K9me3; for H1/H9, which have no ATAC, CTCF is paired with H3K27ac).
   - Top: the ENCODE track, the model's average over fibers, and the baseline, with the tile MSE of each (scored
     positions, ≥ 5 fibers).
+  - The 5 kb window is centred on the flagged bin.
   - Then a heatmap of every fiber's prediction, sorted by the flagged bin.
-  - Then five fibers across that ranking, with their inputs (m6A, MSP, nucleosomes, FIRE). Each fiber's prediction
+  - Then five fibers across that ranking (preferring fibers that cover the window on both sides of the bin), with
+    their inputs (m6A, MSP, nucleosomes, FIRE). Each fiber's prediction
     is drawn against the baseline (dashed): a bulk baseline gives every fiber that same curve, while the model gives
     each fiber its own.
 - **Over all 799 ranked candidates** (not just the plotted ones):
@@ -196,26 +198,26 @@ assay table). H1 and H9 have 3 sharp assays (no ATAC). Model / baseline; **bold*
     sharp marks), but the model is close.
 - **Figures to show** (`figures/oct30/sm_*.png`):
   - `sm_test_mcf7_atac_gain.png`: MCF-7 (held out), ATAC peak absent from the average.
-    - The model finds it (tile MSE 0.13 vs 1.06 for the baseline).
+    - The model finds it (tile MSE 0.14 vs 1.07 for the baseline).
     - The heatmap shows which fibers are open; closed fibers predict ~0.
-  - `sm_test_mcf7_h3k4me1_gain.png`: same locus, H3K4me1. A broad mark that works (MSE 0.39 vs 1.94), with a
+  - `sm_test_mcf7_h3k4me1_gain.png`: same locus, H3K4me1. A broad mark that works (MSE 0.48 vs 2.15), with a
     gradient across fibers.
   - `sm_dev_hepg2_h3k4me3_gain.png`: HepG2 promoter, H3K4me3 and H3K27ac.
-    - The model tracks the track (MSE 0.25 vs 2.22).
-    - The bottom fiber is fully nucleosome-covered and predicts nothing: a silent copy.
+    - The model follows the promoter domain (MSE 0.63 vs 3.44), though below its full height (~2.5 vs ~3.5).
+    - The bottom fiber is almost fully nucleosome-covered and predicts nothing: a silent copy.
   - `sm_test_h9_h3k4me3_gain.png`: H9 (held out, no ATAC).
-    - H3K4me3 is right (MSE 0.16 vs 0.84).
-    - H3K27ac is over-called at the same spot (MSE 0.84 vs 0.16, worse than the baseline): the model ties the two
+    - H3K4me3 is right (MSE 0.28 vs 1.00).
+    - H3K27ac is over-called at the same spot (MSE 0.92 vs 0.08, worse than the baseline): the model ties the two
       promoter marks together.
   - `sm_test_hct116_atac_agree.png`: HCT116 ATAC in line with the average.
-    - Same shape (r 0.98 vs 1.00), but the baseline is closer in level (MSE 0.155 vs 0.018): the model sits
+    - Same shape (r 0.98 vs 0.97), but the baseline is closer in level (MSE 0.125 vs 0.072): the model sits
       slightly high across the whole tile.
-    - CTCF is over-called at the accessible site (MSE 0.30 vs 0.19): CTCF follows accessibility (also visible in
-      the MCF-7 figure, MSE 0.42 vs 0.29).
+    - CTCF is over-called at the accessible site (MSE 0.22 vs 0.16): CTCF follows accessibility (also visible in
+      the MCF-7 figure, MSE 0.43 vs 0.26).
   - `sm_test_hct116_h3k4me1_loss.png`: HCT116 lacks the H3K4me1 domain the average predicts.
-    - The model stays low (MSE 0.26 vs 1.62).
-    - It misses the one real peak at ~2 kb.
-  - `sm_test_hct116_h3k27me3_random_fail.png` (random pick): a failure (MSE 0.88 vs 0.78). The HCT116 H3K27me3
+    - The model stays low (MSE 0.27 vs 1.76).
+    - It misses the one real peak in the window.
+  - `sm_test_hct116_h3k27me3_random_fail.png` (random pick): a failure (MSE 0.80 vs 0.72). The HCT116 H3K27me3
     domain is missed; the prediction is flat and uniform across fibers, the broad-mark weakness from Table 2.
 
 ### Mixture test (T3): are single molecules resolved?

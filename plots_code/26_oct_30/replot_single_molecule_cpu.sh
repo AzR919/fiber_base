@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-10-27_04_replot_single_molecule_dev5_mse
+#SBATCH --job-name=2026-10-28_00_replot_single_molecule_dev5_centred
 #SBATCH --account=def-maxwl_cpu
 #SBATCH --output=logs/%x.out
 #SBATCH --error=logs/%x.err

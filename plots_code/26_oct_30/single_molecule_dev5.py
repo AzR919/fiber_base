@@ -2,10 +2,11 @@
 One-off script for the Oct 30 presentation: single-molecule figures of the DEV5 long model (100 epochs, the model
 behind the bulk-recovery numbers), on chr21 test tiles, for the 5 dev and the 3 held-out cell types.
 
-Every figure shows one tile and a pair of assays (the flagged assay and its partner, PARTNER), with the ENCODE
-track, the model's average over fibers and the cross-cell-average baseline on top, a heatmap of every fiber's
-prediction, and NUM_FIBERS example fibers (input channels + prediction, with the baseline as a reference line: what
-a bulk baseline would give every fiber).
+Every figure shows one window centred on the flagged bin and a pair of assays (the flagged assay and its partner,
+PARTNER), with the ENCODE track, the model's average over fibers and the cross-cell-average baseline on top, a
+heatmap of every fiber's prediction, and NUM_FIBERS example fibers (input channels + prediction, with the baseline as
+a reference line: what a bulk baseline would give every fiber), preferring fibers that span the flagged bin on both
+sides.
 
 Three passes in one job:
   0. Screen (ENCODE tracks only, no fibers, no model): per cell type, tile and assay, cut the tile into BIN bp bins;
@@ -67,7 +68,7 @@ PLOT_RANDOM = {"gain": 2, "loss": 1, "agree": 2}
 MIN_FIBERS = 20                                      # tiles with fewer fibers are ranked but not plotted
 MIN_COVERAGE = 5                                     # scored positions (as in the eval)
 NUM_FIBERS = 5                                       # example fibers per figure
-MIN_SPAN = 0.6                                       # fraction of the window an example fiber should cover
+RANK_WEIGHT = 3.0   # example fibers: cost of moving across the whole ranking, traded against centring the bin (0-1)
 NUM_WORKERS = 4
 SEED = 919
 RUN_NAME = "single_molecule_dev5"
@@ -301,19 +302,33 @@ def _render_single_fiber_features(ax, fiber_inp):
 
 def choose_fibers(out, k, b):
     """Fibers sorted by their prediction in the flagged bin (covering fibers first, the rest by their own mean),
-    and NUM_FIBERS examples spread over that ranking (top to bottom), preferring fibers spanning >= MIN_SPAN."""
-    L = out["mask"].shape[0]
-    present = np.where(out["mask"].sum(0) > 0)[0]
+    and NUM_FIBERS examples spread over that ranking (top to bottom). Each example is the fiber near its target rank
+    that best centres the flagged bin, i.e. covers the window on both sides of it (a soft preference, traded off
+    against moving away from the target rank by RANK_WEIGHT)."""
+    mask = out["mask"]
+    L = mask.shape[0]
+    present = np.where(mask.sum(0) > 0)[0]
     fm = fiber_bin_means(out, k, b)
-    own = (out["per_fiber"][k] * out["mask"]).sum(0) / np.maximum(out["mask"].sum(0), 1)
+    own = (out["per_fiber"][k] * mask).sum(0) / np.maximum(mask.sum(0), 1)
     covering = sorted([f for f in present if not np.isnan(fm[f])], key=lambda f: -fm[f])
     order = covering + sorted([f for f in present if np.isnan(fm[f])], key=lambda f: -own[f])
-    span = out["mask"].sum(0) / L
-    pool = [f for f in covering if span[f] >= MIN_SPAN]
-    if len(pool) < NUM_FIBERS:
-        pool = covering
-    idx = np.unique(np.linspace(0, len(pool) - 1, min(NUM_FIBERS, len(pool))).round().astype(int))
-    return order, [pool[i] for i in idx], len(covering)
+    b0, b1 = b * BIN, (b + 1) * BIN
+    centred = np.minimum(mask[:b0].sum(0) / max(b0, 1), mask[b1:].sum(0) / max(L - b1, 1))   # 1: spans both sides
+    n = len(covering)
+    picks = []
+    for t in np.linspace(0, n - 1, min(NUM_FIBERS, n)):
+        free = [i for i in range(n) if covering[i] not in picks]
+        i = max(free, key=lambda i: centred[covering[i]] - RANK_WEIGHT * abs(i - t) / max(n - 1, 1))
+        picks.append(covering[i])
+    return order, sorted(picks, key=covering.index), n
+
+
+def centre_on_bin(cand, context):
+    """The candidate moved to a window centred on its flagged bin (bin index context // BIN // 2; exact when the
+    window holds an odd number of bins). The ranking scores the candidate on its tile; the figure uses this window."""
+    chrom, start, end = cand["region"]
+    b_start = (start + end) // 2 - context // 2 + cand["bin"] * BIN
+    return dict(cand, region=(chrom, b_start, b_start + BIN), bin=context // BIN // 2)
 
 
 def plot_locus(out, row, output_assays, split):
@@ -474,12 +489,13 @@ def main():
             for sel, picked in (("best", best), ("random", rng.sample(rest, min(PLOT_RANDOM[key[1]], len(rest))))):
                 for j, r in enumerate(picked):
                     r["selected"] = sel
-                    jobs.setdefault(r["region"], []).append((r, sel, j))
+                    c = centre_on_bin(r, cfg["context_length"])
+                    jobs.setdefault(c["region"], []).append((r, c, sel, j))
 
-        print(f"[plot] {cell}: {sum(len(v) for v in jobs.values())} figures on {len(jobs)} tiles", flush=True)
+        print(f"[plot] {cell}: {sum(len(v) for v in jobs.values())} figures on {len(jobs)} windows", flush=True)
         for out in run_model(model, cell, list(jobs), mp, baseline_meta, cfg, device):
-            for r, sel, j in jobs[out["region"]]:
-                fig = plot_locus(out, r, output_assays, split)
+            for r, c, sel, j in jobs[out["region"]]:
+                fig = plot_locus(out, score_candidate(c, out, output_assays), output_assays, split)
                 if fig is None:
                     print(f"  {out['window']} {r['flagged']}: no fiber covers the flagged bin; skipped", flush=True)
                     continue
@@ -511,8 +527,9 @@ def replot(model, output_assays, mp, baseline_meta, cfg, device, out_dir):
                 region = (r["chrom"], int(r["start"]), int(r["end"]))
                 cand = dict(cell=cell, group=r["group"], category=r["category"], flagged=r["flagged"],
                             partner=r["partner"], region=region, bin=int(r["bin"]), d_screen=float(r["d_screen"]))
-                jobs.setdefault(region, []).append((cand, r["selected"], r["figure"]))
-        print(f"\n[plot] {cell}: {sum(len(v) for v in jobs.values())} figures on {len(jobs)} tiles", flush=True)
+                cand = centre_on_bin(cand, cfg["context_length"])
+                jobs.setdefault(cand["region"], []).append((cand, r["selected"], r["figure"]))
+        print(f"\n[plot] {cell}: {sum(len(v) for v in jobs.values())} figures on {len(jobs)} windows", flush=True)
         for out in run_model(model, cell, list(jobs), mp, baseline_meta, cfg, device):
             for cand, sel, figure in jobs[out["region"]]:
                 r = score_candidate(cand, out, output_assays)
@@ -521,6 +538,10 @@ def replot(model, output_assays, mp, baseline_meta, cfg, device, out_dir):
                 if fig is None:
                     print(f"  {out['window']} {r['flagged']}: no fiber covers the flagged bin; skipped", flush=True)
                     continue
+                chrom, s, e = out["window"]   # same name as before, with the centred window's coordinates
+                sel_, cat, j = os.path.basename(figure).split("_")[:3]
+                figure = os.path.join(os.path.dirname(figure),
+                                      f"{sel_}_{cat}_{j}_{chrom}_{s}-{e}_{r['flagged']}-{r['partner']}.png")
                 os.makedirs(os.path.join(out_dir, os.path.dirname(figure)), exist_ok=True)
                 fig.savefig(os.path.join(out_dir, figure), dpi=DPI)
                 plt.close(fig)
