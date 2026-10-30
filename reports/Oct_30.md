@@ -607,6 +607,13 @@ Notes for the presentation: each section below is one or two slides.
 - **Reference values for r:** ENCODE replicate 1 vs 2 as the ceiling; H1's track as a prediction for H9.
 - **Mixture test:** a second training seed, a pair from the same Fiber-seq series (K562 + HepG2), and the test on
   unseen cell types (T3b). T3b rules out a model that only recognises the cell type; it is eval only.
+- **Is each assay more than accessibility?** The assay counterpart of cell-type r; eval only.
+  - Assay-specific r: predicted vs true mark after removing ATAC (partial correlation), per assay, dev vs held-out.
+  - Discordant loci: open but not marked (ATAC+ / H3K27ac-, mostly CTCF sites), primed vs active enhancers
+    (H3K4me1+ / H3K27ac-), bivalent promoters in H9. Headline: sites discordant in one cell type and concordant in
+    another, so the DNA cannot explain it.
+  - Quick lead-in: how correlated the 8 predicted assays are with each other vs the true ones; if predictions are
+    more alike, the model is collapsing onto accessibility.
 
 ### Next: improve the model
 
