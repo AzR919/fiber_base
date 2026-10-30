@@ -3,7 +3,9 @@
 Reads both models' eval outputs (eval_summary.json and the paired .npz of the GM12878 / HepG2 pair) and draws:
   t3_summary_bars.png    differential r (per 5 kb window), sign accuracy and fiber-origin AUC, averaged over the
                          sharp assays, the broad assays and all 8; H0 ("bulk on every molecule") as a dashed line
-  t3_per_assay_bars.png  the same three readouts per assay
+  t3_per_assay_bulk.png       per assay (order and layout as the dev-test per-assay charts, plus "All" = mean over
+                              the 8 assays): differential r and sign accuracy, one panel each
+  t3_per_assay_fiber_auc.png  the same for the fiber-origin AUC and the library control's |AUC - 0.5|
   t3_library_bars.png    mixture model: fiber-origin |AUC - 0.5| for GM12878 vs HepG2 and for the library control
                          (HepG2 100U vs 200U), per assay
 Window-level differential r is recomputed from the .npz the way plot_differential_scatter does (windows scored in
@@ -102,34 +104,59 @@ def summary(mix, upper, out):
     print(f"saved {out}")
 
 
-def assay_axis(ax):
-    """x positions of the 8 assays (sharp, gap, broad) with group labels under the ticks."""
-    x = np.array([0, 1, 2, 3, 4.6, 5.6, 6.6, 7.6], dtype=float)
+ORDER = ["atac", "h3k4me3", "h3k27ac", "ctcf", "h3k4me1", "h3k36me3", "h3k27me3", "h3k9me3"]   # as the tables
+PANELS = READOUTS + [("lib_dev", "Library control, |AUC − 0.5|  (HepG2 100U vs 200U; lower is better)", None)]
+
+
+def assay_axis(ax, x=None, all_group=False):
+    """x positions of the assays (narrow-peak, broad-peak; optionally an "All" group after a gap), with tilted
+    labels and group brackets under the ticks."""
+    if x is None:
+        x = np.array([0, 1, 2, 3, 4.6, 5.6, 6.6, 7.6], dtype=float)
+    labels = [ASSAY_LABELS[a] for a in (ORDER if all_group else SHARP + BROAD)] + (["All"] if all_group else [])
     ax.set_xticks(x)
-    ax.set_xticklabels([ASSAY_LABELS[a] for a in SHARP + BROAD], fontsize=11)
-    for lo, hi, txt in ((x[0], x[3], "Sharp"), (x[4], x[7], "Broad")):
-        ax.annotate("", xy=(lo - 0.4, -0.13), xytext=(hi + 0.4, -0.13), xycoords=("data", "axes fraction"),
+    ax.set_xticklabels(labels, fontsize=10.5, rotation=30 if all_group else 0, ha="right" if all_group else "center",
+                       rotation_mode="anchor")
+    if all_group:
+        ax.get_xticklabels()[-1].set_fontweight("bold")
+    if all_group:
+        groups = ((x[0], x[3], "Narrow peaks"), (x[4], x[7], "Broad peaks"))
+    else:
+        groups = ((x[0], x[3], "Sharp"), (x[4], x[7], "Broad"))
+    y0 = -0.24 if all_group else -0.13
+    for lo, hi, txt in groups:
+        ax.annotate("", xy=(lo - 0.4, y0), xytext=(hi + 0.4, y0), xycoords=("data", "axes fraction"),
                     textcoords=("data", "axes fraction"), arrowprops=dict(arrowstyle="-", color=TEXT_2, lw=1))
-        ax.text((lo + hi) / 2, -0.16, txt, transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=12,
-                color=TEXT_2)
+        ax.text((lo + hi) / 2, y0 - 0.03, txt, transform=ax.get_xaxis_transform(), ha="center", va="top",
+                fontsize=11, color=TEXT_2)
     return x
 
 
-def per_assay(mix, upper, out):
-    assays = SHARP + BROAD
-    fig, axes = plt.subplots(3, 1, figsize=(12, 13))
-    for ax, (key, title, h0) in zip(axes, READOUTS):
-        x = assay_axis(ax)
-        paired_bars(ax, x, [mix[key][a] for a in assays], [upper[key][a] for a in assays], 0.36,
-                    ("Mixture model", "Upper bound (own tracks)"))
-        style(ax, h0)
-        ax.set_ylim(0, 1.0 if h0 else 0.85)
-        ax.set_title(f"{title}   (H0 = {h0:g})", fontsize=14, fontweight="bold", color=TEXT, loc="left")
-    handles, labels = axes[0].get_legend_handles_labels()
-    handles.append(plt.Line2D([], [], color=TEXT, ls="--", lw=1.4))
-    labels.append("H0: bulk on every molecule")
-    fig.legend(handles, labels, loc="upper center", ncol=3, frameon=False, fontsize=12, bbox_to_anchor=(0.5, 1.0))
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.93, bottom=0.06, hspace=0.55)
+def per_assay(mix, upper, panels, out):
+    x = np.array(list(range(8)) + [8.7], dtype=float)
+    w = 0.38
+    fig, axes = plt.subplots(1, len(panels), figsize=(17, 5.6), squeeze=False)
+    for ax, (key, title, h0) in zip(axes.flat, panels):
+        m = [mix[key][a] for a in ORDER] + [mean(mix[key], ORDER)]
+        u = [upper[key][a] for a in ORDER] + [mean(upper[key], ORDER)]
+        paired_bars(ax, x, m, u, w, ("Mixture model", "Upper bound (own tracks)"))
+        ax.annotate(f"{m[-1]:.2f} vs {u[-1]:.2f}" if key != "lib_dev" else f"{m[-1]:.3f} vs {u[-1]:.3f}",
+                    (x[-1], max(m[-1], u[-1])), xytext=(0, 4), textcoords="offset points", ha="center",
+                    va="bottom", fontsize=10.5, color=TEXT)
+        if key == "lib_dev":
+            style(ax, 0.05)
+            ax.set_ylim(0, 0.12)
+            sub = "dashed: sampling noise (≈ 0.05)"
+        else:
+            style(ax, h0)
+            ax.set_ylim(min(0, min(m + u) - 0.05), 1.0 if h0 else 0.85)
+            sub = f"dashed: H0 = {h0:g}"
+        assay_axis(ax, x, all_group=True)
+        ax.set_title(title + "\n", fontsize=13.5, fontweight="bold", color=TEXT, loc="left")
+        ax.text(0, 1.0, sub, transform=ax.transAxes, ha="left", va="bottom", fontsize=10.5, color=TEXT_2)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, fontsize=12, bbox_to_anchor=(0.5, 1.0))
+    fig.subplots_adjust(left=0.05, right=0.99, top=0.8, bottom=0.24, wspace=0.12)
     fig.savefig(out, dpi=200, facecolor="white")
     plt.close(fig)
     print(f"saved {out}")
@@ -169,12 +196,13 @@ def main():
     args = ap.parse_args()
 
     mix, upper = load(args.mixture), load(args.upper)
-    for key, _, _ in READOUTS:
-        print(key, "mixture", {a: round(v, 3) for a, v in mix[key].items()})
-        print(key, "upper  ", {a: round(v, 3) for a, v in upper[key].items()})
+    for key, _, _ in PANELS:
+        print(key, "mixture", {a: round(mix[key][a], 3) for a in ORDER}, "mean", round(mean(mix[key], ORDER), 3))
+        print(key, "upper  ", {a: round(upper[key][a], 3) for a in ORDER}, "mean", round(mean(upper[key], ORDER), 3))
     os.makedirs(args.out_dir, exist_ok=True)
     summary(mix, upper, os.path.join(args.out_dir, "t3_summary_bars.png"))
-    per_assay(mix, upper, os.path.join(args.out_dir, "t3_per_assay_bars.png"))
+    per_assay(mix, upper, PANELS[:2], os.path.join(args.out_dir, "t3_per_assay_bulk.png"))
+    per_assay(mix, upper, PANELS[2:], os.path.join(args.out_dir, "t3_per_assay_fiber_auc.png"))
     library(mix, os.path.join(args.out_dir, "t3_library_bars.png"))
 
 
