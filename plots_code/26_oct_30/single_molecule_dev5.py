@@ -24,7 +24,7 @@ Three passes in one job:
 
 Writes results/<YY-MM-DD_THH-MM-SS>_single_molecule_dev5/: ranking.tsv and
 <dev|test>/<cell>/<sharp|broad>/<best|random>_<category>_<NN>_<chrom>_<start>-<end>_<flagged>-<partner>.png
-(results/ is not synced; copy the good ones to reports/figures/oct30/).
+(results/ is not synced; copy the good ones to plots/26_oct_30/sm/).
 Edit the constants in the EDIT ME block (no CLI by design).
 Usage: python plots_code/26_oct_30/single_molecule_dev5.py
 """

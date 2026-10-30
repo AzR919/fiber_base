@@ -63,12 +63,12 @@ Per assay, mixture model / upper bound:
 | Fiber-origin AUC | .72/.70 | .67/.65 | .67/.66 | .61/.55 | .68/.65 | .54/.52 | .54/.47 | .64/.63 |
 | Differential bins | 776 | 355 | 702 | 605 | 1,472 | 592 | 2,952 | 388 |
 
-![Per-assay readouts: mixture model vs upper bound](figures/oct23_t3/t3_report.png)
+![Per-assay readouts: mixture model vs upper bound](../plots/26_oct_23_t3/t3_report.png)
 
 **Window-level differences** (mixture model): each dot is a chr21 window, x = true GM12878 − HepG2 difference,
 y = predicted difference from each cell type's own fibers. H0 would put every dot on y = 0.
 
-![Differential scatter](figures/oct23_t3/mix_differential_scatter.png)
+![Differential scatter](../plots/26_oct_23_t3/mix_differential_scatter.png)
 
 **Single molecules at a GM12878-specific locus** (mixture model): tracks of both cell types (light filled areas),
 their 50:50 mixture (dashed: what H0 gives both), each cell type's prediction from its own fibers (bold lines,
@@ -77,18 +77,18 @@ prediction, GM12878 fibers above the cyan line, HepG2 below, each block sorted b
 At the H3K27ac / H3K4me3 peak most GM12878 fibers light up, a minority stay dark (molecules without the mark), and
 HepG2 fibers stay dark.
 
-![Paired locus](figures/oct23_t3/mix_paired_locus_0.png)
+![Paired locus](../plots/26_oct_23_t3/mix_paired_locus_0.png)
 
 The four panels are the assays that differ most between the two cell types at this window. All 8 assays at the
-same locus: [paired locus, all assays](figures/oct23_t3/mix_paired_locus_0_all.png).
+same locus: [paired locus, all assays](../plots/26_oct_23_t3/mix_paired_locus_0_all.png).
 
 A second locus shows the weak case: the H3K27ac and H3K4me1 differences are right, but for H3K36me3 (a broad
-gene-body mark) the predicted difference has the wrong sign: [paired locus 2](figures/oct23_t3/mix_paired_locus_1.png).
+gene-body mark) the predicted difference has the wrong sign: [paired locus 2](../plots/26_oct_23_t3/mix_paired_locus_1.png).
 
 **Fiber-origin AUC per differential bin** (mixture model) and the library control:
 
-![Fiber-origin AUC](figures/oct23_t3/mix_fiber_auc.png)
-![Library control AUC](figures/oct23_t3/mix_library_fiber_auc.png)
+![Fiber-origin AUC](../plots/26_oct_23_t3/mix_fiber_auc.png)
+![Library control AUC](../plots/26_oct_23_t3/mix_library_fiber_auc.png)
 
 ## Is the separation biology or library?
 

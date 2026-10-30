@@ -16,7 +16,7 @@ NUM_FIBERS fibers per figure, the same fibers in both columns: fibers spanning >
 summed m6a > M6A_THRESHOLD, preferring fibers with FIRE calls (up to half), seeded.
 
 Writes results/26_oct_30_fire_msp/<cell>/<NN>_<chrom>_<start>-<end>_<assays>.png (results/ is not synced; pick
-the good ones and copy them to reports/figures/oct30/).
+the good ones and copy them to plots/26_oct_30/rest/).
 Edit the constants in the EDIT ME block (no CLI by design).
 Usage: python plots_code/26_oct_30/fire_msp_single_molecule.py
 """

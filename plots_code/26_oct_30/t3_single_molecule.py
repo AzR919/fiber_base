@@ -17,7 +17,7 @@ File names start with best_ / random_ so the showcase picks can be checked again
 
 Writes results/<YY-MM-DD_THH-MM-SS>_t3_single_molecule/: selected.tsv and
 <sharp|broad>/<best|random>_<GM12878|HepG2>-high_<NN>_<chrom>_<start>_<flagged>-<partner>.png
-(results/ is not synced; copy the good ones to reports/figures/oct30/).
+(results/ is not synced; copy the good ones to plots/26_oct_30/t3/).
 Edit the constants in the EDIT ME block (no CLI by design).
 Usage: python plots_code/26_oct_30/t3_single_molecule.py
 """

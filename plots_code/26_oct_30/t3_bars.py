@@ -165,7 +165,7 @@ def main():
                                          "uct_mid_8A_train02_eval")
     ap.add_argument("--upper", default="results/26-10-21_T02-04-44_T3_upper_data28_GM12878_HepG2_200U_model15_"
                                        "uct_mid_8A_train02_eval")
-    ap.add_argument("--out_dir", default="reports/figures/oct30")
+    ap.add_argument("--out_dir", default="plots/26_oct_30/t3")
     args = ap.parse_args()
 
     mix, upper = load(args.mixture), load(args.upper)

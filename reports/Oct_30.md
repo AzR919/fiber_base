@@ -35,9 +35,9 @@ Just show a few previous results.
 
 - Single-molecule figures (H3K27ac and H3K4me3; ENCODE track, with fire_msp in red, without in blue; 7 fibers with
   their inputs and both models' per-fiber predictions):
-  - `figures/oct30/fire_msp_GM12878_03_chr21_34580155-34585155_h3k27ac-h3k4me3.png`
-  - `figures/oct30/fire_msp_GM12878_07_chr21_45108980-45113980_h3k27ac-h3k4me3.png`
-  - `figures/oct30/fire_msp_K562_02_chr21_33400612-33405612_h3k27ac-h3k4me3.png`
+  - `../plots/26_oct_30/rest/fire_msp_GM12878_03_chr21_34580155-34585155_h3k27ac-h3k4me3.png`
+  - `../plots/26_oct_30/rest/fire_msp_GM12878_07_chr21_45108980-45113980_h3k27ac-h3k4me3.png`
+  - `../plots/26_oct_30/rest/fire_msp_K562_02_chr21_33400612-33405612_h3k27ac-h3k4me3.png`
 - Takeaway:
   - Both models agree on the FIRE-bearing fibers: they put the marks around the called FIRE elements, even the
     model that never sees fire_msp (GM 03). Fully closed fibers get nothing from either.
@@ -146,13 +146,12 @@ assay table). H1 and H9 have 3 sharp assays (no ATAC). Model / baseline; **bold*
   gets the levels closer and adds cell-specific signal in new cell types. The weak spot is broad domains,
   especially H3K36me3 (gene bodies) and H3K27me3 / H3K9me3, which are wider than the 5 kb window; longer DNA
   context is the likely fix. H3K4me1 is the exception among broad marks (it tracks enhancers and does well).
-- **Figures** (code: `plots_code/26_oct_30/sharp_broad_bars.py`, from the run's `eval_summary.json`), one panel per
-  group, one bar group per cell type plus the mean:
-  - `figures/oct30/sharp_broad_pearson.png`: model vs baseline. Sharp bars sit level with the baseline; broad bars
-    show the gap.
-  - `figures/oct30/sharp_broad_mse.png`: model vs baseline. The model is lower almost everywhere, in both groups.
-  - `figures/oct30/sharp_broad_cell_r.png`: model only (the baseline is 0 by definition). Held-out cell types sit
-    with the dev ones on sharp marks; broad marks are lower but positive everywhere.
+- **Figures** (`../plots/26_oct_30/rest/`, code: `plots_code/26_oct_30/sharp_broad_bars.py`, from the run's
+  `eval_summary.json`), one panel per group, one bar group per cell type plus the mean:
+  - `sharp_broad_pearson.png`: model vs baseline. Sharp bars sit level with the baseline; broad bars show the gap.
+  - `sharp_broad_mse.png`: model vs baseline. The model is lower almost everywhere, in both groups.
+  - `sharp_broad_cell_r.png`: model only (the baseline is 0 by definition). Held-out cell types sit with the dev
+    ones on sharp marks; broad marks are lower but positive everywhere.
 - Caveat: these numbers use the earlier fiber averaging and baseline (both since updated); a rerun is pending.
   The picture is not expected to change.
 
@@ -196,29 +195,54 @@ assay table). H1 and H9 have 3 sharp assays (no ATAC). Model / baseline; **bold*
   - At loss loci it mostly removes the peak the baseline wrongly predicts.
   - Where the cell matches the average, the baseline is already right and is hard to beat (r 0.88 vs 0.92 for
     sharp marks), but the model is close.
-- **Figures to show** (`figures/oct30/sm_*.png`):
-  - `sm_test_mcf7_atac_gain.png`: MCF-7 (held out), ATAC peak absent from the average.
-    - The model finds it (tile MSE 0.14 vs 1.07 for the baseline).
-    - The heatmap shows which fibers are open; closed fibers predict ~0.
-  - `sm_test_mcf7_h3k4me1_gain.png`: same locus, H3K4me1. A broad mark that works (MSE 0.48 vs 2.15), with a
-    gradient across fibers.
-  - `sm_dev_hepg2_h3k4me3_gain.png`: HepG2 promoter, H3K4me3 and H3K27ac.
-    - The model follows the promoter domain (MSE 0.63 vs 3.44), though below its full height (~2.5 vs ~3.5).
-    - The bottom fiber is almost fully nucleosome-covered and predicts nothing: a silent copy.
-  - `sm_test_h9_h3k4me3_gain.png`: H9 (held out, no ATAC).
-    - H3K4me3 is right (MSE 0.28 vs 1.00).
-    - H3K27ac is over-called at the same spot (MSE 0.92 vs 0.08, worse than the baseline): the model ties the two
-      promoter marks together.
-  - `sm_test_hct116_atac_agree.png`: HCT116 ATAC in line with the average.
-    - Same shape (r 0.98 vs 0.97), but the baseline is closer in level (MSE 0.125 vs 0.072): the model sits
-      slightly high across the whole tile.
-    - CTCF is over-called at the accessible site (MSE 0.22 vs 0.16): CTCF follows accessibility (also visible in
-      the MCF-7 figure, MSE 0.43 vs 0.26).
-  - `sm_test_hct116_h3k4me1_loss.png`: HCT116 lacks the H3K4me1 domain the average predicts.
-    - The model stays low (MSE 0.27 vs 1.76).
-    - It misses the one real peak in the window.
-  - `sm_test_hct116_h3k27me3_random_fail.png` (random pick): a failure (MSE 0.80 vs 0.72). The HCT116 H3K27me3
-    domain is missed; the prediction is flat and uniform across fibers, the broad-mark weakness from Table 2.
+- **Figures to show** (`../plots/26_oct_30/sm/`; tile MSE is model vs baseline, flagged assay first, then the
+  partner):
+  - **Gain (the cell has signal the average lacks):**
+    - `sm_test_mcf-7_atac_gain.png` (MCF-7, held out; ATAC 0.14 vs 1.07):
+      - The model finds an ATAC peak that the average does not have.
+      - The heatmap shows which fibers are open; the closed bottom fiber predicts ~0.
+      - CTCF is over-called at the same site (0.43 vs 0.26): CTCF follows accessibility.
+    - `sm_test_mcf-7_h3k4me3_gain.png` (MCF-7; H3K4me3 3.69 vs 9.56, H3K27ac 0.61 vs 2.78):
+      - A wide active domain the average misses. The model has the extent but about half the height.
+      - The fibers split into marked and unmarked; the bottom fiber is ~0.
+    - `sm_test_hct116_h3k4me3_gain.png` (HCT116, held out; 0.15 vs 1.30, H3K27ac 1.42 vs 3.30):
+      - The promoter is called on most fibers.
+      - The model over-calls the downstream half; H3K27ac is under-called but still closer than the baseline.
+    - `sm_dev_hepg2_h3k4me3_gain.png` (HepG2, dev; 0.63 vs 3.44, H3K27ac 1.42 vs 2.65):
+      - The model follows the promoter domain, below its full height (~2.5 vs ~3.5).
+      - The bottom fiber is almost fully nucleosome-covered and predicts nothing: a silent copy.
+    - `sm_dev_k562_h3k4me1_gain.png` (K562, dev; broad mark, 0.67 vs 2.36):
+      - The model rises over the domain, below its full height.
+      - Smooth gradient across fibers, down to a fully nucleosome-covered fiber at ~0.
+  - **Loss (the average has signal the cell lacks):**
+    - `sm_dev_gm12878_atac_loss.png` (GM12878, dev; ATAC 0.02 vs 0.82):
+      - The model removes the ATAC peak the average puts there.
+      - A few fibers with a FIRE element at the site still light up: rare open copies that average out in the bulk.
+      - It also drops the CTCF peak, which GM12878 partly has (0.25 vs 0.79).
+    - `sm_test_h9_h3k4me3_loss.png` (H9, held out; 0.11 vs 2.65, H3K27ac 0.23 vs 1.15):
+      - A promoter active in the other cell types but weak in H9; the model stays low on both marks.
+      - Only the top few fibers (with FIRE elements) carry signal.
+    - `sm_test_h9_h3k4me1_loss.png` (H9; broad, 0.09 vs 2.27):
+      - The model stays at H9's low level instead of the average's ~2.
+      - H3K36me3 is over-called (0.32 vs 0.14).
+  - **Agree (the cell matches the average):**
+    - `sm_test_mcf-7_atac_agree.png` (MCF-7; ATAC 0.145 vs 0.057, CTCF 0.28 vs 0.53):
+      - Peak shape and height match.
+      - The baseline is slightly closer on ATAC; the model is closer on CTCF.
+      - The closed bottom fiber predicts ~0 where the bulk peak is.
+    - `sm_dev_h1_h3k4me3_agree.png` (H1, dev; 0.22 vs 0.15, H3K27ac 0.99 vs 1.59):
+      - The bulk is matched, yet single fibers differ: the bottom fiber is marked only in patches.
+    - `sm_test_h9_h3k4me1_agree.png` (H9; broad, 0.11 vs 0.11):
+      - The bulk is matched, and the fibers again vary.
+      - A fiber with a long accessible stretch (FIRE) at the bin predicts a dip there: no nucleosome, no histone
+        mark.
+      - A fully nucleosome-covered fiber predicts ~0.
+  - **Failure:** `sm_test_hct116_h3k27me3_gain.png` (HCT116, a random pick; 0.80 vs 0.72):
+    - The H3K27me3 domain is missed.
+    - The prediction is flat and uniform across fibers: the broad-mark weakness from Table 2.
+  - **Pattern in the "agree" figures:**
+    - The bulk is no better than the baseline (expected: the baseline is already right there).
+    - The fibers still differ, which is information the baseline cannot give.
 
 ### Mixture test (T3): are single molecules resolved?
 
@@ -285,21 +309,21 @@ two apart, so we need a test where the answer per group of molecules is known.
 - **It is biology, not the library:** the separation flips with the direction of the difference (e.g. ATAC: the chance a
   GM12878 fiber scores above a HepG2 fiber is 0.65 where GM12878's track is higher, 0.23 where HepG2's is), and two libraries of one cell type are
   not told apart (|AUC − 0.5| 0.044 vs 0.175 for GM12878 vs HepG2).
-- **Bar charts** (`figures/oct30/`, code: `plots_code/26_oct_30/t3_bars.py`, from both runs' eval outputs):
+- **Bar charts** (`../plots/26_oct_30/t3/`, code: `plots_code/26_oct_30/t3_bars.py`, from both runs' eval outputs):
   - `t3_summary_bars.png`: Table 4 as bars (differential r per window, sign accuracy, fiber-origin AUC; sharp,
     broad, all 8; mixture vs upper bound; H0 as a dashed line).
   - `t3_per_assay_bars.png`: the same three readouts per assay. The mixture model is above H0 on every assay and
     readout; the upper bound's H3K9me3 sign accuracy (0.35) and AUC (0.47) fall below it.
   - `t3_library_bars.png`: fiber-origin |AUC − 0.5| per assay, GM12878 vs HepG2 (0.10–0.23) next to the library
     control (0.04–0.05 on every assay).
-- **Figures** (copied from `figures/oct23_t3/` to `figures/oct30/` with a `t3_` prefix):
+- **Figures** (copied from `../plots/26_oct_23_t3/` to `../plots/26_oct_30/t3/` with a `t3_` prefix):
   - `t3_mix_paired_locus_0.png`: a GM12878-specific locus. Each cell type's prediction from its own fibers, the
     mixture (what H0 gives both), and every fiber's prediction: most GM12878 fibers light up at the H3K27ac /
     H3K4me3 peak, a minority stay dark, HepG2 fibers stay dark.
   - `t3_mix_differential_scatter.png`: per chr21 window, predicted vs true difference (H0: all on y = 0).
   - `t3_mix_fiber_auc.png` and `t3_mix_library_fiber_auc.png`: fiber-origin AUC per differential bin, pair vs library
     control.
-- **Single-molecule examples** (`figures/oct30/t3_sm_*.png`, code: `plots_code/26_oct_30/t3_single_molecule.py`).
+- **Single-molecule examples** (`../plots/26_oct_30/t3/t3_sm_*.png`, code: `plots_code/26_oct_30/t3_single_molecule.py`).
   - What each figure shows:
     - The mixture model is run on each cell type's fibers alone, at chr21 bins where GM12878 and HepG2 differ.
     - Each figure has two panels: the differential assay and its partner.

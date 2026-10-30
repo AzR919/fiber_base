@@ -130,7 +130,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", default="results/26-10-18_T15-31-09_DEV5_long_data20_dev5_200U_model15_uct_mid_8A"
                                          "_train03_eval/eval_summary.json")
-    ap.add_argument("--out_dir", default="reports/figures/oct30")
+    ap.add_argument("--out_dir", default="plots/26_oct_30/rest")
     args = ap.parse_args()
 
     results = json.load(open(args.summary))["results"]
