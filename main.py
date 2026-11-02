@@ -50,7 +50,7 @@ def main():
 
     trainer = Trainer(model, train_dataset, val_dataset,
                           wandb_run=wandb_run, epochs=args.epochs,
-                          batch_size=args.batch_size, config=args)
+                          batch_size=args.batch_size, lr=args.lr, patience=args.patience, config=args)
 
     trainer.train(save_dir=res_dir)
 

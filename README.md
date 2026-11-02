@@ -130,6 +130,7 @@ epochs: 25
 samples_per_epoch: 1000     # training samples per epoch (steps = samples / batch_size)
 batch_size: 8
 lr: 0.0001
+# patience: 5              # optional (default 5): ReduceLROnPlateau patience in epochs; scale with samples_per_epoch
 res_dir: "./results"
 seed: 919
 # num_workers: 3           # optional DataLoader workers (default 0); datasets split their work across them
@@ -176,6 +177,7 @@ An eval config may list several cell types; each gets its own metrics (keyed `<c
 | `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `train02` | Standard run (25 epochs × 1000 samples, bs 8); `train01` is retired (old key `iters_per_epoch`) |
 | `train03` | Long run (100 epochs × 1000 samples, bs 8) |
+| `train04` | Standard run from Nov 2026: 15 epochs × 5000 samples (75k), bs 8, LR patience 2 epochs |
 | `data20` | All 5 dev cell types (split v1, 200U); training regions half cCRE, half random |
 | `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type); same regions as `data20` |
 | `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |

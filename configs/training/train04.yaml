@@ -1,0 +1,13 @@
+# Standard run from Nov 2026: 15 epochs x 5000 samples (75k samples, 625 steps per epoch at batch size 8), lr 1e-4,
+# LR patience 2 epochs (10k samples), seed 919. The 100 x 1000 run (train03) plateaued at ~60k samples; bigger
+# epochs validate and restart workers 5x less often. Patience 2 x 5000 is close to the old 5 x 1000 in samples.
+
+epochs: 15
+samples_per_epoch: 5000
+batch_size: 8
+lr: 0.0001
+patience: 2
+
+# Output & Miscellaneous
+res_dir: "./results"
+seed: 919

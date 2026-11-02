@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-10-21_02_t3_upper
+#SBATCH --job-name=2026-11-01_02_dev5_v1_train04
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -9,8 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-4:00:00
-#SBATCH --dependency=afterok:66297589
+#SBATCH --time=0-5:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -28,16 +27,16 @@ echo "Working directory is $(pwd)"
 # Activate virtual environment
 source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
-# Upper bound for the mixture test (T3): GM12878 + HepG2_200U trained as single cell types on their own tracks
-# (data28), same model and budget as 2026-10-21_01_t3_mix. Starts only if the smoke test (66297589) succeeds. Also
-# the V1 single-cell reference. Quick paired mini eval at the end; full eval separately (2026-10-21_04).
+# Reference model bank (reports/TODO.md, section 1): DEV5 with V1 fiber averaging, all 5 dev cell types (data20), mid
+# 8-assay model, train04 (15 x 5000 samples, LR patience 2). Replaces the V0 DEV5 runs. HepG2 mini eval at the end;
+# the full 8-cell eval with the fold-change baseline runs separately.
 python -u main.py \
-  --data_config configs/data/data28_GM12878_HepG2_200U.yaml \
+  --data_config configs/data/data20_dev5_200U.yaml \
   --model_config configs/models/model15_uct_mid_8A.yaml \
-  --train_config configs/training/train02.yaml \
-  --eval_configs configs/evals/eval24_pair_GM12878_HepG2_200U_mini.yaml \
+  --train_config configs/training/train04.yaml \
+  --eval_configs configs/evals/eval23_HepG2_200U_mini.yaml \
   --num_workers 3 \
-  --name_prefix T3_upper
+  --name_prefix DEV5_V1
 
 # Print job completion time
 echo "Job finished on $(date)"
