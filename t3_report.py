@@ -1,7 +1,7 @@
 """
 Mixture-test (T3) report: compares the mixture-trained model with the single-cell-trained upper bound from their
 eval_summary.json files (eval.py --baseline --mixture_reference with the eval24 paired config and the eval25 library
-control), and writes a markdown table and a bar-chart figure. See reports/TODO.md, T3.
+control), and writes a markdown table and a bar-chart figure. See reports/TODO_extended.md, T3.
 
 Usage:
     python t3_report.py --mixture results/<mix eval run>/eval_summary.json \

@@ -243,12 +243,12 @@ evaluated cell's own line) and `pair_loci:` (differential bins of the paired rea
 
 Counts per cell × assay are in the hundreds out of 6,843 tiles. Global scale differences between ENCODE
 experiments show up as one-sided sets (e.g. HepG2 H3K9me3: ~2,600 gains, ~70 losses on dev), the per-track
-scale issue noted in `reports/TODO.md` (T4).
+scale issue noted in `reports/TODO_extended.md` (T4).
 
 ## Mixture test (T3)
 
 Does the model resolve molecules, or paint the bulk onto every one? Train with **mixtures only** and check that
-each cell type's own fibers give back its own track (design and readouts: `reports/TODO.md`, T3; how to run: root
+each cell type's own fibers give back its own track (design and readouts: `reports/TODO_extended.md`, T3; how to run: root
 README, "Mixture test").
 
 | Config | Role |

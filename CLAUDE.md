@@ -33,10 +33,18 @@ Run the stop script before closing the laptop (avoids fail2ban bans from danglin
 
 ## Slurm jobs
 - Training: `slurm_batch_command.sh` → `main.py`. Eval of a saved checkpoint: `slurm_batch_command_eval.sh` → `eval.py`.
-- Logs go to `logs/<job-name>.out/.err`; checkpoints to `results/<timestamp>_<prefix>_<data>_<model>_<train>/`.
-- **Job name scheme:** `YYYY-MM-DD_NN_description` — dashes in the date, underscores after it, `NN` = two-digit index for that day starting at `00`. Example: `2026-10-14_00_no_fire`.
+- Logs go to `logs/<job-name>.out/.err`; checkpoints to `results/<timestamp>_train_<prefix>_<data>_<model>_<train>/`; eval output to `results/<timestamp>_eval_<training run name>/` (`_eval_BASELINE_<data>` for baseline-only).
+- **Job name scheme:** `YYYY-MM-DD_NN_<train|eval>_description` — dashes in the date, underscores after it, `NN` = two-digit index for that day starting at `00`, then `train` or `eval` so the kind of run shows in the prefix when scrolling `logs/`. Examples: `2026-10-14_00_train_no_fire`, `2026-10-14_01_eval_no_fire`. One-off jobs that are neither (plots, analysis) use the description directly.
 - Every new run gets the next index for the day (count across both training and eval scripts — check `logs/` and the other script). Update `--job-name` in the script before submitting.
 - GPUs are H100 MIG slices (`1g.10gb`, `2g.20gb`, `3g.40gb`); pick the smallest that fits.
+- **CPUs with a GPU job:** requesting more CPUs than the slice comes with bills the job for a larger slice. Keep `--cpus-per-task` at or below (and set DataLoader workers to fit):
+
+  | GPU slice | Fir | Nibi |
+  |---|---|---|
+  | `1g.10gb` | 1 | 2 |
+  | `2g.20gb` | 3 | 4 |
+  | `3g.40gb` | 5 | 6 |
+  | Full H100 | 12 | 14 |
 
 ## Conventions
 - Configs are numbered (`dataNN_`, `modelNN_`, `evalNN_`); add new ones with the next number instead of editing ones that have already been used in a run. Each config starts with a header comment saying what it is.

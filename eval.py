@@ -98,7 +98,7 @@ def main():
         output_assays = args.output_assays or list(yaml.safe_load(open(ENCODE_SPEC))["assays"])
         base_name = f"BASELINE_{os.path.splitext(os.path.basename(args.train_data_config))[0]}"
         print(f"--> Baseline: training cells {baseline_cells} from {args.train_data_config}, assays {output_assays}")
-        run_name, wandb_run_name = f"{now}_{base_name}", base_name
+        run_name, wandb_run_name = f"{now}_eval_{base_name}", base_name
     else:
         print("--> Loading model checkpoint...")
         model, ckpt_config = BaseModel.load_model(args.checkpoint, map_location=args.device)
@@ -112,8 +112,8 @@ def main():
                                  "use --baseline_only --train_data_config <its data config> instead.")
             print(f"--> Baseline: training cells {baseline_cells} (from the checkpoint)")
         run_dir = os.path.basename(os.path.dirname(os.path.abspath(args.checkpoint)))
-        base_name = re.sub(r'^\d{2}-\d{2}-\d{2}_T\d{2}-\d{2}-\d{2}_?', '', run_dir)
-        run_name, wandb_run_name = f"{now}_{base_name}_eval", f"{base_name}_eval"
+        base_name = re.sub(r'^\d{2}-\d{2}-\d{2}_T\d{2}-\d{2}-\d{2}_?(train_)?', '', run_dir)
+        run_name, wandb_run_name = f"{now}_eval_{base_name}", f"{base_name}_eval"
 
     # Minimal namespace so run_final_eval has fallback values for context_length / fibers_per_entry
     train_args_ns = SimpleNamespace(

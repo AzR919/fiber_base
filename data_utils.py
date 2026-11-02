@@ -313,7 +313,7 @@ class SingleCellFiberDataset(IterableDataset):
 
 class MixedCellFiberDataset(SingleCellFiberDataset):
     """
-    Composite samples for mixture training (T3 in reports/TODO.md): fibers from several cell types at the same
+    Composite samples for mixture training (T3 in reports/TODO_extended.md): fibers from several cell types at the same
     window, with the bulk target that mixture would have.
 
     Proportions: with mix_range [lo, hi] (exactly 2 cell types), the first cell type's share of the fibers is drawn

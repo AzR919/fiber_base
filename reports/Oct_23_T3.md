@@ -2,7 +2,7 @@
 
 Are single molecules resolved? The model is trained only on bulk averages, so the question is whether its
 per-molecule output carries molecule-specific information. Setup of the pipeline: `Oct_19.md`; bulk results and
-the fiber-averaging change: `Oct_23.md`. Design of the test: `TODO.md`, T3.
+the fiber-averaging change: `Oct_23.md`. Design of the test: `TODO_extended.md`, T3.
 
 **Summary.** A model trained only on mixtures of GM12878 and HepG2 (never on either cell type's own track) gives
 each cell type's molecules their own signal: the predicted difference between the two follows the true one

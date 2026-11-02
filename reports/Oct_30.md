@@ -345,7 +345,7 @@ Notes for the presentation: each section below is one or two slides.
 
 ### Mixture test (T3): are single molecules resolved?
 
-(Details: `Oct_23_T3.md`; design: `TODO.md`, T3.)
+(Details: `Oct_23_T3.md`; design: `TODO_extended.md`, T3.)
 
 #### High-level idea
 

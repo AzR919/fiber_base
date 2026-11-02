@@ -67,6 +67,22 @@ types. Built from the ENCODE tracks during data setup (`configs/README.md`, "Cel
      and H1 brings stem-cell chromatin (e.g. bivalent promoters) into training.
  - Scored at base-pair resolution on asinh(fold change), at positions covered by ≥ 5 fibers.
 
+**Assays:** 8 ENCODE tracks per cell type. Sharp / broad follows ENCODE's peak calling (narrow vs broad peaks).
+
+| Assay | What it marks | Shape |
+|---|---|---|
+| ATAC-seq | open (accessible) DNA | sharp |
+| CTCF | CTCF binding: insulators, loop anchors | sharp |
+| H3K4me3 | active promoters | sharp |
+| H3K27ac | active promoters and enhancers | sharp |
+| H3K4me1 | enhancers (active and primed) | broad |
+| H3K36me3 | bodies of transcribed genes | broad |
+| H3K27me3 | Polycomb-repressed regions | broad |
+| H3K9me3 | heterochromatin (constitutive repression) | broad |
+
+ - ENCODE has no ATAC-seq for H1 and H9, so their ATAC is left out of the loss and the scores: their averages are
+   over 7 assays instead of 8.
+
 **Metrics** (full definitions in `metrics/README.md` and `metrics/APPENDIX.md`)
  - **Pearson r:** correlation between prediction and target, pooled over every scored base pair of chr21. Measures
    whether the predicted *shape* along the genome is right (insensitive to scale). Averaged over assays per cell.

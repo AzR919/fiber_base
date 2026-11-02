@@ -17,7 +17,7 @@ evaluated at every window, and the evaluator also reports
   - sign accuracy at the differential bins of `pair_loci` (does p_A - p_B have the sign of d = t_A - t_B?);
   - fiber-origin AUC at those bins: per fiber its mean prediction over the bin, AUC of A's fibers vs B's
     (oriented by the sign of d, so 0.5 = no separation, 1 = A's fibers perfectly ranked on the right side).
-See reports/TODO.md, T3.
+See reports/TODO_extended.md, T3.
 """
 
 import os

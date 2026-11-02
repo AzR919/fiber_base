@@ -158,12 +158,13 @@ def get_config_names_str(args) -> str:
     return "_".join(config_names)
 
 def create_save_str(args) -> str:
-    """Generates a structured, unique run identifier including timestamp and concatenated config names."""
+    """Generates a structured, unique run identifier: timestamp, 'train', then the concatenated config names."""
     now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
     configs_str = get_config_names_str(args)
 
-    # Build component list, filtering out empty strings
-    components = [now]
+    # Build component list, filtering out empty strings; 'train' right after the timestamp tells train and eval
+    # runs apart when listing results/
+    components = [now, "train"]
     if configs_str:
         components.append(configs_str)
 
