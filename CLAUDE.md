@@ -37,6 +37,11 @@ Run the stop script before closing the laptop (avoids fail2ban bans from danglin
 - **Job name scheme:** `YYYY-MM-DD_NN_<train|eval>_description` — dashes in the date, underscores after it, `NN` = two-digit index for that day starting at `00`, then `train` or `eval` so the kind of run shows in the prefix when scrolling `logs/`. Examples: `2026-10-14_00_train_no_fire`, `2026-10-14_01_eval_no_fire`. One-off jobs that are neither (plots, analysis) use the description directly.
 - Every new run gets the next index for the day (count across both training and eval scripts — check `logs/` and the other script). Update `--job-name` in the script before submitting.
 - GPUs are H100 MIG slices (`1g.10gb`, `2g.20gb`, `3g.40gb`); pick the smallest that fits.
+- **Time limit ≤ 3 h** (jobs up to 3 h can use the fastest partition, `gpubase_bygpu_b1`), and close to the
+  expected run time, not padded far beyond it. Longer training continues in a chained job with `--resume latest`
+  (README, "Checkpoints and resuming").
+- **CPUs / memory in proportion to the slice** (billing takes the largest of GPU, CPU, memory): on nibi a `1g.10gb`
+  covers 2 CPUs / 37 GB, a `2g.20gb` 4 CPUs / 74 GB, a `3g.40gb` 6 CPUs / 111 GB.
 - **CPUs with a GPU job:** requesting more CPUs than the slice comes with bills the job for a larger slice. Keep `--cpus-per-task` at or below (and set DataLoader workers to fit):
 
   | GPU slice | Fir | Nibi |

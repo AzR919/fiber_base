@@ -17,9 +17,18 @@ from metrics import masked_mse, per_assay_mse, PearsonMeter, score_weights, MIN_
 from vis_utils import plot_evaluation_dashboard_t, plot_loss
 from data_utils import loader_context
 
+EVAL_RESERVE_S = 15 * 60   # time kept free after the last epoch for the end-of-training eval
+
+
 class Trainer:
+    """
+    Training loop. Saves a rolling checkpoint (LAST_CHECKPOINT: model, optimizer, LR scheduler, grad scaler, losses,
+    epoch times, wandb run id) after every epoch, and with a deadline (utils.training_deadline) stops before an epoch
+    that would not finish in time; train() then returns False and the run is continued with load_checkpoint().
+    Training data is seeded per epoch, so a resumed run sees the same samples as an uninterrupted one.
+    """
     def __init__(self, model, train_dataset, val_dataset=None, wandb_run=None,
-                 epochs=10, batch_size=32, lr=1e-4, patience=5, config=None):
+                 epochs=10, batch_size=32, lr=1e-4, patience=5, config=None, deadline=None):
 
         self.model = model
         self.train_dataset = train_dataset
@@ -42,6 +51,49 @@ class Trainer:
         self.min_coverage = getattr(config, "min_coverage", MIN_COVERAGE)
 
         self.scaler = torch.amp.GradScaler(self.device)
+
+        self.deadline = deadline
+        self.start_epoch = 0
+        self.train_losses, self.val_losses, self.epoch_secs = [], [], []
+
+    def save_checkpoint(self, save_dir, epochs_done):
+        """Atomically write the rolling checkpoint after `epochs_done` completed epochs."""
+        os.makedirs(save_dir, exist_ok=True)
+        path = os.path.join(save_dir, LAST_CHECKPOINT)
+        torch.save({
+            "epoch": epochs_done,
+            "model_config": self.model.init_args,
+            "config": vars(self.config).copy() if self.config is not None else {},
+            "state_dict": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+            "scaler": self.scaler.state_dict(),
+            "train_losses": self.train_losses,
+            "val_losses": self.val_losses,
+            "epoch_secs": self.epoch_secs,
+            "wandb_id": getattr(self.wandb_run, "id", None),
+        }, path + ".tmp")
+        os.replace(path + ".tmp", path)
+
+    def load_checkpoint(self, ckpt):
+        """Restore optimizer / scheduler / scaler state and history from a checkpoint (model weights are loaded
+        by the caller before the model is built into the Trainer)."""
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.scheduler.load_state_dict(ckpt["scheduler"])
+        self.scaler.load_state_dict(ckpt["scaler"])
+        self.start_epoch = ckpt["epoch"]
+        self.train_losses, self.val_losses = list(ckpt["train_losses"]), list(ckpt["val_losses"])
+        self.epoch_secs = list(ckpt.get("epoch_secs", []))
+
+    def _time_left_for(self, epoch):
+        """False if the next epoch (plus the end-of-training eval, for the last one) would overrun the deadline."""
+        if self.deadline is None or not self.epoch_secs:
+            return True
+        need = 1.1 * max(self.epoch_secs[-3:]) + (EVAL_RESERVE_S if epoch == self.epochs - 1 else 0)
+        if time.time() + need <= self.deadline:
+            return True
+        print(f"[checkpoint] Not enough time left for epoch {epoch} (needs ~{need / 60:.0f} min); stopping.", flush=True)
+        return False
 
     def _score_weights(self, batch):
         """(B, K, L) loss weights: assay mask × positions covered by >= min_coverage fibers."""
@@ -110,13 +162,12 @@ class Trainer:
                 multiprocessing_context=loader_context(num_workers),
             )
 
-        train_losses = []
-        val_losses = []
-
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats()
 
-        for epoch in range(self.epochs):
+        for epoch in range(self.start_epoch, self.epochs):
+            if not self._time_left_for(epoch):
+                return False
             if hasattr(self.train_dataset, "set_epoch"):
                 self.train_dataset.set_epoch(epoch)
             if self.val_dataset is not None and hasattr(self.val_dataset, "set_epoch"):
@@ -145,7 +196,7 @@ class Trainer:
                 last_t_fibers = t_processed_fibers
 
             avg_train_loss = train_meter.avg
-            train_losses.append(avg_train_loss)
+            self.train_losses.append(avg_train_loss)
             train_secs = time.time() - t_epoch
 
             # --- VALIDATION PHASE ---
@@ -168,7 +219,7 @@ class Trainer:
                     last_v_fibers = v_processed_fibers
 
                 avg_val_loss = val_meter.avg
-                val_losses.append(avg_val_loss)
+                self.val_losses.append(avg_val_loss)
                 self.scheduler.step(avg_val_loss)
             else:
                 self.scheduler.step(avg_train_loss)
@@ -244,10 +295,13 @@ class Trainer:
                 plt.close(fig_v)
 
             self.wandb_run.log(log_dict)
+            self.epoch_secs.append(time.time() - t_epoch)
+            self.save_checkpoint(save_dir, epoch + 1)
 
         # Final loss summary curve & model save
-        plot_loss(save_dir, train_losses, self.epochs, getattr(self.config, "output_assays", ["atac"]))
+        plot_loss(save_dir, self.train_losses, self.epochs, getattr(self.config, "output_assays", ["atac"]))
         self.model.save_model(save_dir, self.epochs, external_config=self.config)
+        return True
 
 
 #--------------------------------------------------------------------------------------------------

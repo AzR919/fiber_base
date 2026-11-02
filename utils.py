@@ -157,6 +157,55 @@ def get_config_names_str(args) -> str:
     # Join extracted config names (e.g., "data_config_model_config_train_config")
     return "_".join(config_names)
 
+LAST_CHECKPOINT = "last.pt"   # rolling end-of-epoch training checkpoint in a run's results folder
+
+
+def find_resumable_run(res_root, args):
+    """Newest results/<timestamp>_train_<configs> run of the same configs (prefix, data, model, train, suffix) that
+    has a last.pt checkpoint but no final model (Model_epoch_<epochs>.pt) yet; None if there is none."""
+    import glob
+    pattern = os.path.join(res_root, f"*_train_{get_config_names_str(args)}")
+    for run_dir in sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True):
+        if (os.path.exists(os.path.join(run_dir, LAST_CHECKPOINT))
+                and not os.path.exists(os.path.join(run_dir, f"Model_epoch_{args.epochs}.pt"))):
+            return run_dir
+    return None
+
+
+def _slurm_time_to_s(text):
+    """Slurm time 'D-HH:MM:SS', 'HH:MM:SS' or 'MM:SS' -> seconds; None for UNLIMITED or anything unparseable."""
+    days = 0
+    if "-" in text:
+        d, text = text.split("-", 1)
+        if not d.isdigit():
+            return None
+        days = int(d)
+    parts = text.split(":")
+    if not 1 <= len(parts) <= 3 or not all(p.isdigit() for p in parts):
+        return None
+    h, m, s = [0] * (3 - len(parts)) + [int(p) for p in parts]
+    return days * 86400 + h * 3600 + m * 60 + s
+
+
+def training_deadline(max_hours=None, margin_s=300):
+    """time.time() by which training should stop: the Slurm job's end minus margin_s (read with squeue), and/or
+    max_hours from now. None when neither applies (e.g. an interactive run without --max_hours)."""
+    import subprocess
+    import time
+    deadlines = [time.time() + max_hours * 3600] if max_hours else []
+    job_id = os.environ.get("SLURM_JOB_ID")
+    if job_id:
+        try:
+            left = subprocess.run(["squeue", "-h", "-j", job_id, "-o", "%L"], capture_output=True, text=True,
+                                  timeout=30).stdout.strip()
+            secs = _slurm_time_to_s(left)
+            if secs is not None:
+                deadlines.append(time.time() + secs - margin_s)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return min(deadlines) if deadlines else None
+
+
 def create_save_str(args) -> str:
     """Generates a structured, unique run identifier: timestamp, 'train', then the concatenated config names."""
     now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
@@ -257,7 +306,8 @@ def build_run_name(base_name, config):
         name += "".join(f"_{n}" for n, f in zip(feature_names, config.input_flags) if f)
     return name
 
-def setup_wandb_run(config, model, with_test_loss=False):
+def setup_wandb_run(config, model, with_test_loss=False, run_id=None):
+    """run_id: continue that wandb run (resumed training) instead of starting a new one."""
 
     if hasattr(config, "input_flags") and sum(config.input_flags) == 0:
         print("Encountered [0,0,0,0,0] run. Skipping training evaluation...")
@@ -266,7 +316,8 @@ def setup_wandb_run(config, model, with_test_loss=False):
         return None
 
     run_name = build_run_name(get_config_names_str(config), config)
-    run = wandb.init(entity="liblab", project="fiber", name=run_name, config=config)
+    run = wandb.init(entity="liblab", project="fiber", name=run_name, config=config,
+                     id=run_id, resume="allow" if run_id else None)
     wandb.define_metric("epoch")
     wandb.define_metric("train_loss", step_metric="epoch")
     wandb.define_metric("val_loss", step_metric="epoch")

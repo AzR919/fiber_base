@@ -93,6 +93,12 @@ def get_args():
     trainer_group.add_argument("--lr", type=float, default=1e-4)
     trainer_group.add_argument("--patience", type=int, default=5,
                                help="ReduceLROnPlateau patience, in epochs (scale it with samples_per_epoch)")
+    trainer_group.add_argument("--resume", type=str, default=None,
+                               help="Continue a training run from its last.pt: a results run folder, or 'latest' = the "
+                                    "newest unfinished run of the same configs (nothing to do if there is none)")
+    trainer_group.add_argument("--max_hours", type=float, default=None,
+                               help="Stop (with a checkpoint) before this many hours; under Slurm the job's time "
+                                    "limit is also respected automatically")
     trainer_group.add_argument("--min_coverage", type=int, default=5,
                                help="Loss and metrics only use positions covered by at least this many fibers")
     trainer_group.add_argument("--num_workers", type=int, default=0,

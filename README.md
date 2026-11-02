@@ -230,12 +230,18 @@ python main.py \
   [--num_workers 3] [--name_prefix myrun] [--name_suffix v1] [-D]
 ```
 
-- Results go to `results/<YY-MM-DD_THH-MM-SS>_<prefix>_<data>_<model>_<train>_<suffix>/` (checkpoints `Model_epoch_N.pt`).
+- Results go to `results/<YY-MM-DD_THH-MM-SS>_train_<prefix>_<data>_<model>_<train>_<suffix>/` (final model `Model_epoch_N.pt`, rolling `last.pt`).
 - If `--eval_configs` is given, each eval config runs after training and is logged to wandb.
 - Any config value can be overridden on the CLI (e.g. `--lr 3e-4`).
 - `--num_workers N` loads data in N background processes (the job's CPUs minus one is a good start). Workers are started with `forkserver`, because pyft hangs in workers forked from a process that has already read fibers; any script that uses workers needs an `if __name__ == "__main__":` guard (`main.py` and `eval.py` have one).
 
 **Reproducibility**: the same `seed` + same epoch always gives the same training data order (`set_epoch(epoch)`); validation and eval iterate fixed window sets. With `num_workers > 0` the data are identical for a given number of workers (each worker has its own seed and share of the regions).
+
+**Checkpoints and resuming** (keeps jobs under 3 h, the `gpubase_bygpu_b1` limit, which schedules fastest):
+- After every epoch the run folder gets `last.pt`: model, optimizer, LR scheduler, grad scaler, losses, epoch times and the wandb run id.
+- Before each epoch, training checks the time left (the Slurm job's limit minus 5 min, read with `squeue`, or `--max_hours`). If the next epoch (plus 15 min for the end-of-training eval, before the last one) would not fit, it stops cleanly, skips the eval, and prints how to continue.
+- `--resume latest` continues the newest unfinished run with the same configs and name prefix/suffix (a `last.pt` but no `Model_epoch_<epochs>.pt`) in the same folder and wandb run; if there is none it does nothing. `--resume results/<run_dir>` picks one explicitly. Training data is seeded per epoch, so a resumed run sees the same samples as an uninterrupted one.
+- Chaining on Slurm: submit the first job as usual, then the same script again with `sbatch --export=ALL,RESUME=latest --dependency=afterany:<first job id> slurm_batch_command.sh` (the script passes `--resume $RESUME` when set; `--open-mode=append` keeps one log per job name). A continuation that finds the run already finished exits within a minute.
 
 ---
 
