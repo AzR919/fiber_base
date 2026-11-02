@@ -72,8 +72,20 @@ pairs + 4 library controls per model, minis first. Build list: I15 in `TODO_exte
 ## 3. Right after
 
 - **Rerun the bulk tables** with V1 DEV5 and the fold-change baseline.
-- **Reference values for r:** ENCODE replicate 1 vs 2 per assay.
-- **H3K36me3:** longer input window, central 5 kb scored (regions allow up to 20 kb); then the whole read.
+- **Assays: keep the 8, report them by difficulty** so the model's limits are stated, not hidden in averages:
+  easy (ATAC, H3K4me3), easy–medium (H3K27ac, H3K4me1), medium (CTCF), hard (H3K27me3, H3K36me3, H3K9me3: broad,
+  repressive or repeat-rich). Assay-specific metrics:
+  - **Replicate ceiling:** ENCODE replicate 1 vs 2 per assay (plain r and cell-type r); report each assay as a
+    fraction of it, separating "hard for the model" from "noisy target" (I11).
+  - **r at several resolutions** (bp, 200 bp, 1 kb): bp-level r penalises broad marks.
+  - **Assay-specific r:** partial correlation of predicted and true mark given the true ATAC track: is each mark
+    more than accessibility (H3K27ac vs H3K4me1 vs CTCF)?
+- **Per-assay learned parameters** (test, V2/V3 in `TODO_extended.md` T4): a learned scale (and offset) per assay
+  mapping per-fiber outputs to the ENCODE track, the same for every cell type; then a per-assay smoothing kernel for
+  ChIP fragment blurring (V3). Should fix signal height (predictions ~half the true size) without cell-type
+  knowledge.
+- **Longer context for broad marks** (H3K36me3, H3K27me3, H3K9me3): longer input window with only the central 5 kb
+  scored (regions allow up to 20 kb); then the whole read as context.
 - **m6A density per fiber:** check per library; drop only the failed-labelling tail or use it as an input (a hard
   filter would bias against compact heterochromatin molecules).
-- **Later:** T5 (CpG on the same molecule, X inactivation), physical output units (V2/V3), Arabidopsis data.
+- **Later:** T5 (CpG on the same molecule, X inactivation), Arabidopsis data.

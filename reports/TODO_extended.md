@@ -357,6 +357,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
 | I15 | Unseen-pair test (`TODO.md` §2): `pairs` in `loci_spec.yaml` (K562–Panc1, K562–H1, Panc1–H1, GM12878–H1, HepG2–H1), paired eval configs + library controls (K562, Panc1, H1), single-cell and pair data configs, ablation model configs, routing for specialists, pair × assay summary (`t3_report.py`); optional shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | |
 | I16 | *(Now part of the current plan, `TODO.md` §1)* Oracle-identity reference for T3: one model per cell type (trained on its own track), each fiber routed through its own cell type's model. Quantifies how much separation knowing the cell type alone buys; not a ceiling for molecule reading (origin is given, so it scores high even without reading fibers) | T3 | Two extra training runs + routing in the paired eval |
+| I17 | Multi-resolution r: Pearson / MSE also on 200 bp and 1 kb bin means of prediction and target (same scored positions) | assay tiers (`TODO.md` §3) | Evaluator only |
+| I18 | Assay-specific r: partial correlation of predicted and true mark given the true ATAC track, per assay | assay tiers (`TODO.md` §3) | Evaluator only; cells without ATAC (H1, H9) skipped |
 
 ## 6. Engineering backlog (performance and quality)
 
