@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-11-01_04_dev5_v1_train04
+#SBATCH --job-name=2026-11-03_05_train_spec_gm12878
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -10,7 +10,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=0-3:00:00
+#SBATCH --time=0-2:45:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
 
@@ -28,17 +28,32 @@ echo "Working directory is $(pwd)"
 # Activate virtual environment
 source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 
-# Reference model bank (reports/TODO.md, section 1): DEV5 with V1 fiber averaging, all 5 dev cell types (data20), mid
-# 8-assay model, train04 (15 x 5000 samples, LR patience 2). Replaces the V0 DEV5 runs. HepG2 mini eval at the end;
-# the full 8-cell eval with the fold-change baseline runs separately.
-# Continuation: sbatch --export=ALL,RESUME=latest --dependency=afterany:<job id> slurm_batch_command.sh
+# Specialists (reports/TODO.md, section 1): one model per dev cell type, trained on its own track only (data29-33),
+# same model and budget as DEV5 V1 (model15, train04: 15 x 5000 samples, ~2.2 h). Pick the cell type with
+#   sbatch --job-name=<name> --export=ALL,CELL=<gm12878|k562|hepg2|panc1|h1> slurm_batch_command.sh
+# Each ends with its own cell type's mini eval; the full eval runs separately (slurm_batch_command_eval.sh).
+# Unseen-pair test (T3b, reports/TODO.md section 2), same budget: CELL=pairA (GM12878 + HepG2, data28) and
+# CELL=pairB (K562 + H1, data34), the two main models, each the other's matched reference.
+# If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
+PREFIX=SPEC_V1
+case "${CELL:-gm12878}" in
+  gm12878) DATA=data29_GM12878;    EVAL=eval21_GM12878_mini ;;
+  k562)    DATA=data30_K562_200U;  EVAL=eval22_K562_200U_mini ;;
+  hepg2)   DATA=data31_HepG2_200U; EVAL=eval23_HepG2_200U_mini ;;
+  panc1)   DATA=data32_Panc1_200U; EVAL=eval16_Panc1_200U_mini ;;
+  h1)      DATA=data33_H1_200U;    EVAL=eval17_H1_200U_mini ;;
+  pairA)   DATA=data28_GM12878_HepG2_200U; EVAL=eval24_pair_GM12878_HepG2_200U_mini; PREFIX=PAIR_V1 ;;
+  pairB)   DATA=data34_K562_H1_200U;       EVAL=eval22_K562_200U_mini;              PREFIX=PAIR_V1 ;;
+  *) echo "Unknown CELL=${CELL}"; exit 1 ;;
+esac
+echo "Model: $PREFIX $DATA"
 python -u main.py \
-  --data_config configs/data/data20_dev5_200U.yaml \
+  --data_config configs/data/$DATA.yaml \
   --model_config configs/models/model15_uct_mid_8A.yaml \
   --train_config configs/training/train04.yaml \
-  --eval_configs configs/evals/eval23_HepG2_200U_mini.yaml \
+  --eval_configs configs/evals/$EVAL.yaml \
   --num_workers 3 \
-  --name_prefix DEV5_V1 \
+  --name_prefix $PREFIX \
   ${RESUME:+--resume "$RESUME"}
 
 # Print job completion time

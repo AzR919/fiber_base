@@ -439,7 +439,8 @@ under `results/`. All V1 unless noted. Same setup unless noted: chr20, half cCRE
 | DEV5 short (V1 check) | `data20` | 5 dev cell types | fir | `2026-10-20_02_dev5_v1_short` | `*_DEV5_V1_short_*/Model_epoch_25.pt` | V1 check run; can serve as DEV5 (V1) |
 | T3 mixture | `data27` | GM12878 + HepG2 mixtures | fir | `2026-10-21_01_t3_mix` | `26-10-21_T00-55-17_T3_mix_..._train02/Model_epoch_25.pt` | mixture-only supervision |
 | GM12878 + HepG2 | `data28` | GM12878, HepG2 (own tracks) | fir | `2026-10-21_02_t3_upper` | `*_T3_upper_data28_*_train02/Model_epoch_25.pt` | T3 single-cell-supervised reference; main model A of T3b |
-| Specialists × 5 | to add | one dev cell type each | | | | planned (`TODO.md` §1) |
+| DEV5 (V1, train04) | `data20` | 5 dev cell types | nibi | `2026-11-01_04_dev5_v1_train04` | `26-11-02_T02-37-45_train_DEV5_V1_data20_dev5_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | 15 × 5000 samples, 2 h 20 min; val r 0.501, HepG2 mini r 0.588; the all-cells reference |
+| Specialists × 5 | `data29`–`data33` | one dev cell type each | nibi | `2026-11-03_05`–`09_train_spec_*` | `*_train_SPEC_V1_<data>_model15_uct_mid_8A_train04/Model_epoch_15.pt` | submitted 3 Nov |
 | Pair models × 5 | to add | K562+Panc1, K562+H1, Panc1+H1, GM12878+H1, HepG2+H1 | | | | planned (`TODO.md` §2) |
 
 ## 9. Ideas from the 30 Oct presentation review

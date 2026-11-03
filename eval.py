@@ -79,6 +79,19 @@ def parse_args():
     return args
 
 
+def make_unique_dir(path):
+    """Create and return `path`, or `path_2`, `path_3`, ... if it exists. Created atomically, so eval jobs that
+    start in the same second (same timestamp in the name) never share a folder and overwrite each other's files."""
+    candidate, n = path, 1
+    while True:
+        try:
+            os.makedirs(candidate)
+            return candidate
+        except FileExistsError:
+            n += 1
+            candidate = f"{path}_{n}"
+
+
 def main():
     args = parse_args()
     now = datetime.datetime.now().strftime("%y-%m-%d_T%H-%M-%S")
@@ -134,7 +147,8 @@ def main():
             config={"checkpoint": args.checkpoint, "eval_configs": args.eval_configs, "baseline_cells": baseline_cells},
         )
 
-    output_dir = os.path.join(args.output_dir, run_name)
+    output_dir = make_unique_dir(os.path.join(args.output_dir, run_name))
+    print(f"--> Output folder: {output_dir}", flush=True)
     plots_dir = output_dir if args.save_plots else None
     summary = run_final_eval(
         model, args.eval_configs, train_args_ns, wandb_run, args.device,
@@ -147,7 +161,6 @@ def main():
         print("WandB run finished.")
 
     # Save JSON summary
-    os.makedirs(output_dir, exist_ok=True)
     out_json = os.path.join(output_dir, "eval_summary.json")
     with open(out_json, "w") as f:
         json.dump({"checkpoint": args.checkpoint, "baseline_train_cells": baseline_cells,

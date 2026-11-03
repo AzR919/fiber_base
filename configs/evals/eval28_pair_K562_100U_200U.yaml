@@ -1,0 +1,16 @@
+# Library control for the unseen-pair test (T3b): K562_100U (A) and K562_200U (B), two Fiber-seq libraries of the same
+# cell line, so the same true track. Fiber-origin AUC should be ~0.5 and RMS(p_A - p_B) small next to the paired
+# evals'; measured at the K562 vs H1 differential bins, on all chr21 tiles.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_tiles
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/K562__H1
+loci: [pairs/K562__H1]
+
+cell_types:
+  K562_100U:
+  K562_200U:

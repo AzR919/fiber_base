@@ -30,3 +30,4 @@ splits:
 # Writes pairs/<A>__<B>.{tsv,bed}; gain = higher in A.
 pairs:
   - [GM12878, HepG2]
+  - [K562, H1]

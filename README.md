@@ -183,6 +183,7 @@ An eval config may list several cell types; each gets its own metrics (keyed `<c
 | `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |
 | `data27` | Mixture test (T3): GM12878 + HepG2_200U mixtures only, GM12878's share from [0.2, 0.8] |
 | `data28` | T3 upper bound: the same two cell types trained as single cell types |
+| `data29`–`data33` | Specialists: one dev cell type each (GM12878, K562_200U, HepG2_200U, Panc1_200U, H1_200U); the "told the cell type" reference |
 | `eval24` (+ `_mini`) | T3 paired eval: GM12878 vs HepG2_200U, each from its own fibers, with pairwise / dev loci |
 | `eval25` (+ `_mini`) | T3 library control: HepG2_100U vs HepG2_200U (same true track) |
 | `eval26_mini` | T3 mixture composites (GM12878 + HepG2_200U) against the mixture target |
@@ -214,6 +215,8 @@ python data_prep/setup_data.py                # run interactively
 - **Skipping:** ENCODE files already on disk with the right md5 are skipped, and `encode_lock.yaml` pins which file each cell + assay uses. Region files are rebuilt only when `regions_spec.yaml`, `build_regions.py` or an input (FASTA index, cCRE file, blacklist) changes; `manifest.json` stores a fingerprint of all of them. Loci are rebuilt only when `loci_spec.yaml`, `build_loci.py`, the region files or an ENCODE manifest changes.
 - **Flags:** `--dry-run`, `--workers N` (parallel downloads), `--verify` (re-hash ENCODE files), `--force-regions`, `--force-loci`.
 - **To change the data:** edit a spec and re-run. Never edit generated files. Each step can also run on its own (`python data_prep/setup_encode.py`, `python data_prep/build_regions.py`, `python data_prep/build_loci.py`).
+- **Fiber-seq QC** (separate, after setup; `sbatch data_prep/slurm_fiber_qc.sh [--samples ...]`, ~10–20 min on 8 CPUs): `data_prep/fiber_qc.py` checks every sample on the same 300 chr21 windows: library stats (fibers per window, span, m6A rate, CpG methylation, MSP / FIRE / nucleosome fractions) and how well the sample's own accessibility (FIRE / MSP fraction per 1 kb bin) agrees with every cell line's ENCODE ATAC and H3K4me3. A sample should agree best with its own line. Writes TSVs to `DATA_FIBER/qc/`; rerun when samples or tracks change.
+- **Sample identity** (`python data_prep/sample_identity.py [--samples ...]`, a few minutes on a login node): genotypes each sample's CRAM at known driver mutations (KRAS G12D / G13D, TP53 R273H, PIK3CA H1047R / E545K, NRAS Q61L), the CDKN2A homozygous deletion, and chrY reads (sex), to catch mislabelled or swapped samples. Writes `DATA_FIBER/qc/sample_identity.tsv`. The CRAMs carry no base qualities, so no quality filter is applied.
 - **ENCODE file selection** (`encode_api.py`): released, unperturbed GRCh38 "fold change over control" bigWigs; per experiment the file with the most biological replicates; experiments ranked by audit severity, then replicates, then recency. Audits rank candidates, never exclude them.
 
 ---

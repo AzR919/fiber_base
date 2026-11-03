@@ -1,0 +1,16 @@
+# Specialist (reports/TODO.md, section 1): one model trained on Panc1_200U only, on its own track. Reference for the
+# unseen-pair test: fibers of Panc1_200U routed to this model ("told the cell type"). Same regions, context and fibers as
+# the dev configs (data20); single-cell training, 5kb context, 100 fibers per sample.
+# Note: the Panc1 Fiber-seq sample failed the identity check (data_prep/sample_identity.py: no TP53 R273H, no CDKN2A
+# deletion); this specialist shows how well a model fits Panc1's own data, as a diagnostic.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+# Regions (configs/README.md, Regions). Same as the dev configs.
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  Panc1_200U:

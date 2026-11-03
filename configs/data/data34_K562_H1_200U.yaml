@@ -1,0 +1,15 @@
+# Unseen-pair test (T3b, reports/TODO.md section 2), main model B: K562_200U + H1_200U trained as single cell types on
+# their own tracks. Tested on the unseen pair GM12878-HepG2 (eval24); the matched reference for main model A
+# (GM12878 + HepG2, data28) on K562-H1 (eval27). H1 has no ATAC (masked). Same regions, context and fibers as data20.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+# Regions (configs/README.md, Regions). Same as the dev configs.
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  K562_200U:
+  H1_200U:

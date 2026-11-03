@@ -1,0 +1,14 @@
+# Specialist (reports/TODO.md, section 1): one model trained on K562_200U only, on its own track. Reference for the
+# unseen-pair test: fibers of K562_200U routed to this model ("told the cell type"). Same regions, context and fibers as
+# the dev configs (data20); single-cell training, 5kb context, 100 fibers per sample.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+# Regions (configs/README.md, Regions). Same as the dev configs.
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  K562_200U:
