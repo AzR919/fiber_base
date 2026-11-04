@@ -1,0 +1,19 @@
+# Mixture-only supervision, second pair (T3 / T3b, reports/TODO.md section 2): every training sample pools fibers from
+# K562_200U and H1_200U at the same window; the target is that mixture's track (fold-change mixture weighted by each
+# cell type's fibers present at each position). Neither cell type's own track is used in training or validation.
+# H1 has no ATAC, so the mixture has no ATAC target (the mixture's assay mask is the product over its cell types):
+# this model never trains ATAC. 5kb context, 100 fibers per sample; K562's share drawn uniformly from [0.2, 0.8].
+# Same pair: eval27 (paired), eval30 (mixture composites); unseen pair: eval24; library controls eval25/28/29.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: mixed
+mix_range: [0.2, 0.8]
+
+# Regions (configs/README.md, Regions). Same as the dev configs. Validation mixes too (seeded per region).
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  K562_200U:
+  H1_200U:

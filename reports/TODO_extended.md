@@ -439,9 +439,13 @@ under `results/`. All V1 unless noted. Same setup unless noted: chr20, half cCRE
 | DEV5 short (V1 check) | `data20` | 5 dev cell types | fir | `2026-10-20_02_dev5_v1_short` | `*_DEV5_V1_short_*/Model_epoch_25.pt` | V1 check run; can serve as DEV5 (V1) |
 | T3 mixture | `data27` | GM12878 + HepG2 mixtures | fir | `2026-10-21_01_t3_mix` | `26-10-21_T00-55-17_T3_mix_..._train02/Model_epoch_25.pt` | mixture-only supervision |
 | GM12878 + HepG2 | `data28` | GM12878, HepG2 (own tracks) | fir | `2026-10-21_02_t3_upper` | `*_T3_upper_data28_*_train02/Model_epoch_25.pt` | T3 single-cell-supervised reference; main model A of T3b |
-| DEV5 (V1, train04) | `data20` | 5 dev cell types | nibi | `2026-11-01_04_dev5_v1_train04` | `26-11-02_T02-37-45_train_DEV5_V1_data20_dev5_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | 15 × 5000 samples, 2 h 20 min; val r 0.501, HepG2 mini r 0.588; the all-cells reference |
-| Specialists × 5 | `data29`–`data33` | one dev cell type each | nibi | `2026-11-03_05`–`09_train_spec_*` | `*_train_SPEC_V1_<data>_model15_uct_mid_8A_train04/Model_epoch_15.pt` | submitted 3 Nov |
-| Pair models × 5 | to add | K562+Panc1, K562+H1, Panc1+H1, GM12878+H1, HepG2+H1 | | | | planned (`TODO.md` §2) |
+| DEV5 (V1, train04) | `data20` | 5 dev cell types | nibi | `2026-11-01_04_dev5_v1_train04` | `26-11-02_T02-37-45_train_DEV5_V1_data20_dev5_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | 15 × 5000 samples, 2 h 20 min; val r 0.501, HepG2 mini r 0.588; split v1 (with Panc1); superseded by DEV4 |
+| **DEV4 (V1, train04)** | `data24` | 4 dev cell types (split v2: GM12878, K562, HepG2, H1) | nibi | `2026-11-03_01_train_loo_panc1_v1` | `*_train_LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | **main dev model from 4 Nov** (trained as the leave-Panc1-out fold); 2 h 19 min; full evals 3 Nov (`Nov_13.md`) |
+| Specialists × 5 | `data29`–`data33` | one cell type each | nibi | `2026-11-03_05`–`09_train_spec_*` | `*_train_SPEC_V1_<data>_model15_uct_mid_8A_train04/Model_epoch_15.pt` | done 3 Nov, ~2 h 12 min each; full own-cell evals without baseline; Panc1's is a held-out-cell oracle under split v2 |
+| Pair model A | `data28` | GM12878 + HepG2 (own tracks) | nibi | `2026-11-04_01_train_pair_a_gm12878_hepg2` | `*_train_PAIR_V1_data28_GM12878_HepG2_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | T3b main A (train04 rerun of the T3 upper bound); running 4 Nov |
+| Pair model B | `data34` | K562 + H1 (own tracks) | nibi | `2026-11-04_02_train_pair_b_k562_h1` | `*_train_PAIR_V1_data34_K562_H1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | T3b main B; running 4 Nov |
+| Mixture model A | `data27` | GM12878 + HepG2 mixtures only | nibi | `2026-11-04_06_train_mix_a_gm12878_hepg2` | `*_train_MIX_V1_data27_mix_GM12878_HepG2_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | train04 rerun of the T3 mixture model; submitted 4 Nov |
+| Mixture model B | `data35` | K562 + H1 mixtures only | nibi | `2026-11-04_07_train_mix_b_k562_h1` | `*_train_MIX_V1_data35_mix_K562_H1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | no ATAC; submitted 4 Nov |
 
 ## 9. Ideas from the 30 Oct presentation review
 

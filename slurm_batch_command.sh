@@ -34,6 +34,7 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Each ends with its own cell type's mini eval; the full eval runs separately (slurm_batch_command_eval.sh).
 # Unseen-pair test (T3b, reports/TODO.md section 2), same budget: CELL=pairA (GM12878 + HepG2, data28) and
 # CELL=pairB (K562 + H1, data34), the two main models, each the other's matched reference.
+# Mixture-only models of the same pairs: CELL=mixA (data27) and CELL=mixB (data35, no ATAC: H1 has none).
 # If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
 PREFIX=SPEC_V1
 case "${CELL:-gm12878}" in
@@ -44,6 +45,8 @@ case "${CELL:-gm12878}" in
   h1)      DATA=data33_H1_200U;    EVAL=eval17_H1_200U_mini ;;
   pairA)   DATA=data28_GM12878_HepG2_200U; EVAL=eval24_pair_GM12878_HepG2_200U_mini; PREFIX=PAIR_V1 ;;
   pairB)   DATA=data34_K562_H1_200U;       EVAL=eval22_K562_200U_mini;              PREFIX=PAIR_V1 ;;
+  mixA)    DATA=data27_mix_GM12878_HepG2_200U; EVAL=eval26_mix_GM12878_HepG2_200U_mini; PREFIX=MIX_V1 ;;
+  mixB)    DATA=data35_mix_K562_H1_200U;       EVAL=eval30_mix_K562_H1_200U_mini;       PREFIX=MIX_V1 ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 echo "Model: $PREFIX $DATA"

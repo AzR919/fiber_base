@@ -5,24 +5,25 @@ registry of trained reference models) is in `TODO_extended.md`. Results go in th
 
 ## Where we stand
 
-- **Pipeline:** data setup (ENCODE fold-change tracks, region files, cell-specific and pairwise loci), 5 dev /
-  3 held-out cell types, fibers averaged in fold change (V1, default since 20 Oct).
-- **Bulk (`Oct_23.md`, `Oct_30.md`):** beats the cross-cell average on MSE, mostly not on Pearson; cell-type r
-  positive everywhere, held-out included. Strong on ATAC and active marks, weak on H3K36me3 / H3K9me3. Still V0
-  numbers with the old baseline.
+- **Pipeline:** data setup (ENCODE fold-change tracks, region files, cell-specific and pairwise loci), 4 dev /
+  4 held-out cell types (split v2, 4 Nov: Panc1 moved to held out as a hard cell, its sample identity is in
+  doubt; `configs/README.md`), fibers averaged in fold change (V1, default since 20 Oct).
+- **Bulk (`Nov_13.md`, V1):** beats the cross-cell average on MSE, mostly not on Pearson; cell-type r
+  positive everywhere, held-out included. Strong on ATAC and active marks, weak on H3K36me3 / H3K9me3 / CTCF.
+  Dropping Panc1 from training costs nothing; specialists beat the dev model by 0.03–0.06 r.
 - **Single molecules (`Oct_23_T3.md`):** trained only on GM12878 + HepG2 mixtures, the model separates their
   molecules (fiber-origin AUC 0.64) as well as a model trained on their own tracks.
 - **Open:** does it hold for cell types the model never saw, and which inputs drive the predictions?
 
-## 1. Reference models (train first)
+## 1. Reference models
 
-All V1, dev-config setup (chr20, half cCRE / half random, `model15`, `train02` = 25 × 1000 samples). Log
-checkpoints in `TODO_extended.md` §8.
+All V1, dev-config setup (chr20, half cCRE / half random, `model15`, `train04` = 15 × 5000 samples). Checkpoints
+in `TODO_extended.md` §8.
 
-- **DEV5 (V1):** all 5 dev cell types. The existing DEV5 runs are V0; also gives the updated bulk numbers.
-- **5 specialists:** one per dev cell type. "Told the cell type" reference: fibers routed to their own cell
-  type's model.
-- **GM12878 + HepG2** (`data28`, done): main model A below.
+- **DEV4** (`data24`, done): all 4 dev cell types; the main dev model.
+- **Specialists** (`data29`–`data31`, `data33`, done): one per dev cell type. "Told the cell type" reference:
+  fibers routed to their own cell type's model.
+- **Pair models A and B** (`data28`, `data34`, running 4 Nov): the two main models below.
 
 ## 2. Unseen-pair test (T3b) and input ablations
 
@@ -30,22 +31,23 @@ checkpoints in `TODO_extended.md` §8.
 the loci where they differ, close to a model that saw them, because it maps a molecule's own accessibility (+ DNA)
 to its marks. Accessibility channels should carry most of it; CpG adds to the CpG-island marks.
 
-**Design.** Two main pairs, each tested on the three pairs of the other dev cell types (B checks that results do
-not depend on the training pair and doubles as a replicate):
+**Design.** The 4 dev cell types make two main pairs; each is tested on the other (B checks that results do not
+depend on the training pair and doubles as a replicate):
 
-| | Trained on | Unseen test pairs |
+| | Trained on | Unseen test pair |
 |---|---|---|
-| A | GM12878 + HepG2 | K562–Panc1, K562–H1, Panc1–H1 |
-| B | K562 + Panc1 | GM12878–HepG2, GM12878–H1, HepG2–H1 |
+| A | GM12878 + HepG2 | K562–H1 |
+| B | K562 + H1 | GM12878–HepG2 |
 
-H1 has no ATAC; B's GM12878–HepG2 pair crosses Fiber-seq experiments.
+H1 has no ATAC; the GM12878–HepG2 pair crosses Fiber-seq experiments. Second-mixture model: later, possibly one
+cell carried over from the first pair.
 
-**References per test pair:** (1) a pair model trained on that pair's own tracks (matched: differs only in having
-seen the pair; 5 new runs, K562+Panc1 doubling as main B); (2) DEV5; (3) routed specialists.
+**References per test pair:** (1) the pair model trained on that pair's own tracks (A and B are each other's;
+matched: differs only in having seen the pair); (2) DEV4; (3) routed specialists.
 
 **Readouts per test pair × assay, at the pair's differential bins:** fiber-origin AUC (0.5 = no separation; no
 upper bound claimed, the references show where good models land), differential r and sign accuracy; library
-control (100U vs 200U of K562, Panc1, HepG2, H1: AUC ≈ 0.5); bulk recovery as a guardrail; paired dashboards.
+control (100U vs 200U of K562, HepG2, H1: AUC ≈ 0.5); bulk recovery as a guardrail; paired dashboards.
 
 **Ablations** (the two main models retrained per variant; references stay at full inputs):
 
@@ -62,16 +64,16 @@ control (100U vs 200U of K562, Panc1, HepG2, H1: AUC ≈ 0.5); bulk recovery as 
 
 Order: all, then the FIRE / fibertools variants, then CpG and DNA.
 
-**Which model is better:** higher AUC and differential r on the unseen pairs, per assay and over the 6 test pairs,
+**Which model is better:** higher AUC and differential r on the unseen pairs, per assay and over the 2 test pairs,
 in both designs; library control ≈ 0.5; bulk not clearly worse; dashboards agree. Differences of a few hundredths
 need a second seed.
 
-**Cost / build:** 11 reference runs + 2 per ablation variant (12 for the 6 variants), ~70 min each; eval on 6
-pairs + 4 library controls per model, minis first. Build list: I15 in `TODO_extended.md`.
+**Cost / build:** 2 runs per ablation variant (12 for the 6 variants), ~2.2 h each; eval on 2 pairs + 3 library
+controls per model, minis first. Build list: I15 in `TODO_extended.md`.
 
 ## 3. Right after
 
-- **Rerun the bulk tables** with V1 DEV5 and the fold-change baseline.
+- **Bulk tables for DEV4** in the split v2 layout (dev 4, held out 3, Panc1 separately).
 - **Assays: keep the 8, report them by difficulty** so the model's limits are stated, not hidden in averages:
   easy (ATAC, H3K4me3), easy–medium (H3K27ac, H3K4me1), medium (CTCF), hard (H3K27me3, H3K36me3, H3K9me3: broad,
   repressive or repeat-rich). Assay-specific metrics:

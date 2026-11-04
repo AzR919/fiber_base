@@ -19,11 +19,11 @@ min_signal: 1.5
 threshold: 0.5
 
 # --- Splits (ENCODE folder names under encode_root) ---
-# dev:  the 5 dev cell lines, each against the other 4; never touches the held-out lines' tracks. Used for
-#       development and model decisions.
+# dev:  the 4 dev cell lines (split v2, configs/README.md), each against the other 3; never touches the test lines'
+#       tracks. Used for development and model decisions.
 # test: all 8 cell lines, each against the other 7. For milestone reports only, with the heuristic fixed on dev.
 splits:
-  dev:  [GM12878, K562, HepG2, Panc1, H1]
+  dev:  [GM12878, K562, HepG2, H1]
   test: [GM12878, K562, HepG2, Panc1, H1, HCT116, MCF-7, H9]
 
 # --- Pairs (mixture tests, T3): d = asinh(A) - asinh(B) per bin, same bins / min_signal / threshold.

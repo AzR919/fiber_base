@@ -178,20 +178,26 @@ An eval config may list several cell types; each gets its own metrics (keyed `<c
 | `train02` | Standard run (25 epochs × 1000 samples, bs 8); `train01` is retired (old key `iters_per_epoch`) |
 | `train03` | Long run (100 epochs × 1000 samples, bs 8) |
 | `train04` | Standard run from Nov 2026: 15 epochs × 5000 samples (75k), bs 8, LR patience 2 epochs |
-| `data20` | All 5 dev cell types (split v1, 200U); training regions half cCRE, half random |
-| `data21`–`data25` | Dev leave-one-out folds (dev set minus one cell type); same regions as `data20` |
+| `data24` | **All 4 dev cell types (split v2: GM12878, K562, HepG2, H1; 200U); the main dev model ("DEV4").** Named after its split v1 role (dev minus Panc1) |
+| `data20` | Split v1: all 5 old dev cell types (with Panc1); training regions half cCRE, half random |
+| `data21`–`data23`, `data25` | Split v1 leave-one-out folds (old dev set minus one cell type); same regions as `data20` |
 | `data26` | Temporary: GM12878 + K562_200U, cCRE-only training, to compare with the old setup (test on HepG2, `eval23`) |
 | `data27` | Mixture test (T3): GM12878 + HepG2_200U mixtures only, GM12878's share from [0.2, 0.8] |
 | `data28` | T3 upper bound: the same two cell types trained as single cell types |
-| `data29`–`data33` | Specialists: one dev cell type each (GM12878, K562_200U, HepG2_200U, Panc1_200U, H1_200U); the "told the cell type" reference |
+| `data29`–`data33` | Specialists: one cell type each (GM12878, K562_200U, HepG2_200U, Panc1_200U, H1_200U); the "told the cell type" reference (Panc1's is now a held-out-cell oracle) |
+| `data34` | Pair model B (T3b): K562_200U + H1_200U as single cell types |
+| `data35` | Mixture model B: K562_200U + H1_200U mixtures only, K562's share from [0.2, 0.8]; no ATAC (H1 has none) |
 | `eval24` (+ `_mini`) | T3 paired eval: GM12878 vs HepG2_200U, each from its own fibers, with pairwise / dev loci |
 | `eval25` (+ `_mini`) | T3 library control: HepG2_100U vs HepG2_200U (same true track) |
 | `eval26_mini` | T3 mixture composites (GM12878 + HepG2_200U) against the mixture target |
+| `eval27` | Paired eval K562_200U vs H1_200U (second main pair; no ATAC) |
+| `eval28` / `eval29` | Library controls: K562_100U vs K562_200U, H1_100U vs H1_200U |
+| `eval30_mini` | Mixture composites (K562_200U + H1_200U) against the mixture target |
 | `eval00_pair`, `eval00_mix` | Debug versions of `eval24` (20 tiles) and `eval26` (5 tiles) |
 | `old_configs/data/data12`–`data19` | Retired pre-split configs (still run: no `train_windows` means cCRE-only) |
-| `eval21` / `eval22` / `eval23` (+ `_mini`) | Eval on dev cells GM12878 / K562_200U / HepG2_200U |
-| `eval16` / `eval17` (+ `_mini`) | Eval on dev cells Panc1_200U / H1_200U |
+| `eval21` / `eval22` / `eval23` / `eval17` (+ `_mini`) | Eval on dev cells GM12878 / K562_200U / HepG2_200U / H1_200U |
 | `eval18` / `eval19` / `eval20` (+ `_mini`) | Held-out test: HCT116_200U / MCF_7_200U / H9_200U |
+| `eval16` (+ `_mini`) | Held-out test, hard cell: Panc1_200U (sample identity in doubt; reported separately) |
 | `old_configs/evals/eval13`–`eval15` | Retired cCRE-list evals (do not run with the current code) |
 
 ---
@@ -225,7 +231,7 @@ python data_prep/setup_data.py                # run interactively
 
 ```bash
 python main.py \
-  --data_config  configs/data/data23_dev_loo_HepG2_200U.yaml \
+  --data_config  configs/data/data24_dev_loo_Panc1_200U.yaml \
   --model_config configs/models/model15_uct_mid_8A.yaml \
   --train_config configs/training/train02.yaml \
   [--eval_configs configs/evals/eval21_GM12878_mini.yaml configs/evals/eval23_HepG2_200U_mini.yaml] \
@@ -266,7 +272,7 @@ The reference a model has to beat: for each eval sample, the mean of the **train
 
 ```bash
 # Baseline only: no checkpoint, CPU is enough (sbatch slurm_batch_command_baseline.sh)
-python eval.py --baseline_only --train_data_config configs/data/data20_dev5_200U.yaml \
+python eval.py --baseline_only --train_data_config configs/data/data24_dev_loo_Panc1_200U.yaml \
   --eval_configs configs/evals/eval21_GM12878.yaml [more...] --device cpu --num_workers 7
 
 # Model + baseline + cell-specific score in one pass (training cells read from the checkpoint)

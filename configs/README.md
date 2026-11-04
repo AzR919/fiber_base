@@ -30,64 +30,74 @@ Several cell lines have Fiber-seq at two concentrations (100U and 200U). **For n
 samples, wherever a cell line has one.** GM12878 has a single sample (`GM12878`), so it is used as-is.
 The 100U samples stay in `metapaths.yaml` for later.
 
-## Cell-type split (v1)
+## Cell-type split (v2, from 4 Nov 2026)
 
-The 8 cell lines with ENCODE data are split into a dev group of 5 and a held-out group of 3.
+The 8 cell lines with ENCODE data are split into 4 dev and 4 held-out (test) cell lines. Panc1 is a held-out
+cell line flagged as **hard**: report it separately from the other three, and decide later whether to show it
+at all.
 
 | Group | Sample | Cell line | ENCODE assays |
 |---|---|---|---|
 | Dev | `GM12878` | Lymphoblastoid (B cell) | all 8 |
 | Dev | `K562_200U` | Erythroleukemia (myeloid) | all 8 |
 | Dev | `HepG2_200U` | Liver carcinoma | all 8 |
-| Dev | `Panc1_200U` | Pancreatic carcinoma | all 8 |
 | Dev | `H1_200U` | Embryonic stem cell (male) | no ATAC |
+| **Held-out** | `H9_200U` | Embryonic stem cell (female) | no ATAC |
 | **Held-out** | `HCT116_200U` | Colon carcinoma | all 8 |
 | **Held-out** | `MCF_7_200U` | Breast carcinoma | all 8 |
-| **Held-out** | `H9_200U` | Embryonic stem cell (female) | no ATAC |
+| **Held-out, hard** | `Panc1_200U` | Pancreatic carcinoma (sample identity in doubt) | all 8 |
 
-**Dev (5):** used for everything we tune: ablations, architecture choices, and leave-one-cell-out
+**Dev (4):** used for everything we tune: ablations, architecture choices, and leave-one-cell-out
 checks.
 
-**Held-out (3):** used only to test finished models, as an out-of-distribution test. Never train on
+**Held-out (4):** used only to test finished models, as an out-of-distribution test. Never train on
 them, and never use their numbers to pick a model or a setting. If we do, they stop being held out.
 
-Why this split:
+**Why Panc1 moved out of dev (v1 had it in dev):**
+- **Its fibers and tracks don't match.** The sample identity check (`data_prep/sample_identity.py`) finds KRAS
+  G12D but not PANC-1's homozygous TP53 R273H, no CDKN2A deletion and no chrY reads; its fibers agree better with
+  HCT116's ATAC than with Panc1's own (`data_prep/fiber_qc.py`). Its broad-mark tracks are old and carry 4–6
+  NOT_COMPLIANT audits each, and the library has about half the fiber coverage of the others.
+- **Training on it bought nothing** (`reports/Nov_13.md`): the model trained without Panc1 is as good or slightly
+  better on the other dev cells and the held-out three. Even a Panc1-only model stays below the cross-cell average
+  on Panc1 (Pearson).
+
+Why the rest of the split (unchanged from v1):
 - **The held-out cells range from near to far from the dev set,** so we see how performance falls off
   as the new cell gets less familiar, not just one number:
   - H9 is a near-twin of H1;
   - HCT116 is a new tissue of a related kind (gut-derived epithelial carcinoma, like HepG2 and Panc1);
   - MCF-7 has no close relative in dev.
-- **The held-out cells have clean ENCODE targets.** HCT116 and MCF-7 have newer tracks (2016–17) with
-  almost no NOT_COMPLIANT audits, whereas Panc1's broad marks carry 4–6 each (see
-  `data_prep/encode_lock.yaml`). Noisy targets hurt evaluation more than training, so Panc1 trains.
+- **The held-out three have clean ENCODE targets.** HCT116 and MCF-7 have newer tracks (2016–17) with
+  almost no NOT_COMPLIANT audits (see `data_prep/encode_lock.yaml`). (v1 kept Panc1 in training because noisy
+  targets hurt evaluation more than training; with its identity in doubt it no longer trains at all.)
 - **It costs the least training data.** HCT116 and MCF-7 have only one fiber sample each.
 - **GM12878, K562 and HepG2 stay in dev,** so results remain comparable with earlier runs.
 - **H1 brings stem-cell chromatin into training**, for example bivalent promoters (H3K4me3 + H3K27me3).
 
 Known gaps (accepted):
-- **H1 and H9 have no ATAC.** The leave-one-out fold that holds out H1 gives no ATAC number, so report
-  ATAC averaged over the other 4 folds. On the held-out side, ATAC is tested only on HCT116 and MCF-7.
-- **No held-out cell is an entirely new kind of cell.** The alternative split (hold out H1 + H9 + Panc1)
-  would test that, at the cost of weaker ATAC testing and less training data.
+- **H1 and H9 have no ATAC.** ATAC trains on 3 dev cells and is tested on HCT116 and MCF-7 (and Panc1).
+- **No held-out cell is an entirely new kind of cell,** apart from MCF-7.
+- **Only 4 training cell types.** A replacement for Panc1 (A549 is the best-covered candidate, 6 of 8 assays) can
+  join dev later as split v3.
 
 ## Workflow
 
-1. **Ablations / model selection (dev only).** For each setting, train a leave-one-out fold
-   (`data21`–`data25`) and evaluate on the dev cell it left out (`eval21`–`eval23`, `eval16`, `eval17`). To keep cost down,
-   screen settings with one fold first (e.g. `data23`, HepG2 held out). Run all 5 folds only for the
-   finalists.
-2. **Final models.** Train on all 5 dev cells (`data20`).
-3. **Out-of-distribution test.** Evaluate final models on the held-out 3 (`eval18`–`eval20`).
+1. **Ablations / model selection (dev only).** Train on the 4 dev cells and compare on the dev cells' chr21
+   numbers (`eval21`–`eval23`, `eval17`); leave-one-out folds of the 4 when a setting needs a cell type the
+   model never saw (configs to add: dev minus one, 3 cell types each).
+2. **Final models.** Train on all 4 dev cells (`data24`).
+3. **Out-of-distribution test.** Evaluate final models on the held-out 4 (`eval20`, `eval18`, `eval19`; Panc1
+   `eval16` reported separately).
 
 | Config | Use |
 |---|---|
-| `data20_dev5_200U` | All 5 dev cells: final models |
-| `data21_dev_loo_GM12878` | Dev minus GM12878 → eval with `eval21_GM12878` |
-| `data22_dev_loo_K562_200U` | Dev minus K562 → eval with `eval22_K562_200U` |
-| `data23_dev_loo_HepG2_200U` | Dev minus HepG2 → eval with `eval23_HepG2_200U` |
-| `data24_dev_loo_Panc1_200U` | Dev minus Panc1 → eval with `eval16_Panc1_200U` |
-| `data25_dev_loo_H1_200U` | Dev minus H1 → eval with `eval17_H1_200U` (no ATAC) |
-| `eval18_HCT116_200U`, `eval19_MCF_7_200U`, `eval20_H9_200U` | Held-out test (final models only) |
+| `data24_dev_loo_Panc1_200U` | **All 4 dev cells (split v2): final models.** Named after its v1 role (dev minus Panc1); kept so the trained model's name stays the same |
+| `data20_dev5_200U` | Split v1: the 5 old dev cells (with Panc1). Old runs only |
+| `data21`–`data23`, `data25` | Split v1 leave-one-out folds (still contain Panc1). Old runs only |
+| `eval21_GM12878`, `eval22_K562_200U`, `eval23_HepG2_200U`, `eval17_H1_200U` | Dev cells |
+| `eval20_H9_200U`, `eval18_HCT116_200U`, `eval19_MCF_7_200U` | Held-out test (final models only) |
+| `eval16_Panc1_200U` | Held-out test, hard cell (reported separately) |
 | `data26_GM12878_K562_200U_ccre_only` | Temporary, outside the split: GM12878 + K562 with cCRE-only training (the old `data16` setup on region files), tested on HepG2 (`eval23`) to compare with old results. Retire when done |
 
 Every eval config scores `test_chr21_tiles` (all 6,843 valid chr21 tiles) and has a `_mini` twin on
@@ -217,7 +227,7 @@ tracks alone (no fibers, no model). Read at eval time through the eval config ke
 
 | Split | Cell lines | Each line compared with | Use |
 |---|---|---|---|
-| `dev` | GM12878, K562, HepG2, Panc1, H1 | the other 4 dev lines | Development and model decisions; tune the heuristic here |
+| `dev` | GM12878, K562, HepG2, H1 | the other 3 dev lines | Development and model decisions; tune the heuristic here |
 | `test` | all 8 | the other 7 lines | Milestone reports only, with the heuristic fixed on dev |
 
 Both use the chr21 tiles (`test_chr21_tiles`); the dev cells' chr21 numbers already guide decisions, which we
@@ -236,7 +246,7 @@ skipped for it.
 | `loci/manifest.json` | Spec, fingerprint, counts per split × cell × assay × direction |
 
 **Pairs** (`pairs:` in the spec; mixture test T3): `loci/pairs/<A>__<B>.{tsv,bed}` with `d = asinh(A) −
-asinh(B)` on the same bins and rules (gain = higher in A). `pairs/GM12878__HepG2` is the one we use.
+asinh(B)` on the same bins and rules (gain = higher in A). `pairs/GM12878__HepG2` and `pairs/K562__H1` are the two main pairs (T3b).
 
 Eval configs use them through `loci:` (breakdown, e.g. `[pairs/GM12878__HepG2, "dev/{line}"]`, `{line}` = each
 evaluated cell's own line) and `pair_loci:` (differential bins of the paired readouts); see the root README.
