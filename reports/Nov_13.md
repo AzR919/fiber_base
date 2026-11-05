@@ -215,3 +215,153 @@ model; its numbers above already use the v2 baselines. Rationale in `configs/REA
 
 **Sources:** logs `logs/2026-11-03_{01..14}_*` on nibi; results `results/26-11-03_T16-1*_eval_{LOO_Panc1,SPEC}_V1_*`;
 table script `ignore/reports/nov13_compare.py`; sample checks in `DATA_FIBER/qc/`.
+
+## Mixture test on two pairs (T3 repeated on K562–H1)
+
+October's mixture test (T3) used one pair. With split v2 we have two pairs of dev cell types, **A = GM12878 +
+HepG2** and **B = K562 + H1**, and train four models on them (same `model15` / `train04` setup as DEV4, ~2 h 15 min
+each on nibi):
+
+- **Mix A / Mix B** (`data27` / `data35`): trained only on synthetic mixtures of the pair's fibers (cell fraction
+  q drawn from [0.2, 0.8]), supervised by the q-weighted fold-change mixture of the two tracks. They never see a
+  cell type's own track. H1 has no ATAC, so Mix B never trains ATAC (the mixture's assay mask is the product over
+  its cells).
+- **Pair A / Pair B** (`data28` / `data34`): the same cells, each fiber supervised by its own cell type's track
+  (the ceiling for that pair).
+- **DEV4** (`data24`): all 4 dev cell types, own tracks.
+
+Every model is tested on both pairs: its own pair, and the pair it never saw. The readouts come from paired
+evaluation at the pair's differential bins (`loci_spec.yaml` pairs: 1 kb bins where the two tracks differ by
+|asinh Δ| ≥ 0.5) on chr21:
+
+- **Fiber-origin AUC:** in each tile, how well a fiber's prediction tells which cell type it came from, oriented by
+  the tracks' difference (0.5 = chance).
+- **Sign accuracy:** the fraction of differential bins where the predicted difference between the two cell types
+  has the tracks' sign.
+- **Differential r:** bp-level correlation of predicted vs track difference (p_A − p_B vs t_A − t_B).
+
+### Mean over assays
+
+GM12878–HepG2 has 8 assays; K562–H1 has 7 (no H1 ATAC). Values are AUC / sign accuracy / differential r.
+
+| Model | GM12878–HepG2 | K562–H1 |
+|---|---|---|
+| Mix A (GM12878 + HepG2 mixtures) | **0.637** / 0.761 / 0.329 *(own pair)* | 0.599 / 0.590 / 0.238 *(unseen)* |
+| Pair A (GM12878, HepG2 own tracks) | 0.635 / **0.771** / **0.351** *(own pair)* | 0.600 / 0.598 / 0.224 *(unseen)* |
+| Mix B (K562 + H1 mixtures) | 0.621 / 0.706 / 0.263 *(unseen)* | **0.666** / 0.802 / 0.291 *(own pair)* |
+| Pair B (K562, H1 own tracks) | 0.617 / 0.719 / 0.270 *(unseen)* | 0.665 / **0.828** / **0.335** *(own pair)* |
+| DEV4 (all 4 own tracks) | 0.629 / 0.748 / 0.316 | 0.654 / 0.793 / 0.294 |
+
+### Fiber-origin AUC per assay
+
+GM12878–HepG2:
+
+| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| Mix A | .713 | .687 | .688 | .644 | .685 | .550 | .483 | .643 |
+| Pair A | .705 | .677 | .676 | .653 | .683 | .542 | .499 | .642 |
+| Mix B | .705 | .737 | .673 | .575 | .671 | .485 | .462 | .659 |
+| Pair B | .710 | .735 | .660 | .575 | .650 | .514 | .468 | .623 |
+| DEV4 | .713 | .707 | .674 | .623 | .674 | .525 | .464 | .652 |
+| *bins* | 775 | 355 | 702 | 605 | 1472 | 592 | 2952 | 388 |
+
+K562–H1:
+
+| Model | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|
+| Mix A | .670 | .564 | .796 | .724 | .476 | .505 | .458 |
+| Pair A | .664 | .587 | .788 | .724 | .468 | .496 | .468 |
+| Mix B | .742 | .653 | .786 | .711 | .687 | .615 | .469 |
+| Pair B | .727 | .678 | .771 | .677 | .687 | .643 | .472 |
+| DEV4 | .698 | .641 | .790 | .715 | .638 | .614 | .479 |
+| *bins* | 408 | 509 | 925 | 1118 | 670 | 839 | 428 |
+
+### Differential r per assay
+
+GM12878–HepG2:
+
+| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| Mix A | .60 | .22 | .45 | .27 | .60 | .13 | .19 | .16 |
+| Pair A | .61 | .26 | .46 | .30 | .60 | .13 | .28 | .17 |
+| Mix B | .37 | .20 | .36 | .18 | .54 | .07 | .23 | .16 |
+| Pair B | .57 | .20 | .32 | .17 | .49 | .06 | .24 | .11 |
+| DEV4 | .58 | .23 | .43 | .24 | .58 | .11 | .19 | .17 |
+
+K562–H1:
+
+| Model | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|
+| Mix A | .28 | .25 | .25 | .35 | .25 | .13 | .15 |
+| Pair A | .27 | .25 | .23 | .35 | .21 | .12 | .15 |
+| Mix B | .36 | .31 | .26 | .36 | .33 | .20 | .21 |
+| Pair B | .39 | .37 | .31 | .39 | .33 | .22 | .34 |
+| DEV4 | .38 | .30 | .27 | .37 | .32 | .20 | .23 |
+
+### Library control
+
+The control compares two Fiber-seq libraries of the **same** cell type (100U vs 200U; both libraries scored at the
+real pairs' bins), so any separation comes from the library, not the cell type. The readout is the mean over tiles
+of |AUC − 0.5|; for the real pairs the same measure is 0.17–0.19 (GM12878–HepG2) and 0.22–0.25 (K562–H1).
+
+| Model | HepG2 | K562 | H1 |
+|---|---|---|---|
+| Mix A | .049 | .089 | .044 |
+| Pair A | .049 | .090 | .045 |
+| Mix B | .051 | .075 | .042 |
+| Pair B | .053 | .083 | .045 |
+| DEV4 | .051 | .076 | .041 |
+
+### Own-track recovery and validation
+
+Recovery r is the Pearson r of each cell type's fibers against its own track, from the same paired evals. The
+other columns give validation r at the last epoch and the r on mixture composites (`eval26` / `eval30`).
+
+| Model | Recovery r, own pair | Recovery r, unseen pair | Val r | Mixture composite r |
+|---|---|---|---|---|
+| Mix A | GM12878 .466, HepG2 .615 | K562 .479, H1 .369 | .612 | .608 |
+| Pair A | GM12878 .469, HepG2 .610 | K562 .473, H1 .370 | .566 | – |
+| Mix B | K562 .467, H1 .441 | GM12878 .392, HepG2 .514 | .559 | .518 |
+| Pair B | K562 .522, H1 .438 | GM12878 .398, HepG2 .554 | .530 | – |
+| DEV4 | GM12878 .458, HepG2 .586, K562 .509, H1 .419 | – | – | – |
+
+Mixture models validate on mixtures and pair models on own tracks, so their validation r values don't compare
+directly.
+
+### Findings
+
+- **Mixture-only supervision reaches the ceiling on both pairs.**
+  - On its own pair, each mixture model's fiber-origin AUC matches the own-track model's: Mix A 0.637 vs Pair A
+    0.635, and Mix B 0.666 vs Pair B 0.665.
+  - Sign accuracy and differential r are slightly lower (−0.01 to −0.04).
+  - Recovery of each cell's own track is the same, except K562 under Mix B (.467 vs .522).
+  - This repeats October's T3 result on a second, harder pair.
+- **On the unseen pair, mixture and own-track models trained on the same cells perform the same** (Mix A ≈ Pair A on
+  K562–H1, Mix B ≈ Pair B on GM12878–HepG2). The loss comes from never having seen the cell types, not from the
+  kind of supervision.
+- **The drop on the unseen pair is lopsided.**
+  - K562 + H1 → GM12878–HepG2 loses little: AUC 0.62 vs 0.64.
+  - GM12878 + HepG2 → K562–H1 loses a lot: AUC 0.60 vs 0.67, and sign accuracy 0.59, close to chance.
+  - The K562–H1 loss is in H3K36me3 (0.47 vs 0.69), H3K9me3 (0.50 vs 0.62–0.64) and H3K27ac (0.56–0.59 vs
+    0.65–0.68).
+  - H3K27me3 and H3K4me1 transfer fully (~0.79, ~0.72).
+  - A plausible reason is that GM12878 and HepG2 offer nothing like H1's stem-cell chromatin to learn from.
+- **DEV4 sits just below each pair's own models** (AUC 0.629 vs 0.635–0.637; 0.654 vs 0.665–0.666). This matches
+  the specialists beating the multi-cell model above.
+- **Some assays fail for every model, including those trained on the pair:**
+  - **H3K9me3 on GM12878–HepG2** (AUC 0.46–0.50). Almost all of its 2,952 bins are higher in HepG2: this is the
+    HepG2 H3K9me3 track's scale issue, not single-molecule signal.
+  - **CTCF on K562–H1** (0.46–0.48).
+  - **H3K36me3 on GM12878–HepG2** (0.49–0.55).
+- **ATAC fiber-origin AUC is a weak readout.** Mix B never trained an ATAC output, yet reaches AUC 0.705 on
+  GM12878–HepG2, as high as the models that did. Accessibility is in the input, so the cell types separate on ATAC
+  almost for free. Differential r does show the missing training (.37 vs .57–.61).
+- **Library effects are small next to cell-type effects.** Same-cell-type library pairs give |AUC − 0.5| ≈ 0.04–0.05
+  (HepG2, H1) and 0.08–0.09 (K562, whose two libraries differ most), against 0.17–0.25 for the real pairs. The
+  GM12878–HepG2 pair crosses Fiber-seq experiments and still sits well above the controls.
+
+**Next (not run yet):** routed specialists as the "told the cell type" reference on the unseen pair.
+
+**Sources:** training and eval logs `logs/2026-11-04_*` on nibi (paired evals that timed out were rerun as
+`2026-11-04_{15..18}_eval_*_rerun`); results `results/26-11-04_*_eval_{MIX_V1,PAIR_V1,LOO_Panc1_V1}_*`
+(`<config>_paired.npz`, `eval_summary.json`); table script `ignore/reports/mix_compare.py`.
