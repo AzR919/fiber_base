@@ -1,3 +1,210 @@
+<!-- ===================================================================================================== -->
+# HANDOFF NOTE (6 Nov 2026, Windows → Mac): read this first, then delete this block
+
+This block is for a new Claude Code session picking up the work, not part of the report. It says where things
+stand, what was done on 3–5 Nov, and how to continue. Delete it when you take over. The report itself starts at
+"# 13th Nov" below.
+
+## 0. Before anything else
+
+- **Git.** The Windows checkout is on branch `over`, 2 commits ahead of `origin/over` ("finished main runs" holds
+  `plots_code/26_nov_13/mix_two_pairs.py`, the mixture section of this report and the `TODO_extended.md`
+  registry updates). It has to be pushed from Windows and pulled on the Mac (`git pull`). Check that
+  `plots_code/26_nov_13/mix_two_pairs.py` exists and this note is here. If not, the push hasn't happened yet.
+- **Pull before starting `misc/sync_fiber.sh`.** The Mac watcher pushes local → nibi, so a stale Mac checkout
+  would overwrite newer files on nibi.
+- **nibi is IP-blocked as of 6 Nov (fail2ban).** Failed SSH attempts while the ControlMaster socket was down
+  probably caused it:
+  - Mutagen on Windows retrying;
+  - a sync watcher running while the socket was closed;
+  - one of my commands (on the 5th) that ran `ssh nibi` without checking the socket and sat at the 2FA prompt.
+
+  Rules from now on:
+  - **Always `ssh -O check nibi` before any remote command.** If the socket is down, tell the user and give them
+    `ssh -fN nibi`. Never run a plain `ssh nibi ...` that could start a fresh login.
+  - Run `misc/sync_fiber_stop.sh` before the laptop sleeps.
+  - An SSH-config guard was proposed, not set up. It would make normal `nibi` commands only reuse an existing
+    socket (fail fast), with the socket opened through a separate alias. Ask the user if they want it.
+- **Mac paths:** repo `/Users/azr/Documents/SFU/Lab/code/fiber_base`; on nibi
+  `/home/azr/projects/def-maxwl/azr/code/fiber_base`. Venv and modules are in `CLAUDE.md`.
+- **Claude memory** is per machine and per path. The Windows memory folder had one file
+  (`project_training_pipeline.md`: tensor shapes (B,C,L,N), per-position coverage normalization, eval mixing
+  logic). Copy it over if it matters.
+
+## 1. Where the project stands (main updates since 30 Oct)
+
+- **V1 aggregation** (asinh(mean sinh): fibers averaged in fold change) is the default. The baseline and the
+  mixture targets average in fold change too.
+- **Training budget `train04`:** 15 epochs × 5000 samples, ~2 h 12–20 min on a 2g.20gb slice (≈10.2 samples/s).
+  Checkpoint every epoch; `--resume latest` continues a stopped job.
+- **Split v2 (4 Nov):** dev = GM12878, K562, HepG2, H1; held out = H9, HCT116, MCF-7, plus Panc1 as a "hard"
+  held-out cell reported separately. Panc1 moved because of doubtful sample identity (fibers match HCT116 ATAC
+  better than its own, no TP53 R273H / CDKN2A deletion), half coverage, NOT_COMPLIANT ENCODE tracks, and because
+  training on it bought nothing. Rationale: `configs/README.md` "Cell-type split (v2…)"; evidence: the Panc1
+  section of this report. A549 could join later as split v3. Not started.
+- **DEV4** (`data24`, trained as the leave-Panc1-out fold) is the **main dev model** and replaces DEV5 (`data20`,
+  split v1). Run name `LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04`. It is the default
+  `RUN` in `slurm_batch_command_eval.sh`.
+- **Specialists** (`data29`–`data33`, one dev cell each, own track): beat DEV5 by +0.03–0.06 Pearson. Panc1's
+  specialist (0.44) still trails the baseline (0.48).
+- **Two-pair mixture test (T3 repeated; the "Mixture test on two pairs" section at the end of this report):**
+  - Mixture-only models match the own-track ceiling on their own pair (AUC 0.637 vs 0.635; 0.666 vs 0.665).
+  - On the unseen pair, mixture and own-track models trained on the same cells perform alike: seeing the cell
+    types matters, not the kind of supervision.
+  - The transfer is lopsided: K562+H1 → GM12878–HepG2 is fine; GM12878+HepG2 → K562–H1 is poor (sign accuracy
+    0.59; H3K36me3, H3K9me3 and H3K27ac fail).
+  - DEV4 sits just below each pair's own models.
+  - Library controls (|AUC − 0.5| 0.04–0.09) are well below the real pairs (0.17–0.25).
+  - Assays that fail for every model: H3K9me3 on GM12878–HepG2 (the HepG2 H3K9me3 track's scale issue), CTCF on
+    K562–H1, H3K36me3 on GM12878–HepG2.
+  - ATAC fiber-origin AUC is a weak readout: Mix B never trained ATAC and still gets 0.705.
+
+## 2. What was added on 3–5 Nov (all committed)
+
+- **Configs:**
+  - `data34_K562_H1_200U` (pair B, own tracks);
+  - `data35_mix_K562_H1_200U` (Mix B, no ATAC because H1 has none: a mixture's assay mask is the product over
+    its cells);
+  - `eval27_pair_K562_H1_200U`, `eval28`/`eval29` (K562 / H1 100U vs 200U library controls);
+  - `eval30_mix_K562_H1_200U_mini` (K562+H1 mixture composites, seed 919, mix_range [0.2, 0.8]).
+  - Existing ones used: `data27` (Mix A), `data28` (pair A), `eval24` (GM12878–HepG2 pair), `eval25` (HepG2
+    library control), `eval26` (GM12878+HepG2 mixture composites).
+- **`data_prep/loci_spec.yaml`:**
+  - dev split = the 4 dev cells; pairs = [GM12878, HepG2] and [K562, H1].
+  - Loci were rebuilt on nibi for split v2 (`2026-11-04_05_build_loci_split_v2`).
+  - A stale `dev/Panc1.bed` remains in the loci folder, unused.
+- **`slurm_batch_command.sh`:** the `CELL=` case table now has `gm12878|k562|hepg2|panc1|h1` (specialists) and
+  `pairA|pairB|mixA|mixB`. `RESUME=latest` continues a stopped run.
+- **`slurm_batch_command_eval.sh`:** `RUN=` (default DEV4) and `EVAL_SET=a` (dev: eval21, 22, 23, 17), `b` (held
+  out: eval20, 18, 19, 16 = Panc1), or `one` with `CONFIGS="..."`. Two flags:
+  - `BASELINE=0` skips the cross-cell baseline (specialists);
+  - `MIXREF=1` adds `--mixture_reference` (mixture model on its own pair).
+- **Docs:**
+  - `README.md` configs table;
+  - `configs/README.md` (split v2, known gaps);
+  - `reports/TODO.md` (§1–2 rewritten for split v2 and the two-pair design);
+  - `reports/TODO_extended.md` §8 registry: DEV4, specialists, pairs, mixtures all marked done.
+- **Analysis scripts:**
+  - `ignore/reports/nov13_compare.py` (DEV5 / LOO / specialists);
+  - `ignore/reports/mix_compare.py` (two-pair tables).
+
+  `ignore/` is **not synced**: run these by piping, `ssh nibi 'cd <repo> && source <venv> && python -' < file`.
+  `ignore/` is also gitignored, so these exist only on the Windows machine. They are not needed:
+  `plots_code/26_nov_13/mix_two_pairs.py` (in git) supersedes `mix_compare.py`.
+
+## 3. Runs (all on nibi, logs in `logs/`, results in `results/`)
+
+| Job | What |
+|---|---|
+| `2026-11-03_01_train_loo_panc1_v1` | DEV4 training (`data24`) |
+| `2026-11-03_02..04_eval_loo_panc1_v1_{a,b,c}` | DEV4 full evals |
+| `2026-11-03_05..09_train_spec_*` | specialists |
+| `2026-11-03_10..14_eval_spec_*` | specialist evals (`BASELINE=0`) |
+| `2026-11-04_00_build_loci`, `_05_build_loci_split_v2` | loci (the second is the current one) |
+| `2026-11-04_01_train_pair_a_gm12878_hepg2`, `_02_train_pair_b_k562_h1` | Pair A / Pair B |
+| `2026-11-04_06_train_mix_a_gm12878_hepg2`, `_07_train_mix_b_k562_h1` | Mix A / Mix B |
+| `2026-11-04_03`, `_04` | Pair A on eval27+28+29+24; Pair B on eval24+25+27 |
+| `2026-11-04_08` | DEV4 on both pairs + all controls (timed out) |
+| `2026-11-04_09`, `_10` | pair controls (`_10` timed out) |
+| `2026-11-04_11`, `_12` | Mix A on own pair (+eval25, eval26) / other pair (`_12` timed out) |
+| `2026-11-04_13`, `_14` | Mix B on own pair (+eval28, 29, 30) / other pair |
+| `2026-11-04_15..18_*_rerun` | reruns of the timed-out evals; all COMPLETED |
+
+Run names (results dirs are `results/<timestamp>_train_<run>/` and `results/<timestamp>_eval_<run>*`):
+
+- `MIX_V1_data27_mix_GM12878_HepG2_200U_model15_uct_mid_8A_train04` (Mix A)
+- `MIX_V1_data35_mix_K562_H1_200U_model15_uct_mid_8A_train04` (Mix B)
+- `PAIR_V1_data28_GM12878_HepG2_200U_model15_uct_mid_8A_train04` (Pair A)
+- `PAIR_V1_data34_K562_H1_200U_model15_uct_mid_8A_train04` (Pair B)
+- `LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04` (DEV4)
+
+A model's results are spread over several eval dirs (the original job and the rerun), so scripts search all
+`results/*_eval_<run>*` dirs, newest first.
+
+**Timing lessons:**
+- A paired eval config takes ~28 min (2 cells × 6843 chr21 tiles plus figures). A full `EVAL_SET` a/b job takes
+  ~25–30 min per cell.
+- Mini evals take a few minutes.
+- `eval.py` writes `eval_summary.json` only at the very end. A timed-out job leaves `<config>_paired.npz` and
+  figures for the configs it finished, but no JSON. AUC and sign accuracy can be recovered from the npz;
+  differential r and recovery r cannot.
+- Size time limits from these numbers (≤ 3 h, close to the expected runtime, not padded).
+
+## 4. Where this session stopped, and how to pick up
+
+The user asked to **"make some plots and consolidate the results"** for the mixture test. Done so far:
+
+- [x] `plots_code/26_nov_13/mix_two_pairs.py` written. It has **never run successfully**: the first attempt was
+  interrupted when nibi blocked the IP.
+  - It loads every model × {eval24, eval27, eval25, eval28, eval29}: npz for AUC, sign accuracy and
+    |AUC − 0.5|; JSON for differential r and recovery r.
+  - It prints all markdown tables and writes `plots/26_nov_13/mix/`:
+    - `mix_summary.png`;
+    - `mix_per_assay_auc.png`, `mix_per_assay_diff_r.png`;
+    - `mix_library_control.png`;
+    - `mix_bin_scatter_GM12878_HepG2.png`, `mix_bin_scatter_K562_H1.png`;
+    - `mix_results.csv`.
+  - Colours follow the reference dataviz palette: mixtures blue `#2a78d6`, own tracks orange `#eb6834`, DEV4
+    aqua `#1baf7a`. Hatched bars are models trained on the *other* pair.
+- [x] The "Mixture test on two pairs" section at the end of this report has the full tables and findings.
+
+Next steps, in order:
+
+1. **Once the socket is up** (`ssh -O check nibi`):
+   - See whether the interrupted run left a partial `plots/26_nov_13/mix/` on nibi.
+   - Make sure the script is on nibi (via sync, or pipe it with `python - < plots_code/26_nov_13/mix_two_pairs.py`
+     from the repo root).
+   - Run it on the login node (CPU, light, ~1 min): `python plots_code/26_nov_13/mix_two_pairs.py`.
+2. **Check the output against the tables in the mixture section.** The AUC, sign accuracy, differential r and
+   library numbers came from `mix_compare.py` (the same computation), so they should match exactly.
+   - The **recovery r and validation r values in the report were carried over from memory**, not rerun. Replace
+     recovery r with the script's printout.
+   - Validation r comes from the training logs (last epoch).
+   - Mixture composite r is in each training run's final mini eval or in `eval_summary.json` under
+     `eval26`/`eval30`.
+   - Unverified code paths in the script: the recovery-r JSON path `results["<cfg>/<cell>"]["per_assay"][a]["pearson"]`
+     (the older `t3_report.py` read `per_assay_pearson`; check which exists), and `tile_dt_bin` in the npz.
+3. **Pull the figures to the Mac** (`plots/` is gitignored), e.g.
+   `rsync -av nibi:/home/azr/projects/def-maxwl/azr/code/fiber_base/plots/26_nov_13/ plots/26_nov_13/`.
+   **Look at every figure** for label collisions and overflow. Likely fixes:
+   - the summary figure's model names inside the bars and the rotated AUC values;
+   - the y-limits (AUC panels start at 0.45/0.4);
+   - the per-assay figures with 5 bars × 9 groups.
+4. **Consolidate the report** (user's request; keep everything in this one report for now, it gets split up later):
+   - Rebuild the mixture section around the figures. Link them as `../plots/26_nov_13/mix/<file>.png`; figures
+     never go in `reports/`.
+   - Keep the per-assay tables, but they can shrink once the figures carry them.
+   - Add a short summary at the top of the report covering DEV4 bulk, Panc1 → split v2, and the mixture test.
+5. **Update `reports/TODO.md`** (status only, no results):
+   - §1 still says pair models are "running 4 Nov";
+   - "Where we stand" → single molecules should mention both pairs and the lopsided transfer.
+
+**Deferred by the user** ("leave routing for later"):
+- routed specialists as the "told the cell type" reference on the unseen pair. It needs a way to route each
+  cell's fibers to its own specialist in the paired eval; not built.
+- the input ablations (`TODO.md` §2 table);
+- a second mixture model;
+- A549 / split v3.
+
+## 5. Standing conventions and user feedback
+
+- **Job names:** `YYYY-MM-DD_NN_<train|eval>_description`, NN counted across both scripts for the day (check
+  `logs/`). Set `--job-name` on the sbatch line.
+- **Slurm limits:**
+  - jobs ≤ 3 h, time limit close to the expected runtime (no padding);
+  - 2g.20gb slice with 4 CPUs on nibi;
+  - continuation jobs with `RESUME=latest`;
+  - specialists need no continuation.
+- **Configs:** numbered; never edit one that has been used in a run, add the next number instead.
+- **Plotting:** figures go in `plots/<name>/`, code in `plots_code/<name>/` (here `26_nov_13`). `tester.py`,
+  `misc/` and `plots_code/` are one-offs: don't keep pipeline changes compatible with them.
+- **Docs:** `TODO.md` holds the plan and status only, never results. Results go in the dated reports.
+- **Metrics:** keep them simple. Fiber-origin AUC stays on [0, 1] with 0.5 = chance, judged against the reference
+  models; no extra normalized metrics.
+- **The user commits and pushes; Claude doesn't.** Don't `git pull` as a habit. Never permanently delete data.
+- **Top priority of the project:** verify single-molecule correctness.
+<!-- ===================================================================================================== -->
+
 # 13th Nov
 
 Work in progress. Results on the current setup: the reference model bank and the unseen-pair test (`TODO.md`).
