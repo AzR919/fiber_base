@@ -1,213 +1,32 @@
-<!-- ===================================================================================================== -->
-# HANDOFF NOTE (6 Nov 2026, Windows → Mac): read this first, then delete this block
-
-This block is for a new Claude Code session picking up the work, not part of the report. It says where things
-stand, what was done on 3–5 Nov, and how to continue. Delete it when you take over. The report itself starts at
-"# 13th Nov" below.
-
-## 0. Before anything else
-
-- **Git.** The Windows checkout is on branch `over`, 2 commits ahead of `origin/over` ("finished main runs" holds
-  `plots_code/26_nov_13/mix_two_pairs.py`, the mixture section of this report and the `TODO_extended.md`
-  registry updates). It has to be pushed from Windows and pulled on the Mac (`git pull`). Check that
-  `plots_code/26_nov_13/mix_two_pairs.py` exists and this note is here. If not, the push hasn't happened yet.
-- **Pull before starting `misc/sync_fiber.sh`.** The Mac watcher pushes local → nibi, so a stale Mac checkout
-  would overwrite newer files on nibi.
-- **nibi is IP-blocked as of 6 Nov (fail2ban).** Failed SSH attempts while the ControlMaster socket was down
-  probably caused it:
-  - Mutagen on Windows retrying;
-  - a sync watcher running while the socket was closed;
-  - one of my commands (on the 5th) that ran `ssh nibi` without checking the socket and sat at the 2FA prompt.
-
-  Rules from now on:
-  - **Always `ssh -O check nibi` before any remote command.** If the socket is down, tell the user and give them
-    `ssh -fN nibi`. Never run a plain `ssh nibi ...` that could start a fresh login.
-  - Run `misc/sync_fiber_stop.sh` before the laptop sleeps.
-  - An SSH-config guard was proposed, not set up. It would make normal `nibi` commands only reuse an existing
-    socket (fail fast), with the socket opened through a separate alias. Ask the user if they want it.
-- **Mac paths:** repo `/Users/azr/Documents/SFU/Lab/code/fiber_base`; on nibi
-  `/home/azr/projects/def-maxwl/azr/code/fiber_base`. Venv and modules are in `CLAUDE.md`.
-- **Claude memory** is per machine and per path. The Windows memory folder had one file
-  (`project_training_pipeline.md`: tensor shapes (B,C,L,N), per-position coverage normalization, eval mixing
-  logic). Copy it over if it matters.
-
-## 1. Where the project stands (main updates since 30 Oct)
-
-- **V1 aggregation** (asinh(mean sinh): fibers averaged in fold change) is the default. The baseline and the
-  mixture targets average in fold change too.
-- **Training budget `train04`:** 15 epochs × 5000 samples, ~2 h 12–20 min on a 2g.20gb slice (≈10.2 samples/s).
-  Checkpoint every epoch; `--resume latest` continues a stopped job.
-- **Split v2 (4 Nov):** dev = GM12878, K562, HepG2, H1; held out = H9, HCT116, MCF-7, plus Panc1 as a "hard"
-  held-out cell reported separately. Panc1 moved because of doubtful sample identity (fibers match HCT116 ATAC
-  better than its own, no TP53 R273H / CDKN2A deletion), half coverage, NOT_COMPLIANT ENCODE tracks, and because
-  training on it bought nothing. Rationale: `configs/README.md` "Cell-type split (v2…)"; evidence: the Panc1
-  section of this report. A549 could join later as split v3. Not started.
-- **DEV4** (`data24`, trained as the leave-Panc1-out fold) is the **main dev model** and replaces DEV5 (`data20`,
-  split v1). Run name `LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04`. It is the default
-  `RUN` in `slurm_batch_command_eval.sh`.
-- **Specialists** (`data29`–`data33`, one dev cell each, own track): beat DEV5 by +0.03–0.06 Pearson. Panc1's
-  specialist (0.44) still trails the baseline (0.48).
-- **Two-pair mixture test (T3 repeated; the "Mixture test on two pairs" section at the end of this report):**
-  - Mixture-only models match the own-track ceiling on their own pair (AUC 0.637 vs 0.635; 0.666 vs 0.665).
-  - On the unseen pair, mixture and own-track models trained on the same cells perform alike: seeing the cell
-    types matters, not the kind of supervision.
-  - The transfer is lopsided: K562+H1 → GM12878–HepG2 is fine; GM12878+HepG2 → K562–H1 is poor (sign accuracy
-    0.59; H3K36me3, H3K9me3 and H3K27ac fail).
-  - DEV4 sits just below each pair's own models.
-  - Library controls (|AUC − 0.5| 0.04–0.09) are well below the real pairs (0.17–0.25).
-  - Assays that fail for every model: H3K9me3 on GM12878–HepG2 (the HepG2 H3K9me3 track's scale issue), CTCF on
-    K562–H1, H3K36me3 on GM12878–HepG2.
-  - ATAC fiber-origin AUC is a weak readout: Mix B never trained ATAC and still gets 0.705.
-
-## 2. What was added on 3–5 Nov (all committed)
-
-- **Configs:**
-  - `data34_K562_H1_200U` (pair B, own tracks);
-  - `data35_mix_K562_H1_200U` (Mix B, no ATAC because H1 has none: a mixture's assay mask is the product over
-    its cells);
-  - `eval27_pair_K562_H1_200U`, `eval28`/`eval29` (K562 / H1 100U vs 200U library controls);
-  - `eval30_mix_K562_H1_200U_mini` (K562+H1 mixture composites, seed 919, mix_range [0.2, 0.8]).
-  - Existing ones used: `data27` (Mix A), `data28` (pair A), `eval24` (GM12878–HepG2 pair), `eval25` (HepG2
-    library control), `eval26` (GM12878+HepG2 mixture composites).
-- **`data_prep/loci_spec.yaml`:**
-  - dev split = the 4 dev cells; pairs = [GM12878, HepG2] and [K562, H1].
-  - Loci were rebuilt on nibi for split v2 (`2026-11-04_05_build_loci_split_v2`).
-  - A stale `dev/Panc1.bed` remains in the loci folder, unused.
-- **`slurm_batch_command.sh`:** the `CELL=` case table now has `gm12878|k562|hepg2|panc1|h1` (specialists) and
-  `pairA|pairB|mixA|mixB`. `RESUME=latest` continues a stopped run.
-- **`slurm_batch_command_eval.sh`:** `RUN=` (default DEV4) and `EVAL_SET=a` (dev: eval21, 22, 23, 17), `b` (held
-  out: eval20, 18, 19, 16 = Panc1), or `one` with `CONFIGS="..."`. Two flags:
-  - `BASELINE=0` skips the cross-cell baseline (specialists);
-  - `MIXREF=1` adds `--mixture_reference` (mixture model on its own pair).
-- **Docs:**
-  - `README.md` configs table;
-  - `configs/README.md` (split v2, known gaps);
-  - `reports/TODO.md` (§1–2 rewritten for split v2 and the two-pair design);
-  - `reports/TODO_extended.md` §8 registry: DEV4, specialists, pairs, mixtures all marked done.
-- **Analysis scripts:**
-  - `ignore/reports/nov13_compare.py` (DEV5 / LOO / specialists);
-  - `ignore/reports/mix_compare.py` (two-pair tables).
-
-  `ignore/` is **not synced**: run these by piping, `ssh nibi 'cd <repo> && source <venv> && python -' < file`.
-  `ignore/` is also gitignored, so these exist only on the Windows machine. They are not needed:
-  `plots_code/26_nov_13/mix_two_pairs.py` (in git) supersedes `mix_compare.py`.
-
-## 3. Runs (all on nibi, logs in `logs/`, results in `results/`)
-
-| Job | What |
-|---|---|
-| `2026-11-03_01_train_loo_panc1_v1` | DEV4 training (`data24`) |
-| `2026-11-03_02..04_eval_loo_panc1_v1_{a,b,c}` | DEV4 full evals |
-| `2026-11-03_05..09_train_spec_*` | specialists |
-| `2026-11-03_10..14_eval_spec_*` | specialist evals (`BASELINE=0`) |
-| `2026-11-04_00_build_loci`, `_05_build_loci_split_v2` | loci (the second is the current one) |
-| `2026-11-04_01_train_pair_a_gm12878_hepg2`, `_02_train_pair_b_k562_h1` | Pair A / Pair B |
-| `2026-11-04_06_train_mix_a_gm12878_hepg2`, `_07_train_mix_b_k562_h1` | Mix A / Mix B |
-| `2026-11-04_03`, `_04` | Pair A on eval27+28+29+24; Pair B on eval24+25+27 |
-| `2026-11-04_08` | DEV4 on both pairs + all controls (timed out) |
-| `2026-11-04_09`, `_10` | pair controls (`_10` timed out) |
-| `2026-11-04_11`, `_12` | Mix A on own pair (+eval25, eval26) / other pair (`_12` timed out) |
-| `2026-11-04_13`, `_14` | Mix B on own pair (+eval28, 29, 30) / other pair |
-| `2026-11-04_15..18_*_rerun` | reruns of the timed-out evals; all COMPLETED |
-
-Run names (results dirs are `results/<timestamp>_train_<run>/` and `results/<timestamp>_eval_<run>*`):
-
-- `MIX_V1_data27_mix_GM12878_HepG2_200U_model15_uct_mid_8A_train04` (Mix A)
-- `MIX_V1_data35_mix_K562_H1_200U_model15_uct_mid_8A_train04` (Mix B)
-- `PAIR_V1_data28_GM12878_HepG2_200U_model15_uct_mid_8A_train04` (Pair A)
-- `PAIR_V1_data34_K562_H1_200U_model15_uct_mid_8A_train04` (Pair B)
-- `LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04` (DEV4)
-
-A model's results are spread over several eval dirs (the original job and the rerun), so scripts search all
-`results/*_eval_<run>*` dirs, newest first.
-
-**Timing lessons:**
-- A paired eval config takes ~28 min (2 cells × 6843 chr21 tiles plus figures). A full `EVAL_SET` a/b job takes
-  ~25–30 min per cell.
-- Mini evals take a few minutes.
-- `eval.py` writes `eval_summary.json` only at the very end. A timed-out job leaves `<config>_paired.npz` and
-  figures for the configs it finished, but no JSON. AUC and sign accuracy can be recovered from the npz;
-  differential r and recovery r cannot.
-- Size time limits from these numbers (≤ 3 h, close to the expected runtime, not padded).
-
-## 4. Where this session stopped, and how to pick up
-
-The user asked to **"make some plots and consolidate the results"** for the mixture test. Done so far:
-
-- [x] `plots_code/26_nov_13/mix_two_pairs.py` written. It has **never run successfully**: the first attempt was
-  interrupted when nibi blocked the IP.
-  - It loads every model × {eval24, eval27, eval25, eval28, eval29}: npz for AUC, sign accuracy and
-    |AUC − 0.5|; JSON for differential r and recovery r.
-  - It prints all markdown tables and writes `plots/26_nov_13/mix/`:
-    - `mix_summary.png`;
-    - `mix_per_assay_auc.png`, `mix_per_assay_diff_r.png`;
-    - `mix_library_control.png`;
-    - `mix_bin_scatter_GM12878_HepG2.png`, `mix_bin_scatter_K562_H1.png`;
-    - `mix_results.csv`.
-  - Colours follow the reference dataviz palette: mixtures blue `#2a78d6`, own tracks orange `#eb6834`, DEV4
-    aqua `#1baf7a`. Hatched bars are models trained on the *other* pair.
-- [x] The "Mixture test on two pairs" section at the end of this report has the full tables and findings.
-
-Next steps, in order:
-
-1. **Once the socket is up** (`ssh -O check nibi`):
-   - See whether the interrupted run left a partial `plots/26_nov_13/mix/` on nibi.
-   - Make sure the script is on nibi (via sync, or pipe it with `python - < plots_code/26_nov_13/mix_two_pairs.py`
-     from the repo root).
-   - Run it on the login node (CPU, light, ~1 min): `python plots_code/26_nov_13/mix_two_pairs.py`.
-2. **Check the output against the tables in the mixture section.** The AUC, sign accuracy, differential r and
-   library numbers came from `mix_compare.py` (the same computation), so they should match exactly.
-   - The **recovery r and validation r values in the report were carried over from memory**, not rerun. Replace
-     recovery r with the script's printout.
-   - Validation r comes from the training logs (last epoch).
-   - Mixture composite r is in each training run's final mini eval or in `eval_summary.json` under
-     `eval26`/`eval30`.
-   - Unverified code paths in the script: the recovery-r JSON path `results["<cfg>/<cell>"]["per_assay"][a]["pearson"]`
-     (the older `t3_report.py` read `per_assay_pearson`; check which exists), and `tile_dt_bin` in the npz.
-3. **Pull the figures to the Mac** (`plots/` is gitignored), e.g.
-   `rsync -av nibi:/home/azr/projects/def-maxwl/azr/code/fiber_base/plots/26_nov_13/ plots/26_nov_13/`.
-   **Look at every figure** for label collisions and overflow. Likely fixes:
-   - the summary figure's model names inside the bars and the rotated AUC values;
-   - the y-limits (AUC panels start at 0.45/0.4);
-   - the per-assay figures with 5 bars × 9 groups.
-4. **Consolidate the report** (user's request; keep everything in this one report for now, it gets split up later):
-   - Rebuild the mixture section around the figures. Link them as `../plots/26_nov_13/mix/<file>.png`; figures
-     never go in `reports/`.
-   - Keep the per-assay tables, but they can shrink once the figures carry them.
-   - Add a short summary at the top of the report covering DEV4 bulk, Panc1 → split v2, and the mixture test.
-5. **Update `reports/TODO.md`** (status only, no results):
-   - §1 still says pair models are "running 4 Nov";
-   - "Where we stand" → single molecules should mention both pairs and the lopsided transfer.
-
-**Deferred by the user** ("leave routing for later"):
-- routed specialists as the "told the cell type" reference on the unseen pair. It needs a way to route each
-  cell's fibers to its own specialist in the paired eval; not built.
-- the input ablations (`TODO.md` §2 table);
-- a second mixture model;
-- A549 / split v3.
-
-## 5. Standing conventions and user feedback
-
-- **Job names:** `YYYY-MM-DD_NN_<train|eval>_description`, NN counted across both scripts for the day (check
-  `logs/`). Set `--job-name` on the sbatch line.
-- **Slurm limits:**
-  - jobs ≤ 3 h, time limit close to the expected runtime (no padding);
-  - 2g.20gb slice with 4 CPUs on nibi;
-  - continuation jobs with `RESUME=latest`;
-  - specialists need no continuation.
-- **Configs:** numbered; never edit one that has been used in a run, add the next number instead.
-- **Plotting:** figures go in `plots/<name>/`, code in `plots_code/<name>/` (here `26_nov_13`). `tester.py`,
-  `misc/` and `plots_code/` are one-offs: don't keep pipeline changes compatible with them.
-- **Docs:** `TODO.md` holds the plan and status only, never results. Results go in the dated reports.
-- **Metrics:** keep them simple. Fiber-origin AUC stays on [0, 1] with 0.5 = chance, judged against the reference
-  models; no extra normalized metrics.
-- **The user commits and pushes; Claude doesn't.** Don't `git pull` as a habit. Never permanently delete data.
-- **Top priority of the project:** verify single-molecule correctness.
-<!-- ===================================================================================================== -->
-
 # 13th Nov
 
-Work in progress. Results on the current setup: the reference model bank and the unseen-pair test (`TODO.md`).
+Work in progress. This report covers results on the current setup: the reference models and the unseen-pair test
+(`TODO.md`).
+
+## Summary
+
+- **Reference model (DEV5, 5 dev cell types, `train04`).**
+  - It beats the cross-cell baseline on MSE in 7 of 8 cell types, and is ahead of or level with it on Pearson in 4
+    of 5 dev cell types.
+  - It trails the baseline on Pearson for Panc1 and the 3 held-out cell types.
+  - The marks accessibility reflects most directly (ATAC, H3K4me3, H3K27ac, H3K4me1) carry over to held-out cell
+    types. The broad and repressive marks don't, H3K36me3 least of all.
+- **Panc1 and split v2.**
+  - Panc1's sample is doubtful: its fibers match HCT116's ATAC better than Panc1's own, it lacks some of PANC-1's
+    markers, and it has half coverage.
+  - Training on it buys nothing.
+  - It moves to the held-out set as a "hard" cell type. The 4-dev model **DEV4** replaces DEV5 as the main model.
+  - Specialists, one cell type each, beat the multi-cell model by +0.03–0.06 Pearson.
+- **Mixture test on two pairs** (GM12878–HepG2 and K562–H1).
+  - Training only on mixtures reaches the own-track ceiling on both pairs (fiber-origin AUC 0.637 vs 0.635, and
+    0.666 vs 0.665).
+  - On a pair it never saw, a model does the same whether it was trained on mixtures or on own tracks. What
+    matters is having seen the cell types.
+  - Transfer toward K562–H1 is poor: sign accuracy 0.59 vs 0.80–0.83.
+  - Library effects are small (|AUC − 0.5| 0.04–0.09, against 0.17–0.25 for real pairs).
+  - Weak spots: CTCF on K562–H1 and H3K9me3 on GM12878–HepG2 fail even for models trained on the pair.
+    - For CTCF, H1's ChIP track is weakly enriched (it is the outlier at shared sites; MCF-7's is too).
+    - On top of that, every model adds a constant shift toward H1 that accessibility doesn't explain.
 
 ## What changed since 30 Oct
 
@@ -425,33 +244,36 @@ table script `ignore/reports/nov13_compare.py`; sample checks in `DATA_FIBER/qc/
 
 ## Mixture test on two pairs (T3 repeated on K562–H1)
 
-October's mixture test (T3) used one pair. With split v2 we have two pairs of dev cell types, **A = GM12878 +
-HepG2** and **B = K562 + H1**, and train four models on them (same `model15` / `train04` setup as DEV4, ~2 h 15 min
-each on nibi):
+October's mixture test (T3) used one pair. With split v2 there are two pairs of dev cell types, **A = GM12878 +
+HepG2** and **B = K562 + H1**. Four models were trained on them, all with the same `model15` / `train04` setup
+as DEV4 (~2 h 15 min each on nibi):
 
-- **Mix A / Mix B** (`data27` / `data35`): trained only on synthetic mixtures of the pair's fibers (cell fraction
-  q drawn from [0.2, 0.8]), supervised by the q-weighted fold-change mixture of the two tracks. They never see a
-  cell type's own track. H1 has no ATAC, so Mix B never trains ATAC (the mixture's assay mask is the product over
-  its cells).
-- **Pair A / Pair B** (`data28` / `data34`): the same cells, each fiber supervised by its own cell type's track
-  (the ceiling for that pair).
+- **Mix A / Mix B** (`data27` / `data35`): trained only on synthetic mixtures of the pair's fibers. The cell
+  fraction q is drawn from [0.2, 0.8], and the target is the q-weighted fold-change mixture of the two tracks.
+  These models never see a cell type's own track. H1 has no ATAC, so Mix B never trains ATAC (a mixture's assay
+  mask is the product over its cells).
+- **Pair A / Pair B** (`data28` / `data34`): the same cells, but each fiber is supervised by its own cell type's
+  track. This is the ceiling for that pair.
 - **DEV4** (`data24`): all 4 dev cell types, own tracks.
 
-Every model is tested on both pairs: its own pair, and the pair it never saw. The readouts come from paired
-evaluation at the pair's differential bins (`loci_spec.yaml` pairs: 1 kb bins where the two tracks differ by
-|asinh Δ| ≥ 0.5) on chr21:
+Every model is tested on both pairs: its own pair, and the pair it never saw. The readouts come from the paired
+evaluation on chr21, at the pair's differential bins. These are 1 kb bins where the two tracks differ by
+|asinh Δ| ≥ 0.5 (`loci_spec.yaml` pairs):
 
 - **Fiber-origin AUC:** in each tile, how well a fiber's prediction tells which cell type it came from, oriented by
-  the tracks' difference (0.5 = chance).
+  the sign of the tracks' difference (0.5 = chance).
 - **Sign accuracy:** the fraction of differential bins where the predicted difference between the two cell types
-  has the tracks' sign.
-- **Differential r:** bp-level correlation of predicted vs track difference (p_A − p_B vs t_A − t_B).
+  has the same sign as the tracks' difference.
+- **Differential r:** bp-level correlation between the predicted and the true difference (p_A − p_B vs t_A − t_B).
 
-### Mean over assays
+All numbers below and in the figures come from one script, `plots_code/26_nov_13/mix_two_pairs.py`. It also
+writes every value per assay to `plots/26_nov_13/mix/mix_results.csv`.
 
-GM12878–HepG2 has 8 assays; K562–H1 has 7 (no H1 ATAC). Values are AUC / sign accuracy / differential r.
+### Overview
 
-| Model | GM12878–HepG2 | K562–H1 |
+![Mean over assays, both pairs](../plots/26_nov_13/mix/mix_summary.png)
+
+| Model | GM12878–HepG2 (8 assays) | K562–H1 (7 assays, no ATAC) |
 |---|---|---|
 | Mix A (GM12878 + HepG2 mixtures) | **0.637** / 0.761 / 0.329 *(own pair)* | 0.599 / 0.590 / 0.238 *(unseen)* |
 | Pair A (GM12878, HepG2 own tracks) | 0.635 / **0.771** / **0.351** *(own pair)* | 0.600 / 0.598 / 0.224 *(unseen)* |
@@ -459,78 +281,69 @@ GM12878–HepG2 has 8 assays; K562–H1 has 7 (no H1 ATAC). Values are AUC / sig
 | Pair B (K562, H1 own tracks) | 0.617 / 0.719 / 0.270 *(unseen)* | 0.665 / **0.828** / **0.335** *(own pair)* |
 | DEV4 (all 4 own tracks) | 0.629 / 0.748 / 0.316 | 0.654 / 0.793 / 0.294 |
 
-### Fiber-origin AUC per assay
+Each cell gives the fiber-origin AUC / sign accuracy / differential r, as means over the pair's assays.
 
-GM12878–HepG2:
+### Per assay
 
-| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+![Fiber-origin AUC per assay](../plots/26_nov_13/mix/mix_per_assay_auc.png)
+
+| Model | ATAC | H3K4me3 | H3K27ac | CTCF | H3K4me1 | H3K36me3 | H3K27me3 | H3K9me3 |
 |---|---|---|---|---|---|---|---|---|
-| Mix A | .713 | .687 | .688 | .644 | .685 | .550 | .483 | .643 |
-| Pair A | .705 | .677 | .676 | .653 | .683 | .542 | .499 | .642 |
-| Mix B | .705 | .737 | .673 | .575 | .671 | .485 | .462 | .659 |
-| Pair B | .710 | .735 | .660 | .575 | .650 | .514 | .468 | .623 |
-| DEV4 | .713 | .707 | .674 | .623 | .674 | .525 | .464 | .652 |
-| *bins* | 775 | 355 | 702 | 605 | 1472 | 592 | 2952 | 388 |
+| **GM12878–HepG2** | | | | | | | | |
+| Mix A | .713 | .687 | .688 | .643 | .685 | .550 | .644 | .483 |
+| Pair A | .705 | .677 | .676 | .642 | .683 | .542 | .653 | .499 |
+| Mix B | .705 | .737 | .673 | .659 | .671 | .485 | .575 | .462 |
+| Pair B | .710 | .735 | .660 | .623 | .650 | .514 | .575 | .468 |
+| DEV4 | .713 | .707 | .674 | .652 | .674 | .525 | .623 | .464 |
+| *bins (% higher in GM12878)* | 775 (47%) | 355 (36%) | 702 (60%) | 388 (32%) | 1472 (33%) | 592 (72%) | 605 (40%) | 2952 (13%) |
+| **K562–H1** | | | | | | | | |
+| Mix A | – | .670 | .564 | .458 | .724 | .476 | .796 | .505 |
+| Pair A | – | .664 | .587 | .468 | .724 | .468 | .788 | .496 |
+| Mix B | – | .742 | .653 | .469 | .711 | .687 | .786 | .615 |
+| Pair B | – | .727 | .678 | .472 | .677 | .687 | .771 | .643 |
+| DEV4 | – | .698 | .641 | .479 | .715 | .638 | .790 | .614 |
+| *bins (% higher in K562)* | – | 408 (43%) | 509 (58%) | 428 (82%) | 1118 (29%) | 670 (79%) | 925 (78%) | 839 (14%) |
 
-K562–H1:
+Differential r per assay is in [this figure](../plots/26_nov_13/mix/mix_per_assay_diff_r.png) and in the CSV. It
+ranks the models the same way the AUC does.
 
-| Model | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
-|---|---|---|---|---|---|---|---|
-| Mix A | .670 | .564 | .796 | .724 | .476 | .505 | .458 |
-| Pair A | .664 | .587 | .788 | .724 | .468 | .496 | .468 |
-| Mix B | .742 | .653 | .786 | .711 | .687 | .615 | .469 |
-| Pair B | .727 | .678 | .771 | .677 | .687 | .643 | .472 |
-| DEV4 | .698 | .641 | .790 | .715 | .638 | .614 | .479 |
-| *bins* | 408 | 509 | 925 | 1118 | 670 | 839 | 428 |
+**Predicted vs true difference per bin.** In each scatter, the top row is the mixture model trained on that pair
+and the bottom row is the one trained on the other pair:
 
-### Differential r per assay
+![K562–H1 bin scatter](../plots/26_nov_13/mix/mix_bin_scatter_K562_H1.png)
 
-GM12878–HepG2:
-
-| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
-|---|---|---|---|---|---|---|---|---|
-| Mix A | .60 | .22 | .45 | .27 | .60 | .13 | .19 | .16 |
-| Pair A | .61 | .26 | .46 | .30 | .60 | .13 | .28 | .17 |
-| Mix B | .37 | .20 | .36 | .18 | .54 | .07 | .23 | .16 |
-| Pair B | .57 | .20 | .32 | .17 | .49 | .06 | .24 | .11 |
-| DEV4 | .58 | .23 | .43 | .24 | .58 | .11 | .19 | .17 |
-
-K562–H1:
-
-| Model | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
-|---|---|---|---|---|---|---|---|
-| Mix A | .28 | .25 | .25 | .35 | .25 | .13 | .15 |
-| Pair A | .27 | .25 | .23 | .35 | .21 | .12 | .15 |
-| Mix B | .36 | .31 | .26 | .36 | .33 | .20 | .21 |
-| Pair B | .39 | .37 | .31 | .39 | .33 | .22 | .34 |
-| DEV4 | .38 | .30 | .27 | .37 | .32 | .20 | .23 |
+![GM12878–HepG2 bin scatter](../plots/26_nov_13/mix/mix_bin_scatter_GM12878_HepG2.png)
 
 ### Library control
 
-The control compares two Fiber-seq libraries of the **same** cell type (100U vs 200U; both libraries scored at the
-real pairs' bins), so any separation comes from the library, not the cell type. The readout is the mean over tiles
-of |AUC − 0.5|; for the real pairs the same measure is 0.17–0.19 (GM12878–HepG2) and 0.22–0.25 (K562–H1).
+The library control compares two Fiber-seq libraries of the **same** cell type (100U vs 200U), scored at the real
+pairs' bins. Any separation there comes from the library, not the cell type.
 
-| Model | HepG2 | K562 | H1 |
-|---|---|---|---|
-| Mix A | .049 | .089 | .044 |
-| Pair A | .049 | .090 | .045 |
-| Mix B | .051 | .075 | .042 |
-| Pair B | .053 | .083 | .045 |
-| DEV4 | .051 | .076 | .041 |
+![Library control](../plots/26_nov_13/mix/mix_library_control.png)
+
+Mean |AUC − 0.5| over tiles and assays:
+
+| Model | HepG2 100U vs 200U | K562 100U vs 200U | H1 100U vs 200U | GM12878–HepG2 | K562–H1 |
+|---|---|---|---|---|---|
+| Mix A | .049 | .089 | .044 | .182 | .245 |
+| Pair A | .049 | .090 | .045 | .182 | .246 |
+| Mix B | .051 | .075 | .042 | .192 | .232 |
+| Pair B | .053 | .083 | .045 | .172 | .221 |
+| DEV4 | .051 | .076 | .041 | .184 | .221 |
 
 ### Own-track recovery and validation
 
-Recovery r is the Pearson r of each cell type's fibers against its own track, from the same paired evals. The
-other columns give validation r at the last epoch and the r on mixture composites (`eval26` / `eval30`).
+Recovery r is the Pearson r of each cell type's fibers against its own track, from the same paired evals, averaged
+over the pair's assays (so no ATAC on K562–H1). Validation r is taken at the last epoch. Mixture composite r is the
+final mini eval on mixtures (`eval26` / `eval30`).
 
-| Model | Recovery r, own pair | Recovery r, unseen pair | Val r | Mixture composite r |
+| Model | Recovery r, GM12878–HepG2 | Recovery r, K562–H1 | Val r | Mixture composite r |
 |---|---|---|---|---|
-| Mix A | GM12878 .466, HepG2 .615 | K562 .479, H1 .369 | .612 | .608 |
-| Pair A | GM12878 .469, HepG2 .610 | K562 .473, H1 .370 | .566 | – |
-| Mix B | K562 .467, H1 .441 | GM12878 .392, HepG2 .514 | .559 | .518 |
-| Pair B | K562 .522, H1 .438 | GM12878 .398, HepG2 .554 | .530 | – |
-| DEV4 | GM12878 .458, HepG2 .586, K562 .509, H1 .419 | – | – | – |
+| Mix A | GM12878 .466, HepG2 .615 *(own)* | K562 .446, H1 .369 *(unseen)* | .612 | .608 |
+| Pair A | GM12878 .469, HepG2 .610 *(own)* | K562 .438, H1 .370 *(unseen)* | .566 | – |
+| Mix B | GM12878 .392, HepG2 .513 *(unseen)* | K562 .478, H1 .441 *(own)* | .559 | .518 |
+| Pair B | GM12878 .398, HepG2 .554 *(unseen)* | K562 .493, H1 .438 *(own)* | .530 | – |
+| DEV4 | GM12878 .458, HepG2 .586 | K562 .478, H1 .419 | – | – |
 
 Mixture models validate on mixtures and pair models on own tracks, so their validation r values don't compare
 directly.
@@ -541,34 +354,162 @@ directly.
   - On its own pair, each mixture model's fiber-origin AUC matches the own-track model's: Mix A 0.637 vs Pair A
     0.635, and Mix B 0.666 vs Pair B 0.665.
   - Sign accuracy and differential r are slightly lower (−0.01 to −0.04).
-  - Recovery of each cell's own track is the same, except K562 under Mix B (.467 vs .522).
+  - Recovery of each cell type's own track is the same within 0.015.
   - This repeats October's T3 result on a second, harder pair.
-- **On the unseen pair, mixture and own-track models trained on the same cells perform the same** (Mix A ≈ Pair A on
-  K562–H1, Mix B ≈ Pair B on GM12878–HepG2). The loss comes from never having seen the cell types, not from the
-  kind of supervision.
-- **The drop on the unseen pair is lopsided.**
-  - K562 + H1 → GM12878–HepG2 loses little: AUC 0.62 vs 0.64.
+- **On an unseen pair, the type of supervision makes no difference.** Mix A ≈ Pair A on K562–H1, and Mix B ≈ Pair B
+  on GM12878–HepG2, on every readout. The loss comes from never having seen the cell types.
+- **The differential readouts transfer lopsidedly.**
+  - K562 + H1 → GM12878–HepG2 loses little: AUC 0.62 vs 0.64 for models that saw the pair.
   - GM12878 + HepG2 → K562–H1 loses a lot: AUC 0.60 vs 0.67, and sign accuracy 0.59, close to chance.
   - The K562–H1 loss is in H3K36me3 (0.47 vs 0.69), H3K9me3 (0.50 vs 0.62–0.64) and H3K27ac (0.56–0.59 vs
     0.65–0.68).
   - H3K27me3 and H3K4me1 transfer fully (~0.79, ~0.72).
-  - A plausible reason is that GM12878 and HepG2 offer nothing like H1's stem-cell chromatin to learn from.
-- **DEV4 sits just below each pair's own models** (AUC 0.629 vs 0.635–0.637; 0.654 vs 0.665–0.666). This matches
-  the specialists beating the multi-cell model above.
+  - The scatter shows the H3K36me3 failure is a shift, not noise. 79% of those bins are higher in K562, yet the
+    models trained on GM12878 + HepG2 predict H1 higher at most of them.
+  - Recovery of each cell type's own track drops in both directions (−0.05 to −0.10), so the lopsidedness concerns
+    the *difference* between the two cell types, not the per-cell tracks.
+- **DEV4 sits just below each pair's own models.** Its AUC is 0.629 vs 0.635–0.637 on GM12878–HepG2, and 0.654 vs
+  0.665–0.666 on K562–H1. This matches the specialists beating the multi-cell model (Panc1 section).
 - **Some assays fail for every model, including those trained on the pair:**
-  - **H3K9me3 on GM12878–HepG2** (AUC 0.46–0.50). Almost all of its 2,952 bins are higher in HepG2: this is the
-    HepG2 H3K9me3 track's scale issue, not single-molecule signal.
-  - **CTCF on K562–H1** (0.46–0.48).
+  - **CTCF on K562–H1** (AUC 0.46–0.48, sign accuracy ~0.4). This has two causes: H1's weak CTCF track, plus a
+    constant shift toward H1 in every model. See the next subsection.
+  - **H3K9me3 on GM12878–HepG2** (AUC 0.46–0.50). 87% of its 2,952 bins are higher in HepG2, and all models
+    predict almost no difference for either group (flat clouds in the scatter). HepG2's H3K9me3 track is the
+    outlier (MSE 0.645 in the DEV5 table, the highest of any cell type and assay), so this looks like a
+    track-level difference the fibers don't show.
   - **H3K36me3 on GM12878–HepG2** (0.49–0.55).
-- **ATAC fiber-origin AUC is a weak readout.** Mix B never trained an ATAC output, yet reaches AUC 0.705 on
-  GM12878–HepG2, as high as the models that did. Accessibility is in the input, so the cell types separate on ATAC
-  almost for free. Differential r does show the missing training (.37 vs .57–.61).
+- **ATAC fiber-origin AUC is a weak readout.** Mix B never trained an ATAC output, yet reaches an AUC of 0.705 on
+  GM12878–HepG2, as high as the models that did. Accessibility is in the input, so the two cell types separate on
+  ATAC almost for free. Differential r does show the missing training (.37 vs .57–.61).
 - **Library effects are small next to cell-type effects.** Same-cell-type library pairs give |AUC − 0.5| ≈ 0.04–0.05
-  (HepG2, H1) and 0.08–0.09 (K562, whose two libraries differ most), against 0.17–0.25 for the real pairs. The
-  GM12878–HepG2 pair crosses Fiber-seq experiments and still sits well above the controls.
+  for HepG2 and H1, and 0.08–0.09 for K562, whose two libraries differ the most. The real pairs give 0.17–0.25,
+  including GM12878–HepG2, which crosses Fiber-seq experiments.
 
-**Next (not run yet):** routed specialists as the "told the cell type" reference on the unseen pair.
+### CTCF on K562–H1: a weak H1 track plus a model shift
 
-**Sources:** training and eval logs `logs/2026-11-04_*` on nibi (paired evals that timed out were rerun as
-`2026-11-04_{15..18}_eval_*_rerun`); results `results/26-11-04_*_eval_{MIX_V1,PAIR_V1,LOO_Panc1_V1}_*`
-(`<config>_paired.npz`, `eval_summary.json`); table script `ignore/reports/mix_compare.py`.
+82% of the 428 CTCF differential bins are higher in K562, yet every model predicts H1 ≥ K562 at most of them. Two
+explanations were tested:
+
+- **(a) Track scale.** H1's CTCF ChIP is less enriched everywhere, so most "differential" bins are shared CTCF sites
+  at a different scale, which fibers cannot show.
+- **(b) Accessibility.** The models' CTCF output follows fiber accessibility, and H1's fibers are more accessible
+  at these sites.
+
+![CTCF offset](../plots/26_nov_13/ctcf/ctcf_offset.png)
+
+**(a) holds: H1's CTCF track is weak, not K562's strong.**
+- At the 219 chr21 sites with CTCF signal in all 4 dev lines, H1 sits below the 4-line mean at 93% of them (median
+  −0.51 asinh). GM12878, K562 and HepG2 sit within ~0.2 of each other (panel a).
+- On chr21, H1's 99.9th percentile is 2.40, against 3.1–3.2 for GM12878, K562 and HepG2, and 3.19 for H9. So this is
+  not stem-cell biology: H9 is the other ESC line.
+- The H1 track comes from an older ENCODE experiment (ENCSR000BNH, no NOT_COMPLIANT audits). MCF-7's
+  (ENCSR000AHD) is just as weak (2.31, panel a), which matters for MCF-7's held-out CTCF numbers.
+- At the K562-higher bins, H1 is the lowest of the 4 dev lines at 65% of them, while K562 is the highest at only
+  57%. Only 41% of them have an H1 peak at all.
+
+**(b) does not hold: K562's fibers are the more accessible ones.**
+- At the K562-higher bins, the fraction of the bin inside an MSP is 0.43 for K562 and 0.35 for H1. H1 is more
+  accessible at only 8% of them.
+- At shared sites the gap is +0.05.
+
+**The models get the accessibility-driven part right but add a constant shift toward H1.**
+
+| | Fit: K562 − H1 vs accessibility difference | Mean K562 − H1 |
+|---|---|---|
+| Tracks | +0.15 + 3.4 · Δaccess | +0.35 |
+| Pair B (trained on K562 + H1) | −0.27 + 1.9 · Δaccess | −0.15 |
+| Mix B (K562 + H1 mixtures) | −0.34 + 2.7 · Δaccess | −0.18 |
+| Pair A / Mix A (never saw them) | −0.39 / −0.41 + 3.5 / 3.2 · Δaccess | −0.18 / −0.22 |
+| DEV4 | −0.31 + 2.6 · Δaccess | −0.15 |
+
+- The predicted difference correlates with the accessibility difference (r 0.60–0.72), with roughly the true slope.
+  Almost the whole error is the intercept: at equal accessibility, every model predicts 0.4–0.55 asinh more CTCF
+  for H1. That holds even for Pair B, which was trained on H1's weak track.
+- The cause is not tested. It is not a global "H1 looks more open" effect: H1's library has a lower MSP fraction
+  (0.27 vs 0.34) and a lower m6A rate (0.092 vs 0.117) than K562's (`fiber_qc.py`). The big global difference is
+  CpG methylation, 0.27 in H1 against 0.085 in K562. The model could read that as a cell-level shift.
+- The planned input ablations (`TODO.md` §2, dropping the CpG channel) would test this.
+
+**Consequences:**
+- K562–H1 CTCF bins are a poor test of CTCF: most of them measure H1's ChIP enrichment, not differential binding.
+  The CTCF row of the K562–H1 tables should be read with that in mind.
+- The weak H1 and MCF-7 CTCF tracks also lower those cell types' bulk CTCF numbers.
+
+**Sources:** `plots_code/26_nov_13/ctcf_offset.py`. Fiber part: job `2026-11-07_00_ctcf_offset` (CPU, 2 min).
+Outputs are in `plots/26_nov_13/ctcf/`: per-bin tables and the figure.
+
+### The same breakdown for every assay on both pairs
+
+The CTCF checks above were repeated for every assay on both pairs, on up to 200 differential bins per assay:
+- each line's track scale at shared sites;
+- the fibers' accessibility difference;
+- each model's mean predicted difference and its slope against accessibility.
+
+The table below covers GM12878–HepG2, where Mix A and Pair A saw the pair and Mix B and Pair B did not.
+
+![Mean predicted vs true difference per assay](../plots/26_nov_13/offsets/pair_offsets.png)
+
+![GM12878–HepG2: predicted difference vs accessibility difference](../plots/26_nov_13/offsets/access_scatter_GM12878__HepG2.png)
+
+| Assay | Shared-site scale GM12878 / HepG2 | True mean | Predicted mean, Mix A / Pair A *(own)* | Mix B / Pair B *(unseen)* | Slope pred/true, Mix A / Mix B |
+|---|---|---|---|---|---|
+| ATAC | +0.02 / −0.01 | −0.02 | −0.11 / −0.15 | −0.11 / −0.16 | 0.77 / 0.34 |
+| H3K4me3 | −0.78 / −0.34 | −0.34 | −0.26 / −0.22 | −0.45 / −0.34 | 0.73 / 1.01 |
+| H3K27ac | +0.44 / +0.28 | **+0.31** | −0.06 / −0.05 | −0.13 / −0.11 | 0.66 / 0.28 |
+| CTCF | +0.19 / +0.20 | −0.27 | −0.21 / −0.22 | −0.19 / −0.14 | 0.56 / 0.48 |
+| H3K4me1 | +0.04 / +0.27 | −0.41 | −0.28 / −0.25 | −0.22 / −0.19 | 0.75 / 0.44 |
+| H3K36me3 | −0.04 / −0.15 | **+0.38** | −0.10 / −0.14 | −0.25 / −0.14 | 0.51 / 0.03 |
+| H3K27me3 | −0.30 / −0.36 | −0.23 | −0.04 / −0.14 | +0.01 / +0.02 | −0.07 / −0.33 |
+| H3K9me3 | −0.35 / **+0.56** | **−1.26** | +0.04 / +0.02 | +0.05 / +0.06 | 0.15 / 0.10 |
+
+Means are of the GM12878 − HepG2 difference over the bins, in asinh units. Bold marks a track outlier or a
+true mean that every model gets wrong.
+
+**GM12878–HepG2:**
+- **ATAC, H3K4me3, CTCF and H3K4me1 work for every model.** The predicted mean has the right sign and is near the
+  true one. The unseen-pair models mainly lose slope (the predictions are compressed): for example ATAC 0.34 vs
+  0.77 and H3K4me1 0.44 vs 0.75 (Mix B vs Mix A).
+- **CTCF has no offset on this pair**, and both lines' CTCF tracks are normal (+0.19 / +0.20). So the K562–H1 CTCF
+  failure is H1's track, not CTCF itself.
+- **H3K9me3 is the same kind of track problem as H1's CTCF, in the other direction.** HepG2's H3K9me3 track is
+  globally strong (+0.56 at shared sites, GM12878 −0.35). The true mean is −1.26, and every model, trained on HepG2
+  or not, predicts ~0. On K562–H1 it repeats: H1's H3K9me3 track is +0.23, K562's −0.40, the true mean is −0.75, and
+  the models predict ~0.
+- **H3K27ac and H3K36me3 flip sign for every model, including those trained on the pair.**
+  - The true difference is GM12878-higher (+0.31, +0.38); the predictions are slightly HepG2-higher.
+  - HepG2's fibers are more accessible at these bins (Δ −0.04; its library is also more digested overall, MSP
+    fraction 0.275 vs 0.244). The predictions follow accessibility, but GM12878's tracks sit above what its
+    accessibility implies.
+  - The models trained on the pair pick up part of that, with a steeper slope (0.66 / 0.51). The unseen models pick
+    up almost none of it (0.28 / 0.03).
+
+**K562–H1, for comparison:**
+- The models that never saw K562 and H1 get H3K27ac and H3K36me3 wrong in sign (−0.50 and −0.34 vs +0.34 and
+  +0.54).
+- They overshoot H3K4me1 (−0.95 vs −0.46) and H3K27me3 (+0.85 vs +0.54).
+- The models that saw them get H3K36me3 right in sign (+0.23 / +0.20) and are close on H3K4me1 and H3K27me3.
+- H3K27ac stays near zero for them too (−0.14 / −0.02).
+
+**Summary of the breakdown.** Three distinct failure types:
+1. **Track-scale outliers that fibers cannot show:** H1 CTCF, HepG2 H3K9me3, H1 H3K9me3. Every model fails, seen or
+   unseen.
+2. **Compression on unseen cell types:** the model separates the bins but with flatter differences.
+3. **Cell-level offsets:** marks where one line's track sits above what its fibers' accessibility implies.
+   Training on the pair recovers part of it (H3K27ac, H3K36me3).
+
+**Sources:** `plots_code/26_nov_13/pair_offsets.py`, run as job `2026-11-07_01_pair_offsets` (CPU, 3 min); the
+crashed print step was redone with `--replot`. Outputs, including the K562–H1 scatter, are in
+`plots/26_nov_13/offsets/`. The intercept difference against accessibility (the `shift` column) is not reported
+here. Where predicted slopes are flatter, it mostly measures compression extrapolated to Δaccess = 0. For CTCF on
+K562–H1 the slopes are close, and the intercept and mean error agree (−0.46 vs −0.51 for Mix B).
+
+**Next (not run yet):**
+- Routed specialists as the "told the cell type" reference on the unseen pair.
+- The CpG-channel ablation for the CTCF shift.
+
+**Sources (mixture test):**
+- Training and eval logs: `logs/2026-11-04_*` on nibi. Paired evals that timed out were rerun as
+  `2026-11-04_{15..18}_eval_*_rerun`.
+- Results: `results/26-11-04_*_eval_{MIX_V1,PAIR_V1,LOO_Panc1_V1}_*`, i.e. `<config>_paired.npz` and
+  `eval_summary.json`.
+- Figures, tables and CSV: `plots_code/26_nov_13/mix_two_pairs.py`, which writes to `plots/26_nov_13/mix/`.

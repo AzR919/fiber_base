@@ -11,9 +11,16 @@ registry of trained reference models) is in `TODO_extended.md`. Results go in th
 - **Bulk (`Nov_13.md`, V1):** beats the cross-cell average on MSE, mostly not on Pearson; cell-type r
   positive everywhere, held-out included. Strong on ATAC and active marks, weak on H3K36me3 / H3K9me3 / CTCF.
   Dropping Panc1 from training costs nothing; specialists beat the dev model by 0.03–0.06 r.
-- **Single molecules (`Oct_23_T3.md`):** trained only on GM12878 + HepG2 mixtures, the model separates their
-  molecules (fiber-origin AUC 0.64) as well as a model trained on their own tracks.
-- **Open:** does it hold for cell types the model never saw, and which inputs drive the predictions?
+- **Single molecules (`Oct_23_T3.md`, `Nov_13.md`):**
+  - Trained only on a pair's mixtures, the model separates that pair's molecules as well as a model trained on
+    their own tracks. This holds on both pairs.
+  - On the unseen pair, mixture and own-track models do the same. Transfer is lopsided: fine toward GM12878–HepG2,
+    poor toward K562–H1.
+- **Open:**
+  - Routed specialists as the third reference.
+  - Which inputs drive the predictions (ablations).
+  - The CTCF shift on K562–H1: its track part is explained (weak H1 ChIP, `Nov_13.md`); the model shift toward H1
+    could be tested with the CpG-channel ablation.
 
 ## 1. Reference models
 
@@ -23,7 +30,8 @@ in `TODO_extended.md` §8.
 - **DEV4** (`data24`, done): all 4 dev cell types; the main dev model.
 - **Specialists** (`data29`–`data31`, `data33`, done): one per dev cell type. "Told the cell type" reference:
   fibers routed to their own cell type's model.
-- **Pair models A and B** (`data28`, `data34`, running 4 Nov): the two main models below.
+- **Pair models A and B** (`data28`, `data34`, done): the two main models below. Mixture models A and B (`data27`,
+  `data35`) are done too.
 
 ## 2. Unseen-pair test (T3b) and input ablations
 

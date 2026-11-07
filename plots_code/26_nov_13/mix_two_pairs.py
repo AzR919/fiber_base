@@ -96,8 +96,7 @@ def json_readouts(run, cfg):
         diff = {a: v["diff_pearson"] for a, v in p["strata"]["all"]["per_assay"].items()}
         rec = {}
         for c in p["cells"]:
-            pa = res.get(f"{cfg}/{c}", {}).get("per_assay", {})
-            rec[c] = {a: v.get("pearson") for a, v in pa.items()}
+            rec[c] = dict(res.get(f"{cfg}/{c}", {}).get("per_assay_pearson", {}))
         return diff, rec
     return None, None
 
@@ -154,13 +153,14 @@ def model_order(pair):
     return [(m, True) for m in seen] + [(m, True) for m in dev] + [(m, False) for m in unseen]
 
 
-def bar(ax, x, h, w, model, seen):
+def bar(ax, x, v, w, model, seen, base=0.0):
+    """Bar from base (chance for AUC / sign accuracy, so below-chance values point down) to v."""
     c = COLOR[model[3]]
     if seen:
-        ax.bar(x, h, w, color=c, zorder=3, linewidth=0)
+        ax.bar(x, v - base, w, bottom=base, color=c, zorder=3, linewidth=0)
     else:
-        ax.bar(x, h, w, facecolor=matplotlib.colors.to_rgba(c, 0.18), edgecolor=c, hatch="////", linewidth=0,
-               zorder=3)
+        ax.bar(x, v - base, w, bottom=base, facecolor=matplotlib.colors.to_rgba(c, 0.18), edgecolor=c,
+               hatch="////", linewidth=0, zorder=3)
 
 
 def legend_handles():
@@ -171,36 +171,38 @@ def legend_handles():
 
 
 # ---- figures ----
-READOUTS = [("auc", "Fiber-origin AUC", 0.5, (0.45, 0.72)),
-            ("sign", "Sign accuracy at differential bins", 0.5, (0.45, 0.88)),
+READOUTS = [("auc", "Fiber-origin AUC", 0.5, (0.5, 0.70)),
+            ("sign", "Sign accuracy at differential bins", 0.5, (0.5, 0.875)),
             ("diff", "Differential r (bp level)", 0.0, (0.0, 0.40))]
 
 
 def fig_summary(data, out):
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.4))
     w, gap = 0.17, 0.012
     for ax, (ro, title, h0, ylim) in zip(axes, READOUTS):
+        ticks, labels = [], []
         for gi, pair in enumerate(PAIRS):
             assays = assays_of(data, pair)
             for bi, (m, seen) in enumerate(model_order(pair)):
                 v = mean(value(data, m[0], pair, ro, a) for a in assays)
                 x = gi + (bi - 2) * (w + gap)
-                bar(ax, x, v, w, m, seen)
-                ax.text(x, v + 0.004, f"{v:.2f}" if ro != "auc" else f"{v:.3f}", ha="center", va="bottom",
+                bar(ax, x, v, w, m, seen, base=h0)
+                ax.text(x, v + 0.003, f"{v:.2f}" if ro != "auc" else f"{v:.3f}", ha="center", va="bottom",
                         fontsize=8.5, color=TEXT if seen else TEXT_2, rotation=90 if ro == "auc" else 0)
-                ax.text(x, ylim[0] + 0.003, m[1], ha="center", va="bottom", fontsize=7.5, color="white" if seen
-                        else TEXT_2, rotation=90, zorder=5)
-        style(ax, h0 if h0 > 0 else None)
+                ticks.append(x)
+                labels.append(m[1])
+            ax.text(gi, -0.16, f"tested on {pair}\n({len(assays)} assays)", transform=ax.get_xaxis_transform(),
+                    ha="center", va="top", fontsize=11, color=TEXT)
+        style(ax)
         ax.set_ylim(*ylim)
-        ax.set_xticks(range(len(PAIRS)))
-        ax.set_xticklabels([f"tested on {p}\n({len(assays_of(data, p))} assays)" for p in PAIRS], fontsize=11,
-                           color=TEXT)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels, fontsize=8.5, color=TEXT_2, rotation=45, ha="right", rotation_mode="anchor")
         ax.set_title(title + "\n", fontsize=13, fontweight="bold", color=TEXT, loc="left")
-        ax.text(0, 1.0, "mean over assays" + (f";  dashed: chance = {h0:g}" if h0 > 0 else ""),
+        ax.text(0, 1.0, "mean over assays" + (f";  bars start at chance ({h0:g})" if h0 > 0 else ""),
                 transform=ax.transAxes, ha="left", va="bottom", fontsize=10, color=TEXT_2)
     fig.legend(handles=legend_handles(), loc="upper center", ncol=4, frameon=False, fontsize=10.5,
                bbox_to_anchor=(0.5, 1.0))
-    fig.subplots_adjust(left=0.04, right=0.99, top=0.8, bottom=0.13, wspace=0.18)
+    fig.subplots_adjust(left=0.04, right=0.99, top=0.8, bottom=0.25, wspace=0.18)
     fig.savefig(out, dpi=200, facecolor="white")
     plt.close(fig)
     print(f"saved {out}")
@@ -221,8 +223,10 @@ def fig_per_assay(data, ro, title, h0, ylim, out):
                     v = value(data, m[0], pair, ro, g)
                 if v is None:
                     continue
-                bar(ax, xg + (bi - 2) * (w + gap), v, w, m, seen)
-        style(ax, h0 if h0 > 0 else None)
+                bar(ax, xg + (bi - 2) * (w + gap), v, w, m, seen, base=h0)
+        style(ax)
+        if h0 > 0:
+            ax.axhline(h0, color=TEXT, lw=1.0, zorder=4)
         ax.set_ylim(*ylim)
         ax.set_xticks(xs)
         n = data[(MODELS[0][0], pair)]["ro"]
@@ -280,7 +284,8 @@ def fig_bin_scatter(data, pair, out):
     own = next(m for m in MODELS if m[3] == "mix" and m[4] == pair)
     other = next(m for m in MODELS if m[3] == "mix" and m[4] not in (pair, None))
     assays = assays_of(data, pair)
-    cols = {True: "#2a78d6", False: "#eb6834"}  # higher in A / higher in B
+    # higher in A / higher in B: violet and red (slots 7, 8), so they don't read as the mixture / own-track colours
+    cols = {True: "#6250d6", False: "#e34948"}
     fig, axes = plt.subplots(2, len(assays), figsize=(2.55 * len(assays), 5.8), squeeze=False)
     for r, (m, tag) in enumerate(((own, "trained on this pair"), (other, "trained on the other pair"))):
         e = data[(m[0], pair)]
@@ -296,8 +301,7 @@ def fig_bin_scatter(data, pair, out):
             ax.axvline(0, color=GRID, lw=0.8, zorder=0)
             ax.set_xlim(-lim, lim)
             ax.set_ylim(-lim, lim)
-            rr = np.corrcoef(x, y)[0, 1] if len(x) > 2 else float("nan")
-            ax.set_title(f"{LAB[a]}\nr {rr:.2f}, sign {e['ro'][a]['sign']:.2f}", fontsize=9.5, color=TEXT)
+            ax.set_title(f"{LAB[a]}\nsign accuracy {e['ro'][a]['sign']:.2f}", fontsize=9.5, color=TEXT)
             for s in ("top", "right"):
                 ax.spines[s].set_visible(False)
             ax.tick_params(labelsize=7.5, colors=TEXT_2)
@@ -358,6 +362,11 @@ def print_tables(data):
             if ro == "auc":
                 n = data[(MODELS[0][0], p)]["ro"]
                 print("| *bins* | " + " | ".join(str(n[a]["n"]) for a in A) + " |")
+    print("\n### Differential bins: count and share higher in the first cell type\n")
+    for p in PAIRS:
+        bins = data[(MODELS[0][0], p)]["bins"]
+        print(f"{p}: " + ", ".join(f"{LAB[a]} {len(bins[a][0])} ({np.mean(bins[a][0] > 0):.0%})"
+                                   for a in assays_of(data, p)))
     print("\n### Library control: mean |AUC - 0.5|\n")
     names = list(CONTROLS) + list(PAIRS)
     print("| Model | " + " | ".join(names) + " |\n" + "|---" * (len(names) + 1) + "|")
@@ -365,12 +374,13 @@ def print_tables(data):
         print(f"| {label} | " + " | ".join(
             f(mean(v["dev"] for v in data[(key, n)]["ro"].values())) if data[(key, n)]["ro"] else "–"
             for n in names) + " |")
-    print("\n### Recovery r (own fibers vs own track, mean over assays)\n")
+    print("\n### Recovery r (own fibers vs own track, mean over the pair's assays, so no ATAC on K562–H1)\n")
+    print("| Model | " + " | ".join(PAIRS) + " |\n" + "|---" * (len(PAIRS) + 1) + "|")
     for key, label, *_ in MODELS:
         parts = []
         for p in PAIRS:
-            rec = data[(key, p)]["rec"] or {}
-            parts.append(", ".join(f"{c} {f(mean(rec[c].values()))}" for c in rec))
+            rec, A = data[(key, p)]["rec"] or {}, assays_of(data, p)
+            parts.append(", ".join(f"{c.replace('_200U', '')} {f(mean(rec[c].get(a) for a in A))}" for c in rec))
         print(f"| {label} | " + " | ".join(parts) + " |")
 
 
@@ -383,7 +393,7 @@ def main():
     print_tables(data)
     write_csv(data, os.path.join(args.out_dir, "mix_results.csv"))
     fig_summary(data, os.path.join(args.out_dir, "mix_summary.png"))
-    fig_per_assay(data, "auc", "Fiber-origin AUC per assay (dashed: chance = 0.5)", 0.5, (0.4, 0.82),
+    fig_per_assay(data, "auc", "Fiber-origin AUC per assay (bars start at chance, 0.5)", 0.5, (0.4, 0.82),
                   os.path.join(args.out_dir, "mix_per_assay_auc.png"))
     fig_per_assay(data, "diff", "Differential r per assay (bp level)", 0.0, (0.0, 0.7),
                   os.path.join(args.out_dir, "mix_per_assay_diff_r.png"))
