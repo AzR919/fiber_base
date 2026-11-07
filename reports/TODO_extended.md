@@ -1,6 +1,6 @@
 # Research plan: extended TODO
 
-The full plan and every floating idea: the hypothesis, the test catalogue (T1–T9), the comparison ladder, the
+The full plan and every floating idea: the hypothesis, the test catalogue (T1–T10), the comparison ladder, the
 implementation list, the engineering backlog, model ideas, and the registry of reference models. The **current**
 plan (what we run now, max two pages) is `TODO.md`; ideas move from here to there when they become current.
 Metric definitions: `metrics/README.md` / `metrics/APPENDIX.md`. Background and motivation: the directed-reading
@@ -32,10 +32,38 @@ that a "bulk on every molecule" model fails it.
 1. Bulk recovery on training cell types (T1).
 2. Bulk recovery on unseen cell types, and the cell-specific part of it (T2).
 3. Recovery of individual cell types from a model supervised only on their mixture (T3), the main test of H.
-4. Within-population structure: molecules of one cell type that should differ (T5).
+4. Within-population structure and biological validation: molecules of one cell type that should differ for a
+   known biological reason (alleles, X inactivation, imprinting, CpG state, CTCF footprints; T5), and input
+   ablations read through those tests (T10).
 
 Levels 1–3 test differences *between* populations of molecules; only level 4 tests differences *within* one.
 None verifies an individual molecule; that would need single-molecule histone measurements (T8).
+
+**Validation strategy (since 7 Nov 2026).** Levels 1–3 use proxies. Fiber-origin AUC, for example, assumes every
+molecule of the cell with the higher track should score higher, which molecular heterogeneity contradicts. The main
+evidence is therefore level 4: biological backing, as in the single-molecule literature.
+
+What the literature does:
+- **SMFNet** (Schwämmle, Diamant et al. 2026) predicts *measured* SMF states. Beyond read reconstruction, it backs
+  its biology with:
+  - allele differences in an F1 hybrid (B6 × SPRET) at motif-disrupting variants;
+  - reporter motif deletions (mCHIRA, r = 0.83);
+  - in-silico motif insertions that match known TF behaviour.
+- **The Fiber-seq papers** (Stergachis 2020; FIRE, Vollger et al.; fibertools, Jha et al. 2024) use:
+  - held-out orthogonal assays (scATAC);
+  - haplotype tests (GM12878 Xi is maternal, imprinting at GNAS / MAGEL2 / ZDBF2, heterozygous variants);
+  - CTCF footprints and nucleosome phasing;
+  - co-actuation of neighbouring elements;
+  - null controls (shuffled reads, untreated / WGA DNA).
+
+None of them validates histone marks on single molecules, so our claim is new.
+
+Rule for every level-4 test:
+1. It checks something the model was never trained on.
+2. The expected direction comes from the literature and is written down before running.
+3. It has a null control.
+
+The current plan is in `TODO.md` §2.
 
 ---
 
@@ -159,7 +187,8 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 
 ### T3b. Mixture test on unseen cell types
 
-> Current design (two main pairs, pair-model / DEV5 / specialist references, channel ablations): `TODO.md`, §2.
+> Done on two pairs (GM12878–HepG2, K562–H1) with pair-model and DEV4 references; results in `Nov_13.md`
+> ("Mixture test on two pairs"). The channel ablations that were planned with it are now hypothesis-driven (T10).
 > The text below is the original motivation.
 
 - **Hypothesis.** A model trained on mixtures of two cell types separates the molecules of two *other* cell types
@@ -183,8 +212,11 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Caveat.** A failure is ambiguous: no molecule reading, or reading learned from two cell types does not transfer
   (compare with DEV5 and with mixture training on more cell types, M2). A success is clear. Does not replace T5
   (within one cell type no identity shortcut exists at all).
-- **Status.** Current plan (`TODO.md` §2): two main pairs, pair-model / DEV5 / routed-specialist references,
-  channel ablations. Needs I15.
+- **Status.** Done (Nov 2026, `Nov_13.md`):
+  - Mixture-only training reaches the own-track ceiling on both pairs.
+  - On an unseen pair, mixture and own-track models do the same.
+  - Transfer is lopsided: poor toward K562–H1.
+  - Routed specialists (the third reference) deferred.
 
 ### T4. Output parameterization and assay model (methodology comparison)
 
@@ -217,25 +249,63 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Status.** V1 implemented and default (V0 = `fiber_aggregation: asinh`, also how old checkpoints load).
   V2 (per-assay scale) and V3 after T3. Needs I4 (V2) and I14 (V3).
 
-### T5. Within-population structure
+### T5. Within-population structure and biological validation (current plan, `TODO.md` §2)
 
 Only these probe correctness *within* a cell type. Each uses a group of molecules defined independently of the
-model with a known expected difference.
+model, with a known expected difference written down before running, and a null.
 
-- **T5a. Held-out CpG methylation (same molecule).** Train a model without the CpG channel; the fiber's measured
-  CpG methylation is then ground truth about that molecule the model never saw.
-  - Hypotheses: per-molecule predicted H3K4me3 anti-correlates with the molecule's methylation at CpG-island
-    promoters; predicted H3K36me3 correlates positively with gene-body methylation; H3K27me3 sits on unmethylated
-    CpG islands of silent genes.
-  - Readout: correlation across molecules at the same locus between predicted mark and held-out methylation.
-    The baseline and any "bulk on every molecule" model score 0.
-- **T5b. X inactivation.** In female lines (GM12878, MCF-7, H9; K562 less clear), molecules at X-linked promoters
-  come from an active and an inactive X, so active-mark predictions should be **bimodal across molecules**; in
-  male lines (HepG2, HCT116, H1, Panc1) unimodal. Needs no phasing. Needs a chrX window set (regions exclude chrX).
-- **T5c. Imprinted loci** (H19/IGF2, SNRPN, PEG3, ...). Split fibers by haplotype (heterozygous SNPs, or HP tags
-  if the CRAMs carry them): active marks should concentrate on one allele's molecules, repressive on the other's.
-- Caveat for T5b/c: CpG methylation in the input partly encodes allele state; strongest with the no-CpG model.
-- **Status.** Not started. T5a needs one extra training run; T5b a window set; T5c a phasing check.
+**Why haplotypes are clean for us:**
+- All Fiber-seq CRAMs carry HiPhase HP/PS tags (I8).
+- The DNA input is the reference sequence (`dna_type: ref`), and the ENCODE targets are unphased.
+- So a difference between the two copies can only come from the molecules' chromatin signals, and was never
+  supervised.
+- **Exception:** SNPs that create or destroy a CpG (the CpG channel sees them). Exclude them.
+
+- **T5a. CpG methylation, same molecule.** The hypotheses (literature directions):
+  - H3K4me3 is low on molecules with methylated CGI promoters (CFP1 binds unmethylated CGIs).
+  - H3K36me3 goes with gene-body methylation (DNMT3B is recruited by H3K36me3).
+  - H3K9me3 goes with methylation at ICRs and repeats.
+  - H3K27me3 is largely antagonistic to methylation at CGIs.
+  - CTCF is blocked by methylation at its motif.
+
+  Three readouts:
+  1. **Held-out methylation:** with the no-CpG model (T10), correlate predicted marks with the molecule's measured
+     methylation across molecules at the same locus. The baseline and any "bulk on every molecule" model score 0.
+  2. **In-silico flips:** on the full model, methylate or unmethylate a molecule's CGI CpGs and check the
+     direction of change per assay (cf. SMFNet's in-silico motif insertions). No retraining (I21).
+  3. **Ablation loss per assay:** see T10.
+- **T5b. X inactivation**, phased instead of only bimodality:
+  - Cell line: GM12878, where the Xi is maternal (99% of XIST transcripts, FIRE paper). Assign HP blocks to Xa / Xi
+    by trio phasing, or by XIST-promoter state measured away from the test genes.
+  - Expected: Xi molecules gain H3K27me3 / H3K9me3 and lose H3K4me3 / H3K27ac at TSSs active only on the Xa.
+    Escape genes (UBA1, KDM5C, KDM6A, ...) are active on both. CTCF sits on both copies at most sites, and is
+    Xi-specific at DXZ4 / FIRRE / ICCE.
+  - Nulls: autosomes; male lines (HepG2, H1).
+  - The unphased bimodality version still applies to the other female lines (MCF-7, H9; XCI often eroded in hESC).
+  - Needs a chrX window set (I7).
+- **T5c. Imprinted control regions** (H19/IGF2, KvDMR1, SNRPN, PEG3, MEG3, GNAS; MAGEL2, ZDBF2 from FIRE):
+  - Unmethylated allele: H3K4me3 + accessibility (CTCF at the H19 ICR). Methylated allele: H3K9me3.
+  - Showcase figures across the phased lines.
+  - Some loci sit on training chromosomes (GNAS on chr20). That is acceptable, since haplotypes were never
+    supervised, but say so.
+- **T5d. Allele-specific ChIP at heterozygous SNPs** (strongest quantitative haplotype test):
+  - GM12878 AlleleDB / ADASTRA calls for CTCF, H3K27ac, H3K4me3 (I20).
+  - The predicted per-haplotype difference should have the sign of the ChIP allelic imbalance, and be ~0 at
+    balanced SNPs.
+- **T5e. CTCF footprints:**
+  - Per-fiber CTCF predictions at CTCF motifs, against footprint calls on the same fiber (I22).
+  - Expected ranking: bound > accessible-unbound > closed. Stergachis 2020: about 30% of accessible fibers at K562
+    CTCF sites are bound.
+  - Footprints are a measured single-molecule readout of CTCF occupancy.
+- **T5f. Same-molecule co-occurrence where accessibility and marks disagree:**
+  - Bivalent promoters in H1: H3K4me3 + H3K27me3 on the same molecules, but not in differentiated lines.
+  - H3K36me3 and H3K27me3 mutually exclusive (PRC2 is inhibited by H3K36me3).
+  - Repressive marks not simply inverted accessibility.
+  - Co-actuation of neighbouring elements on the same molecule, with distance decay (Stergachis 2020).
+- **Status.**
+  - Planned (`TODO.md` §2); HP tags checked (I8).
+  - Phase 1 (no retraining): T5b–T5e, plus the T5a in-silico flips.
+  - T5a held-out needs the no-CpG model (T10).
 
 ### T6. Bulk reference model with the same information
 
@@ -255,9 +325,14 @@ model with a known expected difference.
 
 ### T8. External single-molecule data (opportunistic)
 
-- DiMeLo-seq or similar antibody-directed single-molecule histone data for one of our cell lines would be the
-  closest to ground truth; single-cell CUT&Tag (e.g. K562) gives per-locus distributions to compare against the
-  spread of per-molecule predictions. **TODO:** check availability.
+- Antibody-directed single-molecule histone data for one of our cell lines would be the closest to ground truth:
+  - DiMeLo-seq (Altemose 2022);
+  - ChromSMF (Palamin & Krebs 2026, histone modifications + protein–DNA interactions + methylation on multi-kb
+    molecules; cited by SMFNet);
+  - Yue et al. 2022 (nanopore profiling of histone marks + methylation).
+- Single-cell CUT&Tag (e.g. K562) gives per-locus distributions to compare against the spread of per-molecule
+  predictions.
+- **TODO (first step of `TODO.md` §2):** check which cell lines and marks have public data.
 
 ### T9. A pretrained sequence-to-activity model as the DNA encoder
 
@@ -288,6 +363,30 @@ model with a known expected difference.
 - **Prediction.** Gains concentrated in broad marks; per-molecule readouts (cell-specific r, T3) should not drop.
   If bulk improves but they drop, the model is copying DNA-derived bulk onto molecules.
 - **Status.** Idea; after the single-molecule tests.
+
+### T10. Input ablations with biological hypotheses
+
+Replaces the channel-ablation table of the old T3b plan. Each ablation has a hypothesis and is read mainly through
+the T5 tests (allele, X, imprinting, footprints), with bulk and T3 readouts as guards. DEV4 (`data24`) is retrained
+per variant; `input_flags` order is [m6A, CpG, MSP, nuc, FIRE].
+
+| Variant | `input_flags` | Hypothesis | Main readouts |
+|---|---|---|---|
+| No CpG | [1, 0, 1, 1, 1] | CpG matters for the CGI / methylation-linked assays: H3K4me3, H3K36me3, H3K9me3, CTCF lose more than ATAC, H3K27ac, H3K4me1 | Per-assay loss; T5a held-out methylation; imprinting / Xi differences in H3K9me3 shrink; whether the H1 CTCF shift disappears |
+| No FIRE (`model16`) | [1, 1, 1, 1, 0] | FIRE adds little beyond raw m6A / MSP. FIRE was trained on GM12878 DNase + CTCF ChIP peaks, so a large drop means a bulk-derived shortcut | CTCF and GM12878 first; T5e footprints; if the cost is small, no-FIRE becomes the main model |
+| No accessibility | [0, 1, 0, 0, 0] (CpG + DNA) | Accessibility carries most of the active marks; what remains shows what CpG + DNA alone give | Per-assay loss; compare with the accessibility-only baseline (§4a) from the other side |
+
+Not current (later, if the above call for them):
+- FIRE only [0, 0, 0, 0, 1];
+- CpG only [0, 1, 0, 0, 0] without DNA;
+- no DNA (all fiber channels);
+- no fibertools calls ([1, 1, 0, 0, 0]: whether MSP / nuc / FIRE are needed or learnt from raw m6A);
+- continuous ML / FIRE scores instead of ternary calls.
+
+**Cost.** About 2.2 h per variant on a 2g.20gb slice, plus evals. Differences of a few hundredths need a second
+seed.
+
+**Status.** Planned (`TODO.md` §2, step 2).
 
 ---
 
@@ -346,19 +445,24 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I3 | Cell-type-specific-loci breakdown in eval: report MSE, sign accuracy and cell-specific r on each cell's loci tiles (gain / loss) | T1, T2, T3 | Done: loci files (`data_prep/build_loci.py`) and eval config key `loci` (region types `loci:...`); gain / loss split not reported separately yet. Plain r is depressed there (range restricted on the target), so don't compare it with genome-wide r |
 | I4 | Output scale: ~~average fibers in FC (V1), mix targets and baseline in FC~~ (done); per-assay scale (V2); optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | V2 changes training: rerun references after |
 | I5 | Wrong-cell control for the cell-specific r | T2 | Score cell A's target with cell B's prediction |
-| I6 | No-CpG model run (`input_flags` with cpg = 0) + molecule-level correlation with held-out methylation | T5a | The no-CpG ablation of `TODO.md` §2 provides the model |
-| I7 | chrX window set (regions spec) + bimodality analysis | T5b | Spec entry only for the windows |
-| I8 | Check CRAMs for haplotype (HP) tags; phasing otherwise | T5c | |
+| I6 | No-CpG model run (`input_flags` [1, 0, 1, 1, 1], new model config) + molecule-level correlation with held-out methylation | T5a, T10 | |
+| I7 | chrX window set (regions spec) + bimodality analysis | T5b | Spec entry only for the windows; regions currently exclude chrX |
+| I8 | ~~Check CRAMs for haplotype (HP) tags~~ (done 7 Nov: HiPhase HP/PS in all CRAMs; tagged share in a chr21 sample GM12878 93%, K562 100%, HepG2 100%, H1 98%, H9 55%, MCF-7 18%) | T5b–d | Tags are consistent within a phase block (PS) only; parental assignment needs trio phasing (GM12878) or a per-block label |
 | I9 | Aggregated-input bulk model | T6 | New model variant |
 | I10 | Rule-based single-molecule imputer + "bulk on every molecule" reference, scored with T3/T5 | 4a | Analysis only, on saved predictions (I2) |
 | I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b, T2 | Extend the spec/lock to per-replicate FC files. Score replicate vs replicate per assay and cell type with plain r, MSE and cell-specific r (given the baseline), on the same scored positions |
 | I12 | DNA-only model run; similar-cell average baseline; related-cell reference | 4b, T2 | Allow all-zero `input_flags`; baseline with a chosen cell subset; related-cell reference = one sibling cell's real track as the prediction (H1 → H9), scored with cell-specific r |
 | I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
 | I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
-| I15 | Unseen-pair test (`TODO.md` §2): `pairs` in `loci_spec.yaml` (K562–Panc1, K562–H1, Panc1–H1, GM12878–H1, HepG2–H1), paired eval configs + library controls (K562, Panc1, H1), single-cell and pair data configs, ablation model configs, routing for specialists, pair × assay summary (`t3_report.py`); optional shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | |
-| I16 | *(Now part of the current plan, `TODO.md` §1)* Oracle-identity reference for T3: one model per cell type (trained on its own track), each fiber routed through its own cell type's model. Quantifies how much separation knowing the cell type alone buys; not a ceiling for molecule reading (origin is given, so it scores high even without reading fibers) | T3 | Two extra training runs + routing in the paired eval |
+| I15 | *(Done, Nov 2026: pairs GM12878–HepG2 and K562–H1, `Nov_13.md`)* Unseen-pair test: `pairs` in `loci_spec.yaml` (K562–Panc1, K562–H1, Panc1–H1, GM12878–H1, HepG2–H1), paired eval configs + library controls (K562, Panc1, H1), single-cell and pair data configs, ablation model configs, routing for specialists, pair × assay summary (`t3_report.py`); optional shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | |
+| I16 | *(Deferred; specialists trained, routing not built)* Oracle-identity reference for T3: one model per cell type (trained on its own track), each fiber routed through its own cell type's model. Quantifies how much separation knowing the cell type alone buys; not a ceiling for molecule reading (origin is given, so it scores high even without reading fibers) | T3 | Two extra training runs + routing in the paired eval |
 | I17 | Multi-resolution r: Pearson / MSE also on 200 bp and 1 kb bin means of prediction and target (same scored positions) | assay tiers (`TODO.md` §3) | Evaluator only |
 | I18 | Assay-specific r: partial correlation of predicted and true mark given the true ATAC track, per assay | assay tiers (`TODO.md` §3) | Evaluator only; cells without ATAC (H1, H9) skipped |
+| I19 | Haplotype-split analysis: per-fiber predictions at chosen loci split by HP within each phase block (PS); Xa / Xi block labels for GM12878 (trio phasing or XIST-promoter state); exclusion of CpG-creating / destroying SNPs | T5b–d | Builds on I2 (saved per-fiber summaries) |
+| I20 | Allele-specific ChIP truth set: heterozygous SNPs with allelic-imbalance calls (AlleleDB / ADASTRA) for GM12878 CTCF, H3K27ac, H3K4me3, matched to the fibers' haplotypes (GIAB / Platinum NA12878 phased VCF) | T5d | Data download + matching only |
+| I21 | In-silico CpG flips: set a molecule's CpG calls in a region (e.g. a CGI) to methylated / unmethylated and rerun the model on the same fibers | T5a | Inference-only tool |
+| I22 | CTCF footprint calls per fiber at CTCF motifs (fibertools `ft footprint` or an m6A-gap caller), joined to per-fiber CTCF predictions | T5e | |
+| I23 | Ablation model configs: no CpG [1, 0, 1, 1, 1], no accessibility [0, 1, 0, 0, 0]; no FIRE = `model16` | T10 | Next free model numbers |
 
 ## 6. Engineering backlog (performance and quality)
 
