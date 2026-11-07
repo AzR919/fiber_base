@@ -10,7 +10,8 @@ Usage:
                                [--flank 100] [--max_fibers 1000] [--batch_fibers 200] \
                                [--save_arrays 20 | --array_targets name1 name2 ...] [--out_dir DIR] [--device cuda]
 
-Targets: BED with chrom, start, end, name (optional: score, strand; extra columns are carried into the output).
+Targets: BED with chrom, start, end, name (optional: score, strand; extra columns are carried into the output,
+named by a '#chrom start end name score strand <extra ...>' header line if present; data_prep/build_targets.py).
 Each target gets one window of the model's context length (default 5000 bp, from the checkpoint) centred on it;
 the target must fit inside the window with its flanks. Every fiber whose scored span (fiber_utils.get_fiber_data)
 overlaps the window is predicted, up to --max_fibers, in chunks of --batch_fibers: the model processes fibers
@@ -35,6 +36,7 @@ Output, in DIR (default results/<timestamp>_molecules_<run>_<targets>/):
 import argparse
 import datetime
 import glob
+import gzip
 import json
 import os
 import re
@@ -87,9 +89,15 @@ def resolve_checkpoint(args):
 
 
 def read_targets(path):
+    """BED6 columns get fixed names; extra columns are named by a '#chrom ...' header line if the file has one
+    (data_prep/build_targets.py writes it), else col6, col7, ..."""
     df = pd.read_csv(path, sep="\t", header=None, comment="#")
+    with (gzip.open(path, "rb") if path.endswith(".gz") else open(path, "rb")) as f:
+        first = f.readline().decode().rstrip("\n")
+    header = first.lstrip("#").split("\t") if first.startswith("#") else []
     names = ["chrom", "t_start", "t_end", "target", "score", "t_strand"]
-    df.columns = names[:min(6, df.shape[1])] + [f"col{i}" for i in range(6, df.shape[1])]
+    extra = header[6:] if len(header) == df.shape[1] else [f"col{i}" for i in range(6, df.shape[1])]
+    df.columns = names[:min(6, df.shape[1])] + extra[:max(0, df.shape[1] - 6)]
     if "target" not in df:
         df["target"] = [f"{c}:{s}-{e}" for c, s, e in zip(df.chrom, df.t_start, df.t_end)]
     if "t_strand" not in df:
@@ -153,7 +161,7 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
     bam = pyft.Fiberbam(os.path.realpath(m["fiber_paths"][sample]))
     aln = pysam.AlignmentFile(m["fiber_paths"][sample], reference_filename=m["fasta_path"])
     fasta = pysam.FastaFile(m["fasta_path"])
-    extra = [c for c in targets.columns if c.startswith("col") or c == "score"]
+    extra = [c for c in targets.columns if c not in ("chrom", "t_start", "t_end", "target", "t_strand")]
     rows, arrays = [], {}
     for k, t in enumerate(targets.itertuples(index=False)):
         t = t._asdict()

@@ -1,0 +1,46 @@
+# Target spec for the single-molecule tests (reports/TODO.md section 2): data_prep/build_targets.py reads this and
+# writes BEDs into <regions_root>/targets/ for molecule_predict.py. Edit this file, never the outputs.
+# Built from annotations only (reference, GENCODE, CpG islands, ENCODE CTCF peaks, the JASPAR CTCF motif); no fibers
+# and no model. Every BED has a '#chrom start end name score strand ...' header naming its extra columns.
+
+# --- Inputs ---
+regions_spec: data_prep/regions_spec.yaml   # regions_root (outputs go to <regions_root>/targets/) and fasta_path
+annotations:  /home/azr/projects/def-maxwl/azr/data/misc/annotations
+gtf:          gencode.v44.basic.annotation.gtf.gz
+cpg_islands:  cpgIslandExt.hg38.txt.gz       # UCSC table dump (bin chrom start end name length cpgNum ...)
+ctcf_motif:   MA0139.2.jaspar
+ctcf_peaks:                                  # ENCODE IDR thresholded peaks (narrowPeak), same experiments as our tracks
+  GM12878: ctcf_peaks_GM12878_ENCSR000AKB.bed.gz
+  K562:    ctcf_peaks_K562_ENCSR000EGM.bed.gz
+  HepG2:   ctcf_peaks_HepG2_ENCSR607XFI.bed.gz
+  H1:      ctcf_peaks_H1_ENCSR000BNH.bed.gz
+
+# --- CTCF motif sites (T5e: CTCF footprints) -> ctcf_sites_<chroms>.bed ---
+# bound:   the best motif hit (p <= motif_pvalue) inside each peak of any cell line; one row per motif position, with
+#          each cell line's peak signalValue (0 = no peak there).
+# unbound: motif hits on the same chromosomes outside every cell line's peaks (+- unbound_margin), sampled to match
+#          the bound sites' motif-score distribution (score bins of score_bin bits), up to unbound_per_bound per
+#          bound site. The null: same motif strength, no ChIP binding in any of the 4 lines.
+# Default chromosome: chr21, the test chromosome (training is chr20, validation chr22).
+ctcf:
+  chroms: [chr21]
+  motif_pvalue: 1.0e-5
+  pseudocount: 0.1          # per-column pseudocount mass (FIMO's default), spread over A/C/G/T
+  unbound_margin: 500
+  score_bin: 1.0
+  unbound_per_bound: 1
+  seed: 919
+
+# --- Promoters (T5b X inactivation; T5c CpG) -> tss_<chroms>.bed ---
+# One TSS per protein-coding gene (GENCODE gene record), target = TSS +- tss_half. Columns: gene, class, cgi.
+# class on chrX: par (PAR1/PAR2), escape (escape_genes below), xist, subject (everything else); elsewhere: autosomal.
+# cgi = 1 when the target overlaps a UCSC CpG island.
+tss:
+  chroms: [chrX, chr21]
+  tss_half: 500
+  # hg38 pseudoautosomal regions
+  par: [[chrX, 10000, 2781479], [chrX, 155701382, 156030895]]
+  # PROVISIONAL constitutive escape genes outside the PARs, from memory of the consensus in Balaton et al. 2015 and
+  # Tukiainen et al. 2017 (escape in most tissues / cell lines). Check against Tukiainen 2017 Suppl. Table 13 and
+  # GM12878 allele-specific expression before relying on it. Escape can be cell-line specific.
+  escape_genes: [KDM5C, KDM6A, DDX3X, EIF1AX, EIF2S3, ZFX, USP9X, SMC1A, JPX, PRKX, STS, TXLNG, CA5B, PUDP, UBA1]
