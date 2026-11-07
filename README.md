@@ -42,6 +42,7 @@ Eval is **fully deterministic**: same checkpoint + same eval config → identica
 |---|---|
 | `main.py` | Training entry point — parses args, builds datasets and model, trains, optionally runs eval |
 | `eval.py` | Standalone evaluation of a saved checkpoint |
+| `molecule_predict.py` | Per-molecule predictions at a target BED: one row per fiber per target with read name, haplotype tags (HP/PS), predicted marks and input summaries (single-molecule tests) |
 | `args.py` | Argument parsing and config loading (CLI > config files > defaults) |
 | `trainer.py` | Training loop, validation, checkpointing, wandb logging |
 | `evaluator.py` | `Evaluator` (inference + metrics per cell type, loci breakdown, paired readouts for the mixture test) and `run_final_eval` (loops over eval configs) |
@@ -175,6 +176,7 @@ An eval config may list several cell types; each gets its own metrics (keyed `<c
 | `model13` / `model14` | UNet03 small (8/16/32/64), all 8 assays, with / without `fire_msp`; 1g.10gb slice (tight) |
 | `model15` / `model16` | UNet03 mid (8/24/48/96), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
 | `model17` / `model18` | UNet03 large (8/32/64/128), all 8 assays, with / without `fire_msp`; 2g.20gb slice |
+| `model19` / `model20` | Input ablations of `model15` (T10): no CpG / CpG + DNA only (no accessibility channels) |
 | `train02` | Standard run (25 epochs × 1000 samples, bs 8); `train01` is retired (old key `iters_per_epoch`) |
 | `train03` | Long run (100 epochs × 1000 samples, bs 8) |
 | `train04` | Standard run from Nov 2026: 15 epochs × 5000 samples (75k), bs 8, LR patience 2 epochs |
@@ -299,6 +301,26 @@ python t3_report.py --mixture results/<mix eval>/eval_summary.json --upper resul
 - **Library control** (`eval25`): two libraries of HepG2 share one true track, so their fiber-origin |AUC − 0.5| and RMS(p_A − p_B) are the floor that library effects alone produce.
 - **Saved to the eval run folder**: `<config>_paired.npz` (per-window mean differences, per-bin AUCs) and figures: `differential_scatter` (window-level predicted vs true difference per assay), `fiber_auc` (AUC distributions), `paired_locus_*` (the windows with the largest |d|: both tracks, the 50:50 mixture, each cell's prediction, and every fiber's prediction stacked by origin). Also logged to wandb.
 - `t3_report.py` puts the mixture model, the upper bound and H0 side by side (markdown table + bar chart).
+
+### Per-molecule predictions at chosen targets
+
+For the single-molecule tests (haplotypes, X inactivation, imprinting, CTCF footprints, CpG; `reports/TODO.md` §2):
+
+```bash
+python molecule_predict.py --run <training run name> --samples GM12878 K562_200U --targets <targets.bed> \
+  [--flank 100] [--save_arrays 20]
+# on the cluster: sbatch --export=ALL,TARGETS=<bed>,SAMPLES="GM12878" slurm_batch_command_molecules.sh
+```
+
+- Each target (BED: chrom, start, end, name, [score, strand]) gets one model window centred on it; every fiber
+  overlapping the window is predicted (fibers are processed independently, so chunking does not change them).
+- `fibers_<sample>.tsv.gz`: per (target, fiber), the read name, `hp` / `ps` tags, the mean prediction per assay over
+  the target, and input summaries over the target and both flanks (m6A rate, CpG methylation, MSP / nucleosome /
+  FIRE fraction). Inputs are summarised for all 5 channels whatever the model uses, so a no-CpG model still
+  reports each molecule's measured methylation.
+- `--save_arrays N` / `--array_targets` keep full per-bp arrays (predictions, inputs, masks) for plotting.
+- GM12878 haplotype tags are chromosome-wide (trio-phased, one PS per chromosome); HP2 is the inactive X (open
+  XIST promoter). Other lines have HiPhase blocks: compare haplotypes only within a PS.
 
 ---
 

@@ -1,0 +1,12 @@
+# Accessibility ablation (reports/TODO_extended.md T10): identical to model15_uct_mid_8A but with every accessibility
+# input removed (m6a, msp, nuc, fire_msp). UNet03 conv-transformer, MID, all 8 assays. Inputs [cpg] + reference DNA.
+# Shows how much CpG methylation and DNA alone carry per assay. Fits in a 2g.20gb MIG slice.
+
+model: "unet03"
+input_flags: [0, 1, 0, 0, 0]
+kernel_size: 15
+dna_type: "ref"
+tf_heads: 4
+tf_layers: 2
+emb_dims: [8, 24, 48, 96]
+output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9me3", "ctcf"]

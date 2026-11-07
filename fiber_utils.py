@@ -184,7 +184,7 @@ def nucleosome_span(fiber):
 def get_fiber_data(
     fiber_bam, chrom, start, end, fasta,
     fibers_per_entry, context_length, input_features,
-    return_fiber_dna=False, min_overlap=50,
+    return_fiber_dna=False, min_overlap=50, return_meta=False,
 ):
     """
     Collect fiber reads over [chrom:start-end] and extract per-fiber feature arrays.
@@ -204,6 +204,8 @@ def get_fiber_data(
     return_fiber_dna : whether to build per-fiber DNA one-hot array
     min_overlap     : minimum bp of the fiber's scored span inside the window (fibers with less, or with no
                       nucleosome at all, are skipped)
+    return_meta     : also return one dict per collected fiber (qname, hp, start, end, strand), row-aligned with
+                      fibers_array (used by molecule_predict.py to split molecules by haplotype)
 
     Returns
     -------
@@ -212,6 +214,7 @@ def get_fiber_data(
     n_fibers       : int  — actual fibers collected (≤ fibers_per_entry)
     fiber_coverage : np.ndarray  (context_length,)  — per-position count of fibers whose scored span covers it
     fiber_mask     : np.ndarray  (fibers_per_entry, context_length) bool — each fiber's scored span (padding rows False)
+    meta           : list of n_fibers dicts, only with return_meta=True (appended as a sixth return value)
     """
     ref            = RefWindow(fasta.fetch(chrom, start, end))  # shared by every fiber in the window
     fibers_array   = np.zeros((fibers_per_entry, len(input_features), context_length), dtype=np.float32)
@@ -222,6 +225,7 @@ def get_fiber_data(
         possible_fibers = fiber_bam.fetch(chrom, start, end)
 
     n_fibers = 0
+    meta = []
     for fiber in possible_fibers:
         if n_fibers == fibers_per_entry:
             break
@@ -251,7 +255,12 @@ def get_fiber_data(
             dna_array[n_fibers] = _dna_to_onehot("".join(dna_buffer))
 
         fibers_array[n_fibers] = np.array([fn(fiber, start, end, ref) for fn in input_features])
+        if return_meta:
+            meta.append({"qname": fiber.qname, "hp": getattr(fiber, "hp", None), "start": fiber.start,
+                         "end": fiber.end, "strand": getattr(fiber, "strand", None)})
         n_fibers += 1
 
     fiber_coverage = fiber_mask.sum(axis=0).astype(np.float32)
+    if return_meta:
+        return fibers_array, dna_array, n_fibers, fiber_coverage, fiber_mask, meta
     return fibers_array, dna_array, n_fibers, fiber_coverage, fiber_mask

@@ -35,8 +35,11 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Unseen-pair test (T3b, reports/TODO.md section 2), same budget: CELL=pairA (GM12878 + HepG2, data28) and
 # CELL=pairB (K562 + H1, data34), the two main models, each the other's matched reference.
 # Mixture-only models of the same pairs: CELL=mixA (data27) and CELL=mixB (data35, no ATAC: H1 has none).
+# Input ablations of DEV4 (reports/TODO_extended.md T10), same data (data24) and budget: CELL=nocpg (model19),
+# CELL=nofire (model16), CELL=noacc (model20: CpG + DNA only).
 # If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
 PREFIX=SPEC_V1
+MODEL=model15_uct_mid_8A
 case "${CELL:-gm12878}" in
   gm12878) DATA=data29_GM12878;    EVAL=eval21_GM12878_mini ;;
   k562)    DATA=data30_K562_200U;  EVAL=eval22_K562_200U_mini ;;
@@ -47,12 +50,15 @@ case "${CELL:-gm12878}" in
   pairB)   DATA=data34_K562_H1_200U;       EVAL=eval22_K562_200U_mini;              PREFIX=PAIR_V1 ;;
   mixA)    DATA=data27_mix_GM12878_HepG2_200U; EVAL=eval26_mix_GM12878_HepG2_200U_mini; PREFIX=MIX_V1 ;;
   mixB)    DATA=data35_mix_K562_H1_200U;       EVAL=eval30_mix_K562_H1_200U_mini;       PREFIX=MIX_V1 ;;
+  nocpg)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model19_uct_mid_8A_no_cpg ;;
+  nofire)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  noacc)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model20_uct_mid_8A_cpg_only ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
-echo "Model: $PREFIX $DATA"
+echo "Model: $PREFIX $DATA $MODEL"
 python -u main.py \
   --data_config configs/data/$DATA.yaml \
-  --model_config configs/models/model15_uct_mid_8A.yaml \
+  --model_config configs/models/$MODEL.yaml \
   --train_config configs/training/train04.yaml \
   --eval_configs configs/evals/$EVAL.yaml \
   --num_workers 3 \
