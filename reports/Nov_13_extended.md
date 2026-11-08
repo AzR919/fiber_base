@@ -1,0 +1,947 @@
+# 13th Nov (extended)
+
+The detailed version: every experiment since 30 Oct with its setup, the hypothesis it tested, the full tables and
+figures, and the outcome. The short version is `Nov_13.md`. Plan and test definitions: `TODO.md`,
+`TODO_extended.md`.
+
+## Experiments at a glance
+
+| # | Experiment | Hypothesis / question | Outcome |
+|---|---|---|---|
+| 1 | [DEV5 reference model](#1-dev5-v1-the-all-cells-reference-model) | Does the 5-dev-cell model beat the cross-cell average on chr21? | On MSE yes (7 of 8 cell types); on Pearson only in dev cell types, not held out. Weak on H3K36me3 / H3K9me3 / CTCF |
+| 2 | [Panc1 and split v2](#2-panc1-and-the-new-split-v2-panc1-moves-to-held-out) | Is Panc1's sample the problem? Does training on it help? | Sample doubtful, training on it buys nothing → held out; **DEV4** (4 dev) is the main model. Specialists +0.03–0.06 r |
+| 3 | [Mixture test on two pairs](#3-mixture-test-on-two-pairs-t3-repeated-on-k562h1) | Mixture-only supervision reaches the own-track ceiling (T3), also on a second pair; how does it transfer to an unseen pair? | Ceiling reached on both pairs (AUC 0.637 vs 0.635, 0.666 vs 0.665). On an unseen pair supervision type doesn't matter; transfer to K562–H1 is poor |
+| 4 | [CTCF on K562–H1](#4-ctcf-on-k562h1-a-weak-h1-track-plus-a-model-shift) | (a) H1's CTCF track is weak, or (b) H1's fibers are more accessible | (a) yes, (b) no; plus a constant model shift toward H1 |
+| 5 | [Offset breakdown, all assays](#5-the-same-breakdown-for-every-assay-on-both-pairs) | Which failures are track problems, compression or cell-level offsets? | Three failure types; track outliers H1 CTCF, HepG2 / H1 H3K9me3 |
+| 6 | [Input ablations](#6-input-ablations-t10-no-cpg-no-fire-no-accessibility) | No FIRE costs little; no CpG hurts CpG-linked marks most; the H1 CTCF shift comes from CpG | No FIRE: confirmed (slightly better). No CpG: partly (H3K36me3 −0.25, H3K27me3 −0.09; CTCF / H3K9me3 barely). H1 shift: **not** from CpG |
+| 7 | [CTCF footprints on single molecules](#7-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A; weak in DEV4 (+0.11), **10× stronger without FIRE** (+1.14). No-accessibility model is a clean null |
+| 8 | [X inactivation per haplotype](#8-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac, H3K9me3 (73–91% of genes), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign) |
+
+Experiments 1–5 are bulk or paired readouts; 6–8 are the first tests from the biological-validation plan
+(`TODO.md` §2). Decisions and next steps are at the end.
+
+## What changed since 30 Oct
+
+- **Fiber averaging in fold change (V1)** is the default (`Oct_23.md`, section 1), and the **cross-cell baseline**
+  now also averages the other cell types' tracks in fold change, then asinh. Baseline numbers and cell-type r
+  are therefore not exactly comparable with the October tables.
+- **Training budget `train04`:** 15 epochs × 5000 samples (75k samples), LR patience 2 epochs. The old 100 × 1000
+  run validated and restarted its data loaders 100 times and plateaued at ~60k samples; 5000-sample epochs cut that
+  overhead ~5× (profiling: training is GPU-bound at ~10 samples/s on a 2g.20gb slice).
+- **Checkpointing:** training saves a checkpoint after every epoch and stops cleanly before the job's time limit;
+  `--resume latest` continues it. Jobs stay under 3 h (fastest partition).
+- **Cluster:** runs moved to nibi (shorter queues for our group, same GPUs).
+- **Per-molecule predictions (sections 7–8):** `molecule_predict.py` runs a trained model on every fiber over a
+  BED of target loci and writes one row per (target, fiber): the predicted assays plus the fiber's input summaries
+  (m6A rate, CpG methylation, MSP / nucleosome / FIRE fraction) over the target and its flanks, and the HiPhase
+  haplotype tag. Target BEDs come from `data_prep/build_targets.py` (`data_prep/targets_spec.yaml`).
+- **Biological-validation plan (7 Nov, `TODO.md` §2):** every new test checks something the model never trained on,
+  has its expected direction written down before running, and has a null control.
+
+## 1. DEV5 (V1), the all-cells reference model
+
+> **Question:** with V1 (fold-change averaging) and the longer `train04` budget, does the all-cells model beat the
+> cross-cell average on the test chromosome, in dev and in held-out cell types?
+>
+> **Outcome:** on MSE yes, in 7 of 8 cell types. On Pearson it is ahead or level in 4 of 5 dev cell types and
+> behind in Panc1 and the 3 held-out ones. ATAC, H3K4me3, H3K27ac and H3K4me1 carry over to held-out cell types;
+> the broad and repressive marks don't, H3K36me3 least of all.
+
+- **Model:** mid 8-assay UNet (`model15`), trained on the 5 dev cell types (`data20`), `train04`. One 3 h job on
+  nibi: 2 h 20 min, 10.1 samples/s throughout.
+- **Validation** (chr22, 200 windows × 5 cell types): Pearson 0.320 after epoch 1, 0.501 after epoch 15, still
+  rising slowly at the end (0.497 → 0.501 over the last two epochs). The old 100 × 1000 run plateaued at 0.49.
+- **Test:** all 6,843 valid 5 kb tiles of chr21 (6,806–6,833 per cell type have fibers), for the 5 dev and the 3
+  held-out cell types, at positions covered by ≥ 5 fibers. Baseline = fold-change mean of the dev cell types'
+  tracks, excluding the evaluated cell's own line. Metrics as in `Oct_23.md` / `metrics/README.md`.
+
+### Summary: mean over assays (model / baseline)
+
+**Bold** = better of model and baseline. Held-out cell types ordered from near to far from the dev set.
+
+| Cell type | MSE | Pearson r | Cell-type r |
+|---|---|---|---|
+| GM12878 | **0.225** / 0.285 | **0.44** / 0.43 | +0.28 |
+| K562 | **0.168** / 0.212 | 0.50 / 0.50 | +0.33 |
+| HepG2 | **0.227** / 0.253 | **0.58** / 0.53 | +0.44 |
+| Panc1 | **0.207** / 0.224 | 0.40 / **0.48** | +0.22 |
+| H1 | **0.271** / 0.305 | **0.40** / 0.39 | +0.29 |
+| H9 *(held out)* | **0.186** / 0.198 | 0.38 / **0.46** | +0.19 |
+| HCT116 *(held out)* | 0.178 / **0.172** | 0.47 / **0.55** | +0.28 |
+| MCF-7 *(held out)* | **0.166** / 0.188 | 0.45 / **0.50** | +0.28 |
+
+- **MSE:** the model beats the baseline in 7 of 8 cell types (all but HCT116), by a wider margin than in October,
+  partly because the fold-change baseline has a higher MSE than the old asinh-mean one.
+- **Pearson:** ahead or level in 4 of 5 dev cell types (behind in Panc1), behind in the 3 held-out ones, as before.
+- **Cell-type r:** positive everywhere, +0.19 to +0.44, as high in HCT116 and MCF-7 (+0.28) as in most dev cell types.
+
+### Summary without ATAC: mean over the other 7 assays (model / baseline)
+
+H1 and H9 have no ATAC, so their means above are over 7 assays and the others over 8. Here every row averages the
+same 7 assays.
+
+| Cell type | MSE | Pearson r | Cell-type r |
+|---|---|---|---|
+| GM12878 | **0.248** / 0.311 | **0.40** / 0.39 | +0.24 |
+| K562 | **0.179** / 0.228 | **0.47** / 0.46 | +0.32 |
+| HepG2 | **0.251** / 0.279 | **0.55** / 0.49 | +0.41 |
+| Panc1 | **0.218** / 0.243 | 0.37 / **0.44** | +0.21 |
+| H1 | **0.271** / 0.305 | **0.40** / 0.39 | +0.29 |
+| H9 *(held out)* | **0.186** / 0.198 | 0.38 / **0.46** | +0.19 |
+| HCT116 *(held out)* | 0.192 / **0.183** | 0.43 / **0.53** | +0.26 |
+| MCF-7 *(held out)* | **0.174** / 0.195 | 0.41 / **0.47** | +0.25 |
+
+- Without ATAC (the model's strongest assay) the means drop by 0.03–0.04 in Pearson for the cell types that have
+  it, so H1 and H9 are no longer penalised by the missing assay. The picture is unchanged: ahead of or level with
+  the baseline on Pearson in 4 of 5 dev cell types, behind in Panc1 and the held-out ones; ahead on MSE in 7 of 8.
+
+### Per assay: mean over cell types (model / baseline)
+
+Dev = the 5 dev cell types, held out = the 3 held-out ones (ATAC: 4 dev, 2 held out).
+
+| Assay | MSE, dev | MSE, held out | Pearson r, dev | Pearson r, held out | Cell-type r, dev | Cell-type r, held out |
+|---|---|---|---|---|---|---|
+| ATAC | **0.084** / 0.090 | **0.094** / 0.116 | **0.73** / 0.72 | **0.73** / 0.68 | +0.47 | +0.49 |
+| H3K4me3 | **0.177** / 0.232 | **0.156** / 0.163 | **0.53** / 0.49 | 0.59 / 0.59 | +0.34 | +0.36 |
+| H3K27ac | **0.210** / 0.290 | **0.172** / 0.226 | **0.47** / 0.37 | **0.44** / 0.38 | +0.37 | +0.32 |
+| H3K4me1 | **0.223** / 0.293 | **0.145** / 0.180 | **0.50** / 0.42 | **0.54** / 0.52 | +0.38 | +0.38 |
+| CTCF | **0.183** / 0.203 | 0.169 / **0.164** | 0.40 / **0.43** | 0.35 / **0.48** | +0.24 | +0.12 |
+| H3K27me3 | **0.229** / 0.260 | **0.199** / 0.224 | 0.41 / **0.42** | 0.28 / **0.38** | +0.29 | +0.19 |
+| H3K36me3 | 0.290 / **0.246** | 0.244 / **0.176** | 0.39 / **0.52** | 0.23 / **0.54** | +0.23 | +0.07 |
+| H3K9me3 | **0.324** / 0.390 | **0.203** / 0.210 | 0.37 / **0.41** | 0.41 / **0.53** | +0.20 | +0.18 |
+
+- **ATAC, H3K4me3, H3K27ac, H3K4me1** (the marks accessibility reflects most directly): ahead of the baseline on
+  both metrics, held-out cell types included, with cell-type r +0.32 to +0.49 that does not drop on held-out cell
+  types.
+- **CTCF:** ahead on MSE in dev only, behind on Pearson; cell-type r halves on held-out cell types (+0.24 → +0.12).
+- **H3K27me3, H3K36me3, H3K9me3** (broad / repressive): behind on Pearson, most of all H3K36me3 (0.23 vs 0.54 on
+  held-out cell types, cell-type r +0.07). These are the assays for longer context and per-assay output scaling
+  (`TODO.md` §3).
+
+### Compared with the October model (V0, 100 × 1000 samples)
+
+| Cell type | MSE (Oct → now) | Pearson r (Oct → now) | Cell-type r (Oct → now) |
+|---|---|---|---|
+| GM12878 | 0.228 → 0.225 | 0.43 → 0.44 | +0.26 → +0.28 |
+| K562 | 0.172 → 0.168 | 0.50 → 0.50 | +0.32 → +0.33 |
+| HepG2 | 0.232 → 0.227 | 0.57 → 0.58 | +0.41 → +0.44 |
+| Panc1 | 0.194 → 0.207 | 0.40 → 0.40 | +0.21 → +0.22 |
+| H1 | 0.261 → 0.271 | 0.40 → 0.40 | +0.28 → +0.29 |
+| H9 | 0.177 → 0.186 | 0.38 → 0.38 | +0.19 → +0.19 |
+| HCT116 | 0.177 → 0.178 | 0.47 → 0.47 | +0.26 → +0.28 |
+| MCF-7 | 0.162 → 0.166 | 0.45 → 0.45 | +0.27 → +0.28 |
+
+The same results with 75% of the training samples in about half the time (2 h 20 min vs 4 h 26 min). Cell-type r
+is slightly higher everywhere, but the baseline it is measured against changed, so treat that as level.
+
+### MSE per assay (model / baseline)
+
+| Cell type | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| GM12878 | **.062** / .098 | **.157** / .235 | **.258** / .418 | **.277** / .293 | **.177** / .288 | .321 / **.309** | **.317** / .395 | **.228** / .241 |
+| K562 | **.088** / .097 | **.187** / .257 | **.131** / .207 | **.167** / .197 | **.160** / .237 | **.166** / .173 | **.231** / .296 | **.214** / .229 |
+| HepG2 | **.060** / .072 | **.217** / .264 | **.168** / .227 | **.147** / .160 | **.225** / .321 | .169 / **.152** | .645 / **.616** | **.188** / .213 |
+| Panc1 | .125 / **.093** | **.209** / .253 | **.229** / .251 | **.197** / .256 | **.245** / .249 | .390 / **.279** | **.153** / .292 | **.105** / .119 |
+| H1 | – | **.114** / .149 | **.263** / .350 | **.356** / .392 | **.307** / .368 | .402 / **.315** | **.276** / .348 | **.181** / .211 |
+| H9 | – | **.139** / .145 | **.185** / .225 | **.242** / .268 | **.141** / .180 | .254 / **.203** | **.204** / .237 | .137 / **.127** |
+| HCT116 | **.078** / .099 | **.129** / .151 | **.159** / .220 | .190 / **.188** | **.142** / .175 | .266 / **.184** | .279 / **.195** | .181 / **.165** |
+| MCF-7 | **.111** / .133 | .201 / **.194** | **.172** / .232 | **.164** / .217 | **.153** / .186 | .210 / **.141** | **.126** / .199 | **.188** / .199 |
+
+### Pearson r per assay (model / baseline)
+
+| Cell type | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| GM12878 | **.75** / .67 | .42 / **.43** | **.57** / .33 | .32 / **.38** | **.58** / .39 | .44 / **.51** | .21 / **.36** | .26 / **.35** |
+| K562 | .71 / **.74** | **.55** / .48 | **.49** / .40 | **.58** / .53 | .38 / **.39** | .65 / .65 | .31 / **.42** | .31 / **.38** |
+| HepG2 | **.82** / .77 | **.42** / .41 | **.50** / .43 | **.56** / .55 | **.69** / .50 | .48 / **.63** | **.69** / .48 | **.50** / .47 |
+| Panc1 | .62 / **.71** | .56 / .56 | **.47** / .43 | .27 / **.33** | .37 / **.45** | .11 / **.39** | .36 / **.42** | .42 / **.54** |
+| H1 | – | **.67** / .58 | **.34** / .28 | **.31** / .30 | **.47** / .35 | .25 / **.43** | .30 / **.37** | **.49** / .42 |
+| H9 | – | .58 / **.60** | **.35** / .33 | .34 / **.37** | .48 / **.49** | .16 / **.45** | .30 / **.44** | .40 / **.57** |
+| HCT116 | **.74** / .71 | **.59** / .57 | **.56** / .47 | .25 / **.46** | **.55** / .52 | .16 / **.54** | .64 / **.68** | .30 / **.47** |
+| MCF-7 | **.73** / .65 | **.61** / .59 | **.40** / .35 | .27 / **.32** | **.59** / .55 | .36 / **.63** | .30 / **.48** | .35 / **.41** |
+
+### Cell-type r per assay
+
+| Cell type | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| GM12878 | +0.54 | +0.22 | +0.50 | +0.15 | +0.49 | +0.26 | −0.01 | +0.10 |
+| K562 | +0.43 | +0.39 | +0.38 | +0.46 | +0.26 | +0.51 | +0.10 | +0.16 |
+| HepG2 | +0.61 | +0.24 | +0.38 | +0.42 | +0.60 | +0.27 | +0.62 | +0.36 |
+| Panc1 | +0.30 | +0.35 | +0.35 | +0.18 | +0.19 | −0.02 | +0.17 | +0.23 |
+| H1 | – | +0.51 | +0.26 | +0.22 | +0.37 | +0.15 | +0.15 | +0.35 |
+| H9 | – | +0.31 | +0.23 | +0.22 | +0.30 | +0.04 | +0.10 | +0.13 |
+| HCT116 | +0.48 | +0.39 | +0.43 | +0.15 | +0.40 | −0.03 | +0.40 | +0.07 |
+| MCF-7 | +0.51 | +0.39 | +0.29 | +0.22 | +0.44 | +0.21 | +0.04 | +0.17 |
+
+- **Easy and carried over to held-out cell types:** ATAC, H3K4me3, H3K27ac, H3K4me1. Ahead of the baseline on
+  Pearson in most cell types, ahead on MSE almost everywhere, cell-type r +0.2 to +0.6.
+- **Hard:** H3K36me3 (Pearson 0.11–0.16 in Panc1, H9, HCT116 against 0.39–0.54 for the baseline; cell-type r ≈ 0
+  there), and the repressive marks H3K27me3 / H3K9me3, which mostly trail the baseline on Pearson. Same pattern
+  as in October: the broad marks need longer context (`TODO.md` §3).
+- **CTCF** trails the baseline on Pearson everywhere except HepG2 and H1, with low cell-type r: it mostly follows
+  accessibility.
+
+**Sources:** training log `logs/2026-11-01_04_dev5_v1_train04.out`; eval logs `logs/2026-11-02_{00,02,03}_eval_dev5_v1_*`
+and `results/26-11-03_*_eval_DEV5_V1_*/eval_summary.json` on nibi; tables made with `ignore/reports/nov13_tables.py`.
+
+## 2. Panc1 and the new split (v2): Panc1 moves to held out
+
+> **Question:** DEV5 trails the baseline on Panc1. Is the Panc1 sample the problem, and does training on it help
+> the other cell types? How much better is a model trained on one cell type only?
+>
+> **Outcome:** the sample is doubtful (fibers match HCT116's ATAC better than Panc1's own, PANC-1 markers missing,
+> half coverage) and training on it buys nothing. Panc1 moves to held out (split v2) and the 4-dev model **DEV4**
+> becomes the main model. Specialists beat the multi-cell model by +0.03–0.06 Pearson.
+
+DEV5 trails the baseline on Panc1 (Pearson 0.40 vs 0.48), so we checked the sample and ran two kinds of models
+with the same setup and budget as DEV5 (`model15`, `train04`, ~2 h 15 min each on nibi):
+
+- **Leave-Panc1-out:** the other 4 dev cell types (`data24`); evaluated like DEV5 (baseline = the training cell
+  types' mean, excluding the evaluated line).
+- **Specialists:** one model per dev cell type, trained on its own track only (`data29`–`data33`); evaluated on
+  their own cell type, without baseline (it would exclude the only training cell line).
+
+**Sample checks** (`data_prep/fiber_qc.py`, `data_prep/sample_identity.py`): Panc1 has about half the fiber
+coverage of the other libraries (~50 fibers per 5 kb window vs 80–160), and its fibers agree better with HCT116's
+ATAC (r 0.70) than with Panc1's own (0.62). Of PANC-1's markers it carries KRAS G12D but not the homozygous TP53
+R273H, has no CDKN2A deletion and no chrY reads; every other sample matches its markers and sex. Its ENCODE
+broad-mark tracks are old with 4–6 NOT_COMPLIANT audits each.
+
+### Mean over assays: DEV5 / leave-Panc1-out / specialist (baseline = DEV5's)
+
+| Cell type | MSE | Pearson r | Baseline r | Cell-type r (DEV5 / LOO) |
+|---|---|---|---|---|
+| GM12878 | 0.225 / 0.215 / **0.205** | 0.44 / 0.46 / **0.49** | 0.43 | +0.28 / +0.31 |
+| K562 | 0.168 / 0.167 / **0.153** | 0.50 / 0.51 / **0.53** | 0.50 | +0.33 / +0.36 |
+| HepG2 | 0.227 / 0.228 / **0.195** | 0.58 / 0.59 / **0.63** | 0.53 | +0.44 / +0.46 |
+| H1 | 0.271 / 0.261 / **0.241** | 0.40 / 0.42 / **0.46** | 0.39 | +0.29 / +0.32 |
+| Panc1 | 0.207 / 0.212 / **0.174** | 0.40 / 0.36 / 0.44 | **0.48** | +0.22 / +0.17 |
+| H9 *(held out)* | 0.186 / **0.183** / – | 0.38 / 0.38 / – | **0.46** | +0.19 / +0.21 |
+| HCT116 *(held out)* | 0.178 / 0.184 / – | 0.47 / 0.46 / – | **0.55** | +0.28 / +0.29 |
+| MCF-7 *(held out)* | **0.166** / 0.169 / – | 0.45 / 0.45 / – | 0.50 | +0.28 / +0.30 |
+
+In the leave-Panc1-out column, Panc1 is a cell type the model never saw. MSE baselines: GM12878 0.285, K562 0.212,
+HepG2 0.253, H1 0.305, Panc1 0.224, H9 0.198, HCT116 0.172, MCF-7 0.188.
+
+### Pearson r per assay: DEV5 / leave-Panc1-out / specialist
+
+| Cell type | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K4me1 | H3K36me3 | H3K9me3 | CTCF |
+|---|---|---|---|---|---|---|---|---|
+| GM12878 | .75/.76/.78 | .42/.45/.48 | .57/.58/.61 | .32/.31/.33 | .58/.59/.62 | .44/.47/.51 | .21/.25/.27 | .26/.25/.32 |
+| K562 | .71/.72/.73 | .55/.56/.60 | .49/.50/.52 | .58/.57/.62 | .38/.39/.45 | .65/.68/.70 | .31/.34/.32 | .31/.30/.34 |
+| HepG2 | .82/.81/.79 | .42/.44/.50 | .50/.52/.59 | .56/.56/.57 | .69/.70/.73 | .48/.52/.58 | .69/.64/.77 | .50/.50/.50 |
+| H1 | – | .67/.68/.69 | .34/.35/.44 | .31/.32/.36 | .47/.48/.52 | .25/.26/.26 | .30/.34/.38 | .49/.51/.57 |
+| Panc1 | .62/.60/.67 | .56/.53/.63 | .47/.46/.48 | .27/.16/.30 | .37/.36/.39 | .11/.11/.23 | .36/.25/.41 | .42/.41/.43 |
+| H9 | – | .58/.59/– | .35/.36/– | .34/.41/– | .48/.49/– | .16/.15/– | .30/.30/– | .40/.37/– |
+| HCT116 | .74/.74/– | .59/.58/– | .56/.57/– | .25/.20/– | .55/.58/– | .16/.18/– | .64/.56/– | .30/.27/– |
+| MCF-7 | .73/.73/– | .61/.60/– | .41/.41/– | .27/.23/– | .59/.60/– | .36/.35/– | .30/.32/– | .35/.36/– |
+
+- **Training on Panc1 buys nothing.** Without it the other 4 dev cell types gain slightly (Pearson +0.01–0.02,
+  cell-type r +0.02–0.03) and the held-out three are unchanged (±0.01; per assay both ways, e.g. H9 H3K27me3
+  +0.07, HCT116 H3K9me3 −0.08).
+- **Panc1 is hard even for a model trained only on it:** the specialist reaches 0.44, still below the cross-cell
+  average (0.48), the only cell type where that happens. Unseen, the model gets 0.36. This fits fibers and
+  tracks that don't come from the same cells.
+- **Specialists beat DEV5 on every dev cell type** (Pearson +0.03–0.06, MSE −0.015 to −0.04), most on H3K36me3,
+  H3K4me1 and H3K27ac (H1); ATAC barely moves. Part of this is budget: with the same 75k samples a specialist sees
+  ~5× more of its own cell type. They are the "told the cell type" reference for the unseen-pair test.
+
+**Decision (4 Nov): split v2.** Panc1 moves to the held-out set as a hard cell type, reported separately from the
+other three (we decide later whether to show it at all): 4 dev (GM12878, K562, HepG2, H1), 4 held out (H9,
+HCT116, MCF-7, Panc1). The leave-Panc1-out model is the 4-dev model (**DEV4**) and replaces DEV5 as the main
+model; its numbers above already use the v2 baselines. Rationale in `configs/README.md`.
+
+**Sources:** logs `logs/2026-11-03_{01..14}_*` on nibi; results `results/26-11-03_T16-1*_eval_{LOO_Panc1,SPEC}_V1_*`;
+table script `ignore/reports/nov13_compare.py`; sample checks in `DATA_FIBER/qc/`.
+
+## 3. Mixture test on two pairs (T3 repeated on K562–H1)
+
+> **Hypotheses:** (i) a model trained only on mixtures of two cell types' fibers separates the two cell types' own
+> molecules as well as a model trained on their own tracks (October's T3 result, now on a second pair); (ii) on a
+> pair it never saw, the mixture model does as well as an own-track model (T3b).
+>
+> **Outcome:** (i) yes on both pairs (fiber-origin AUC 0.637 vs 0.635, and 0.666 vs 0.665). (ii) yes, supervision
+> type makes no difference on an unseen pair; what matters is having seen the cell types. Transfer is lopsided:
+> poor toward K562–H1 (sign accuracy 0.59 vs 0.80–0.83). Library effects are small (|AUC − 0.5| 0.04–0.09 vs
+> 0.17–0.25 for real pairs).
+
+October's mixture test (T3) used one pair. With split v2 there are two pairs of dev cell types, **A = GM12878 +
+HepG2** and **B = K562 + H1**. Four models were trained on them, all with the same `model15` / `train04` setup
+as DEV4 (~2 h 15 min each on nibi):
+
+- **Mix A / Mix B** (`data27` / `data35`): trained only on synthetic mixtures of the pair's fibers. The cell
+  fraction q is drawn from [0.2, 0.8], and the target is the q-weighted fold-change mixture of the two tracks.
+  These models never see a cell type's own track. H1 has no ATAC, so Mix B never trains ATAC (a mixture's assay
+  mask is the product over its cells).
+- **Pair A / Pair B** (`data28` / `data34`): the same cells, but each fiber is supervised by its own cell type's
+  track. This is the ceiling for that pair.
+- **DEV4** (`data24`): all 4 dev cell types, own tracks.
+
+Every model is tested on both pairs: its own pair, and the pair it never saw. The readouts come from the paired
+evaluation on chr21, at the pair's differential bins. These are 1 kb bins where the two tracks differ by
+|asinh Δ| ≥ 0.5 (`loci_spec.yaml` pairs):
+
+- **Fiber-origin AUC:** in each tile, how well a fiber's prediction tells which cell type it came from, oriented by
+  the sign of the tracks' difference (0.5 = chance).
+- **Sign accuracy:** the fraction of differential bins where the predicted difference between the two cell types
+  has the same sign as the tracks' difference.
+- **Differential r:** bp-level correlation between the predicted and the true difference (p_A − p_B vs t_A − t_B).
+
+All numbers below and in the figures come from one script, `plots_code/26_nov_13/mix_two_pairs.py`. It also
+writes every value per assay to `plots/26_nov_13/mix/mix_results.csv`.
+
+### Overview
+
+![Mean over assays, both pairs](../plots/26_nov_13/mix/mix_summary.png)
+
+| Model | GM12878–HepG2 (8 assays) | K562–H1 (7 assays, no ATAC) |
+|---|---|---|
+| Mix A (GM12878 + HepG2 mixtures) | **0.637** / 0.761 / 0.329 *(own pair)* | 0.599 / 0.590 / 0.238 *(unseen)* |
+| Pair A (GM12878, HepG2 own tracks) | 0.635 / **0.771** / **0.351** *(own pair)* | 0.600 / 0.598 / 0.224 *(unseen)* |
+| Mix B (K562 + H1 mixtures) | 0.621 / 0.706 / 0.263 *(unseen)* | **0.666** / 0.802 / 0.291 *(own pair)* |
+| Pair B (K562, H1 own tracks) | 0.617 / 0.719 / 0.270 *(unseen)* | 0.665 / **0.828** / **0.335** *(own pair)* |
+| DEV4 (all 4 own tracks) | 0.629 / 0.748 / 0.316 | 0.654 / 0.793 / 0.294 |
+
+Each cell gives the fiber-origin AUC / sign accuracy / differential r, as means over the pair's assays.
+
+### Per assay
+
+![Fiber-origin AUC per assay](../plots/26_nov_13/mix/mix_per_assay_auc.png)
+
+| Model | ATAC | H3K4me3 | H3K27ac | CTCF | H3K4me1 | H3K36me3 | H3K27me3 | H3K9me3 |
+|---|---|---|---|---|---|---|---|---|
+| **GM12878–HepG2** | | | | | | | | |
+| Mix A | .713 | .687 | .688 | .643 | .685 | .550 | .644 | .483 |
+| Pair A | .705 | .677 | .676 | .642 | .683 | .542 | .653 | .499 |
+| Mix B | .705 | .737 | .673 | .659 | .671 | .485 | .575 | .462 |
+| Pair B | .710 | .735 | .660 | .623 | .650 | .514 | .575 | .468 |
+| DEV4 | .713 | .707 | .674 | .652 | .674 | .525 | .623 | .464 |
+| *bins (% higher in GM12878)* | 775 (47%) | 355 (36%) | 702 (60%) | 388 (32%) | 1472 (33%) | 592 (72%) | 605 (40%) | 2952 (13%) |
+| **K562–H1** | | | | | | | | |
+| Mix A | – | .670 | .564 | .458 | .724 | .476 | .796 | .505 |
+| Pair A | – | .664 | .587 | .468 | .724 | .468 | .788 | .496 |
+| Mix B | – | .742 | .653 | .469 | .711 | .687 | .786 | .615 |
+| Pair B | – | .727 | .678 | .472 | .677 | .687 | .771 | .643 |
+| DEV4 | – | .698 | .641 | .479 | .715 | .638 | .790 | .614 |
+| *bins (% higher in K562)* | – | 408 (43%) | 509 (58%) | 428 (82%) | 1118 (29%) | 670 (79%) | 925 (78%) | 839 (14%) |
+
+Differential r per assay is in [this figure](../plots/26_nov_13/mix/mix_per_assay_diff_r.png) and in the CSV. It
+ranks the models the same way the AUC does.
+
+**Predicted vs true difference per bin.** In each scatter, the top row is the mixture model trained on that pair
+and the bottom row is the one trained on the other pair:
+
+![K562–H1 bin scatter](../plots/26_nov_13/mix/mix_bin_scatter_K562_H1.png)
+
+![GM12878–HepG2 bin scatter](../plots/26_nov_13/mix/mix_bin_scatter_GM12878_HepG2.png)
+
+### Library control
+
+The library control compares two Fiber-seq libraries of the **same** cell type (100U vs 200U), scored at the real
+pairs' bins. Any separation there comes from the library, not the cell type.
+
+![Library control](../plots/26_nov_13/mix/mix_library_control.png)
+
+Mean |AUC − 0.5| over tiles and assays:
+
+| Model | HepG2 100U vs 200U | K562 100U vs 200U | H1 100U vs 200U | GM12878–HepG2 | K562–H1 |
+|---|---|---|---|---|---|
+| Mix A | .049 | .089 | .044 | .182 | .245 |
+| Pair A | .049 | .090 | .045 | .182 | .246 |
+| Mix B | .051 | .075 | .042 | .192 | .232 |
+| Pair B | .053 | .083 | .045 | .172 | .221 |
+| DEV4 | .051 | .076 | .041 | .184 | .221 |
+
+### Own-track recovery and validation
+
+Recovery r is the Pearson r of each cell type's fibers against its own track, from the same paired evals, averaged
+over the pair's assays (so no ATAC on K562–H1). Validation r is taken at the last epoch. Mixture composite r is the
+final mini eval on mixtures (`eval26` / `eval30`).
+
+| Model | Recovery r, GM12878–HepG2 | Recovery r, K562–H1 | Val r | Mixture composite r |
+|---|---|---|---|---|
+| Mix A | GM12878 .466, HepG2 .615 *(own)* | K562 .446, H1 .369 *(unseen)* | .612 | .608 |
+| Pair A | GM12878 .469, HepG2 .610 *(own)* | K562 .438, H1 .370 *(unseen)* | .566 | – |
+| Mix B | GM12878 .392, HepG2 .513 *(unseen)* | K562 .478, H1 .441 *(own)* | .559 | .518 |
+| Pair B | GM12878 .398, HepG2 .554 *(unseen)* | K562 .493, H1 .438 *(own)* | .530 | – |
+| DEV4 | GM12878 .458, HepG2 .586 | K562 .478, H1 .419 | – | – |
+
+Mixture models validate on mixtures and pair models on own tracks, so their validation r values don't compare
+directly.
+
+### Findings
+
+- **Mixture-only supervision reaches the ceiling on both pairs.**
+  - On its own pair, each mixture model's fiber-origin AUC matches the own-track model's: Mix A 0.637 vs Pair A
+    0.635, and Mix B 0.666 vs Pair B 0.665.
+  - Sign accuracy and differential r are slightly lower (−0.01 to −0.04).
+  - Recovery of each cell type's own track is the same within 0.015.
+  - This repeats October's T3 result on a second, harder pair.
+- **On an unseen pair, the type of supervision makes no difference.** Mix A ≈ Pair A on K562–H1, and Mix B ≈ Pair B
+  on GM12878–HepG2, on every readout. The loss comes from never having seen the cell types.
+- **The differential readouts transfer lopsidedly.**
+  - K562 + H1 → GM12878–HepG2 loses little: AUC 0.62 vs 0.64 for models that saw the pair.
+  - GM12878 + HepG2 → K562–H1 loses a lot: AUC 0.60 vs 0.67, and sign accuracy 0.59, close to chance.
+  - The K562–H1 loss is in H3K36me3 (0.47 vs 0.69), H3K9me3 (0.50 vs 0.62–0.64) and H3K27ac (0.56–0.59 vs
+    0.65–0.68).
+  - H3K27me3 and H3K4me1 transfer fully (~0.79, ~0.72).
+  - The scatter shows the H3K36me3 failure is a shift, not noise. 79% of those bins are higher in K562, yet the
+    models trained on GM12878 + HepG2 predict H1 higher at most of them.
+  - Recovery of each cell type's own track drops in both directions (−0.05 to −0.10), so the lopsidedness concerns
+    the *difference* between the two cell types, not the per-cell tracks.
+- **DEV4 sits just below each pair's own models.** Its AUC is 0.629 vs 0.635–0.637 on GM12878–HepG2, and 0.654 vs
+  0.665–0.666 on K562–H1. This matches the specialists beating the multi-cell model (Panc1 section).
+- **Some assays fail for every model, including those trained on the pair:**
+  - **CTCF on K562–H1** (AUC 0.46–0.48, sign accuracy ~0.4). This has two causes: H1's weak CTCF track, plus a
+    constant shift toward H1 in every model. See the next subsection.
+  - **H3K9me3 on GM12878–HepG2** (AUC 0.46–0.50). 87% of its 2,952 bins are higher in HepG2, and all models
+    predict almost no difference for either group (flat clouds in the scatter). HepG2's H3K9me3 track is the
+    outlier (MSE 0.645 in the DEV5 table, the highest of any cell type and assay), so this looks like a
+    track-level difference the fibers don't show.
+  - **H3K36me3 on GM12878–HepG2** (0.49–0.55).
+- **ATAC fiber-origin AUC is a weak readout.** Mix B never trained an ATAC output, yet reaches an AUC of 0.705 on
+  GM12878–HepG2, as high as the models that did. Accessibility is in the input, so the two cell types separate on
+  ATAC almost for free. Differential r does show the missing training (.37 vs .57–.61).
+- **Library effects are small next to cell-type effects.** Same-cell-type library pairs give |AUC − 0.5| ≈ 0.04–0.05
+  for HepG2 and H1, and 0.08–0.09 for K562, whose two libraries differ the most. The real pairs give 0.17–0.25,
+  including GM12878–HepG2, which crosses Fiber-seq experiments.
+
+## 4. CTCF on K562–H1: a weak H1 track plus a model shift
+
+> **Hypotheses:** every model fails CTCF on K562–H1 because (a) H1's CTCF ChIP track is weakly enriched, or (b) H1's
+> fibers are more accessible at those sites.
+>
+> **Outcome:** (a) holds, (b) doesn't. On top of that, every model adds a constant shift toward H1 at equal
+> accessibility. The input ablations (section 6) show the shift does not come from the CpG channel.
+
+82% of the 428 CTCF differential bins are higher in K562, yet every model predicts H1 ≥ K562 at most of them. Two
+explanations were tested:
+
+- **(a) Track scale.** H1's CTCF ChIP is less enriched everywhere, so most "differential" bins are shared CTCF sites
+  at a different scale, which fibers cannot show.
+- **(b) Accessibility.** The models' CTCF output follows fiber accessibility, and H1's fibers are more accessible
+  at these sites.
+
+![CTCF offset](../plots/26_nov_13/ctcf/ctcf_offset.png)
+
+**(a) holds: H1's CTCF track is weak, not K562's strong.**
+- At the 219 chr21 sites with CTCF signal in all 4 dev lines, H1 sits below the 4-line mean at 93% of them (median
+  −0.51 asinh). GM12878, K562 and HepG2 sit within ~0.2 of each other (panel a).
+- On chr21, H1's 99.9th percentile is 2.40, against 3.1–3.2 for GM12878, K562 and HepG2, and 3.19 for H9. So this is
+  not stem-cell biology: H9 is the other ESC line.
+- The H1 track comes from an older ENCODE experiment (ENCSR000BNH, no NOT_COMPLIANT audits). MCF-7's
+  (ENCSR000AHD) is just as weak (2.31, panel a), which matters for MCF-7's held-out CTCF numbers.
+- At the K562-higher bins, H1 is the lowest of the 4 dev lines at 65% of them, while K562 is the highest at only
+  57%. Only 41% of them have an H1 peak at all.
+
+**(b) does not hold: K562's fibers are the more accessible ones.**
+- At the K562-higher bins, the fraction of the bin inside an MSP is 0.43 for K562 and 0.35 for H1. H1 is more
+  accessible at only 8% of them.
+- At shared sites the gap is +0.05.
+
+**The models get the accessibility-driven part right but add a constant shift toward H1.**
+
+| | Fit: K562 − H1 vs accessibility difference | Mean K562 − H1 |
+|---|---|---|
+| Tracks | +0.15 + 3.4 · Δaccess | +0.35 |
+| Pair B (trained on K562 + H1) | −0.27 + 1.9 · Δaccess | −0.15 |
+| Mix B (K562 + H1 mixtures) | −0.34 + 2.7 · Δaccess | −0.18 |
+| Pair A / Mix A (never saw them) | −0.39 / −0.41 + 3.5 / 3.2 · Δaccess | −0.18 / −0.22 |
+| DEV4 | −0.31 + 2.6 · Δaccess | −0.15 |
+
+- The predicted difference correlates with the accessibility difference (r 0.60–0.72), with roughly the true slope.
+  Almost the whole error is the intercept: at equal accessibility, every model predicts 0.4–0.55 asinh more CTCF
+  for H1. That holds even for Pair B, which was trained on H1's weak track.
+- It is not a global "H1 looks more open" effect: H1's library has a lower MSP fraction (0.27 vs 0.34) and a lower
+  m6A rate (0.092 vs 0.117) than K562's (`fiber_qc.py`). The big global difference is CpG methylation, 0.27 in H1
+  against 0.085 in K562, so the model could have read that as a cell-level shift.
+- **Tested since (section 6): it is not the CpG channel.** The model trained without CpG keeps the shift (mean
+  K562 − H1 −0.19 vs DEV4 −0.16, true +0.32).
+
+**Consequences:**
+- K562–H1 CTCF bins are a poor test of CTCF: most of them measure H1's ChIP enrichment, not differential binding.
+  The CTCF row of the K562–H1 tables should be read with that in mind.
+- The weak H1 and MCF-7 CTCF tracks also lower those cell types' bulk CTCF numbers.
+
+**Sources:** `plots_code/26_nov_13/ctcf_offset.py`. Fiber part: job `2026-11-07_00_ctcf_offset` (CPU, 2 min).
+Outputs are in `plots/26_nov_13/ctcf/`: per-bin tables and the figure.
+
+## 5. The same breakdown for every assay on both pairs
+
+> **Question:** repeating the CTCF checks for every assay and both pairs, which failures are track-scale problems
+> that fibers cannot show, which are compression, and which are cell-level offsets?
+>
+> **Outcome:** three failure types. Track-scale outliers (H1 CTCF, HepG2 and H1 H3K9me3) fail for every model;
+> unseen cell types get compressed differences; some marks sit above what a line's accessibility implies (H3K27ac,
+> H3K36me3), which training on the pair partly recovers.
+
+The CTCF checks above were repeated for every assay on both pairs, on up to 200 differential bins per assay:
+- each line's track scale at shared sites;
+- the fibers' accessibility difference;
+- each model's mean predicted difference and its slope against accessibility.
+
+The table below covers GM12878–HepG2, where Mix A and Pair A saw the pair and Mix B and Pair B did not.
+
+![Mean predicted vs true difference per assay](../plots/26_nov_13/offsets/pair_offsets.png)
+
+![GM12878–HepG2: predicted difference vs accessibility difference](../plots/26_nov_13/offsets/access_scatter_GM12878__HepG2.png)
+
+| Assay | Shared-site scale GM12878 / HepG2 | True mean | Predicted mean, Mix A / Pair A *(own)* | Mix B / Pair B *(unseen)* | Slope pred/true, Mix A / Mix B |
+|---|---|---|---|---|---|
+| ATAC | +0.02 / −0.01 | −0.02 | −0.11 / −0.15 | −0.11 / −0.16 | 0.77 / 0.34 |
+| H3K4me3 | −0.78 / −0.34 | −0.34 | −0.26 / −0.22 | −0.45 / −0.34 | 0.73 / 1.01 |
+| H3K27ac | +0.44 / +0.28 | **+0.31** | −0.06 / −0.05 | −0.13 / −0.11 | 0.66 / 0.28 |
+| CTCF | +0.19 / +0.20 | −0.27 | −0.21 / −0.22 | −0.19 / −0.14 | 0.56 / 0.48 |
+| H3K4me1 | +0.04 / +0.27 | −0.41 | −0.28 / −0.25 | −0.22 / −0.19 | 0.75 / 0.44 |
+| H3K36me3 | −0.04 / −0.15 | **+0.38** | −0.10 / −0.14 | −0.25 / −0.14 | 0.51 / 0.03 |
+| H3K27me3 | −0.30 / −0.36 | −0.23 | −0.04 / −0.14 | +0.01 / +0.02 | −0.07 / −0.33 |
+| H3K9me3 | −0.35 / **+0.56** | **−1.26** | +0.04 / +0.02 | +0.05 / +0.06 | 0.15 / 0.10 |
+
+Means are of the GM12878 − HepG2 difference over the bins, in asinh units. Bold marks a track outlier or a
+true mean that every model gets wrong.
+
+**GM12878–HepG2:**
+- **ATAC, H3K4me3, CTCF and H3K4me1 work for every model.** The predicted mean has the right sign and is near the
+  true one. The unseen-pair models mainly lose slope (the predictions are compressed): for example ATAC 0.34 vs
+  0.77 and H3K4me1 0.44 vs 0.75 (Mix B vs Mix A).
+- **CTCF has no offset on this pair**, and both lines' CTCF tracks are normal (+0.19 / +0.20). So the K562–H1 CTCF
+  failure is H1's track, not CTCF itself.
+- **H3K9me3 is the same kind of track problem as H1's CTCF, in the other direction.** HepG2's H3K9me3 track is
+  globally strong (+0.56 at shared sites, GM12878 −0.35). The true mean is −1.26, and every model, trained on HepG2
+  or not, predicts ~0. On K562–H1 it repeats: H1's H3K9me3 track is +0.23, K562's −0.40, the true mean is −0.75, and
+  the models predict ~0.
+- **H3K27ac and H3K36me3 flip sign for every model, including those trained on the pair.**
+  - The true difference is GM12878-higher (+0.31, +0.38); the predictions are slightly HepG2-higher.
+  - HepG2's fibers are more accessible at these bins (Δ −0.04; its library is also more digested overall, MSP
+    fraction 0.275 vs 0.244). The predictions follow accessibility, but GM12878's tracks sit above what its
+    accessibility implies.
+  - The models trained on the pair pick up part of that, with a steeper slope (0.66 / 0.51). The unseen models pick
+    up almost none of it (0.28 / 0.03).
+
+**K562–H1, for comparison:**
+- The models that never saw K562 and H1 get H3K27ac and H3K36me3 wrong in sign (−0.50 and −0.34 vs +0.34 and
+  +0.54).
+- They overshoot H3K4me1 (−0.95 vs −0.46) and H3K27me3 (+0.85 vs +0.54).
+- The models that saw them get H3K36me3 right in sign (+0.23 / +0.20) and are close on H3K4me1 and H3K27me3.
+- H3K27ac stays near zero for them too (−0.14 / −0.02).
+
+**Summary of the breakdown.** Three distinct failure types:
+1. **Track-scale outliers that fibers cannot show:** H1 CTCF, HepG2 H3K9me3, H1 H3K9me3. Every model fails, seen or
+   unseen.
+2. **Compression on unseen cell types:** the model separates the bins but with flatter differences.
+3. **Cell-level offsets:** marks where one line's track sits above what its fibers' accessibility implies.
+   Training on the pair recovers part of it (H3K27ac, H3K36me3).
+
+**Sources:** `plots_code/26_nov_13/pair_offsets.py`, run as job `2026-11-07_01_pair_offsets` (CPU, 3 min); the
+crashed print step was redone with `--replot`. Outputs, including the K562–H1 scatter, are in
+`plots/26_nov_13/offsets/`. The intercept difference against accessibility (the `shift` column) is not reported
+here. Where predicted slopes are flatter, it mostly measures compression extrapolated to Δaccess = 0. For CTCF on
+K562–H1 the slopes are close, and the intercept and mean error agree (−0.46 vs −0.51 for Mix B).
+
+**Next (not run yet):**
+- Routed specialists as the "told the cell type" reference on the unseen pair.
+- ~~The CpG-channel ablation for the CTCF shift.~~ Done, section 6: not CpG.
+
+**Sources (mixture test):**
+- Training and eval logs: `logs/2026-11-04_*` on nibi. Paired evals that timed out were rerun as
+  `2026-11-04_{15..18}_eval_*_rerun`.
+- Results: `results/26-11-04_*_eval_{MIX_V1,PAIR_V1,LOO_Panc1_V1}_*`, i.e. `<config>_paired.npz` and
+  `eval_summary.json`.
+- Figures, tables and CSV: `plots_code/26_nov_13/mix_two_pairs.py`, which writes to `plots/26_nov_13/mix/`.
+
+## 6. Input ablations (T10): no CpG, no FIRE, no accessibility
+
+Three retrains of DEV4 with the same data (`data24`, 4 dev cell types), architecture (`model15`) and budget
+(`train04`). Each drops input channels (`input_flags` order: m6A, CpG, MSP, nucleosome, FIRE):
+
+| Model | Config | Inputs kept | Flags | Training |
+|---|---|---|---|---|
+| DEV4 | `model15_uct_mid_8A` | all | [1, 1, 1, 1, 1] | (section 2) |
+| **no CpG** | `model19_uct_mid_8A_no_cpg` | m6A, MSP, nucleosome, FIRE + DNA | [1, 0, 1, 1, 1] | `2026-11-07_02_train_abl_nocpg`, ~2 h 10 min |
+| **no FIRE** | `model16_uct_mid_8A_no_fire_msp` | m6A, CpG, MSP, nucleosome + DNA | [1, 1, 1, 1, 0] | `2026-11-07_03_train_abl_nofire`, ~2 h 15 min |
+| **no accessibility** | `model20_uct_mid_8A_cpg_only` | CpG + DNA only | [0, 1, 0, 0, 0] | `2026-11-07_04_train_abl_noacc`, ~2 h 15 min |
+
+Each was evaluated like DEV4: chr21, every dev and held-out cell type (bulk), plus the two paired evals (`eval24`
+GM12878–HepG2, `eval27` K562–H1).
+
+**Hypotheses (fixed in `TODO.md` §2b–2d before the runs):**
+- **H-A (no FIRE):** dropping FIRE costs little. FIRE's classifier was trained on GM12878 with DNase **and CTCF
+  ChIP** peaks as positives, so the channel carries bulk-assay knowledge and is derived from the m6A we already
+  input. If it costs little, the no-FIRE model becomes the main one (a cleaner claim). A large drop means a
+  shortcut; check CTCF and GM12878 first.
+- **H-B (no CpG):** H3K4me3, H3K36me3, H3K9me3 and CTCF lose more than ATAC, H3K27ac and H3K4me1 (CFP1 at
+  unmethylated CGIs, DNMT3B recruited by H3K36me3, methylation at H3K9me3 repeats, methylation blocking CTCF).
+- **H-C (no CpG):** if the H1 CTCF shift (section 4) comes from H1's high global CpG methylation, it disappears.
+- **H-D (no accessibility):** no direction fixed; how much of each assay is left from CpG and sequence alone.
+
+### Bulk: Pearson r on chr21
+
+![Bulk Pearson r per assay, DEV4 and the three ablations](../plots/26_nov_13/ablations/ablation_bulk.png)
+
+Mean over the group's cell types. Dev = GM12878, K562, HepG2, H1 (ATAC: 3, H1 has none); held out = H9, HCT116,
+MCF-7 (ATAC: 2); Panc1 separately. Δ = ablation − DEV4.
+
+| Assay | DEV4, dev | Δ no CpG | Δ no FIRE | Δ no acc. | DEV4, held out | Δ no CpG | Δ no FIRE | Δ no acc. | Δ Panc1 (no CpG / no FIRE / no acc.) |
+|---|---|---|---|---|---|---|---|---|---|
+| ATAC | 0.764 | −0.014 | +0.004 | **−0.140** | 0.736 | −0.012 | +0.009 | **−0.197** | +0.011 / −0.005 / −0.087 |
+| H3K4me3 | 0.532 | −0.047 | +0.006 | −0.043 | 0.589 | −0.033 | +0.012 | −0.015 | −0.074 / −0.006 / 0.000 |
+| H3K27ac | 0.490 | −0.037 | +0.016 | −0.088 | 0.447 | −0.031 | +0.003 | −0.067 | −0.024 / +0.007 / −0.089 |
+| H3K4me1 | 0.538 | −0.025 | +0.030 | **−0.134** | 0.552 | −0.024 | +0.033 | **−0.183** | −0.011 / +0.002 / −0.059 |
+| CTCF | 0.391 | −0.009 | +0.009 | −0.085 | 0.334 | +0.005 | +0.014 | **−0.139** | −0.009 / +0.006 / −0.082 |
+| H3K36me3 | 0.481 | **−0.250** | +0.009 | −0.013 | 0.228 | −0.051 | +0.014 | +0.006 | −0.059 / +0.021 / −0.036 |
+| H3K27me3 | 0.443 | **−0.090** | +0.009 | −0.032 | 0.279 | −0.031 | +0.030 | +0.011 | −0.065 / +0.113 / −0.004 |
+| H3K9me3 | 0.393 | −0.012 | −0.003 | −0.087 | 0.396 | −0.033 | +0.002 | −0.054 | −0.003 / +0.035 / −0.023 |
+| *Mean* | *0.504* | *−0.060* | *+0.010* | *−0.078* | *0.445* | *−0.026* | *+0.015* | *−0.080* | |
+
+H3K36me3 and H3K27me3 per cell type (Pearson r, DEV4 / no CpG / no FIRE / no accessibility):
+
+| Cell type | H3K36me3 | H3K27me3 |
+|---|---|---|
+| GM12878 | .47 / **.19** / .48 / .46 | .31 / .26 / .35 / .29 |
+| K562 | .68 / **.23** / .70 / .67 | .57 / .45 / .60 / .54 |
+| HepG2 | .52 / **.28** / .52 / .51 | .56 / .45 / .57 / .53 |
+| H1 | .26 / .23 / .26 / .23 | .32 / .26 / .29 / .28 |
+| H9 *(held out)* | .15 / .14 / .16 / .13 | .41 / .38 / .37 / .40 |
+| HCT116 *(held out)* | .18 / .20 / .19 / .19 | .20 / .20 / .25 / .20 |
+| MCF-7 *(held out)* | .35 / **.19** / .38 / .38 | .23 / .16 / .31 / .27 |
+| Panc1 *(held out)* | .11 / .05 / .13 / .07 | .16 / .09 / .27 / .15 |
+
+H-B as stated, per cell type: mean Δr of the CpG-linked assays (H3K4me3, H3K36me3, H3K9me3, CTCF) minus that of
+the accessibility-linked ones (ATAC, H3K27ac, H3K4me1), no-CpG model:
+
+| | GM12878 | K562 | HepG2 | H1 | H9 | HCT116 | MCF-7 | Panc1 |
+|---|---|---|---|---|---|---|---|---|
+| CpG-linked | −0.075 | −0.129 | −0.089 | −0.026 | −0.007 | −0.025 | −0.051 | −0.036 |
+| Accessibility-linked | −0.027 | −0.033 | −0.025 | −0.018 | −0.015 | −0.029 | −0.024 | −0.008 |
+| Difference | **−0.048** | **−0.096** | **−0.064** | −0.008 | +0.008 | +0.004 | −0.027 | −0.028 |
+
+### Pair differential bins
+
+The section 5 breakdown, repeated for the ablations on the same 200 differential bins per assay and pair.
+
+![Mean true vs predicted difference per assay, DEV4 and the ablations](../plots/26_nov_13/ablations/ablation_offsets.png)
+
+Mean difference (A − B, asinh) over the bins:
+
+| Pair | Assay | True | DEV4 | No CpG | No FIRE | No acc. |
+|---|---|---|---|---|---|---|
+| GM12878–HepG2 | ATAC | −0.02 | −0.13 | −0.15 | −0.14 | −0.17 |
+| | H3K4me3 | −0.34 | −0.36 | −0.35 | −0.29 | −0.25 |
+| | H3K27ac | +0.31 | −0.12 | −0.08 | −0.08 | −0.13 |
+| | H3K4me1 | −0.41 | −0.22 | −0.21 | −0.21 | −0.14 |
+| | CTCF | −0.27 | −0.19 | −0.21 | −0.19 | −0.13 |
+| | H3K36me3 | +0.38 | −0.11 | −0.00 | −0.15 | −0.08 |
+| | H3K27me3 | −0.23 | −0.01 | −0.07 | −0.06 | −0.05 |
+| | H3K9me3 | −1.26 | +0.05 | +0.04 | +0.04 | −0.00 |
+| K562–H1 | H3K4me3 | −0.55 | −0.58 | −0.61 | −0.53 | −0.33 |
+| | H3K27ac | +0.34 | −0.17 | −0.15 | −0.12 | −0.14 |
+| | H3K4me1 | −0.46 | −0.49 | −0.42 | −0.51 | −0.22 |
+| | **CTCF** | **+0.32** | **−0.16** | **−0.19** | **−0.19** | **−0.10** |
+| | H3K36me3 | +0.54 | +0.06 | −0.01 | −0.00 | −0.13 |
+| | H3K27me3 | +0.54 | +0.45 | **+0.12** | +0.65 | +0.46 |
+| | H3K9me3 | −0.75 | −0.09 | −0.10 | −0.10 | −0.02 |
+
+Correlation of predicted and true difference over the bins (r):
+
+| Pair, model | ATAC | H3K4me3 | H3K27ac | H3K4me1 | CTCF | H3K36me3 | H3K27me3 | H3K9me3 |
+|---|---|---|---|---|---|---|---|---|
+| **GM12878–HepG2**, DEV4 | .90 | .83 | .89 | .82 | .71 | .62 | .63 | .28 |
+| no CpG | .89 | .79 | .87 | .81 | .72 | **.24** | **.20** | .51 |
+| no FIRE | .89 | .86 | .90 | .83 | .72 | .64 | .68 | .27 |
+| no accessibility | .71 | .73 | .70 | .66 | .57 | .64 | .71 | −.37 |
+| **K562–H1**, DEV4 | – | .84 | .78 | .77 | .63 | .83 | .64 | .33 |
+| no CpG | – | .81 | .78 | .79 | .54 | **.28** | **.25** | .42 |
+| no FIRE | – | .84 | .79 | .80 | .60 | .82 | .69 | .36 |
+| no accessibility | – | .76 | .54 | .55 | .37 | .85 | .53 | .06 |
+
+Slopes against the accessibility difference (predicted / true, full table in `offsets.tsv`): the no-accessibility
+model compresses every accessibility-linked assay (GM12878–HepG2 ATAC 0.72 → 0.31, H3K4me1 0.55 → 0.17; K562–H1
+H3K4me1 0.80 → 0.32). Without CpG, K562–H1 H3K36me3 drops from 0.51 to 0.07.
+
+### Outcomes
+
+- **H-A confirmed.** No FIRE is level with or slightly better than DEV4 on almost every assay and cell type (mean
+  +0.010 dev, +0.015 held out; Panc1 H3K27me3 +0.11), and its pair readouts are the same or better. Single seed, so
+  the small gains are within seed noise; the conclusion "FIRE is not needed" doesn't depend on them. Section 7
+  shows what changes at the molecule level.
+- **H-B partly confirmed.**
+  - **H3K36me3** loses by far the most (−0.25 dev; −0.46 in K562), and its differential prediction collapses on
+    both pairs (r 0.83 → 0.28 on K562–H1). The no-accessibility model keeps H3K36me3 almost intact (K562 0.67), so
+    H3K36me3 is read almost entirely from CpG, consistent with gene-body methylation following H3K36me3 (DNMT3B).
+  - **H3K4me3** loses moderately (−0.047), more than the accessibility-linked marks (−0.014 to −0.037).
+  - **CTCF and H3K9me3 barely move** (−0.009, −0.012): this part of H-B fails.
+  - **Not predicted: H3K27me3** loses −0.09, and its differential prediction collapses too (r 0.64 → 0.25 on
+    K562–H1, mean +0.45 → +0.12).
+  - The CpG-linked excess loss shows in GM12878, K562 and HepG2 (−0.05 to −0.10), not in the two ESC lines or
+    HCT116. In H1 / H9 / HCT116, DEV4's H3K36me3 is already poor (r 0.15–0.26), so there is little for CpG to add.
+- **H-C rejected.** Without CpG the K562–H1 CTCF mean stays wrong (−0.19 vs DEV4 −0.16, true +0.32). Without
+  accessibility it shrinks to −0.10, but that model's differences are compressed overall. The shift is not a
+  CpG-methylation effect; the weak H1 CTCF track (section 4) remains the main explanation.
+- **H-D:** CpG + DNA alone keep H3K4me3 (−0.04 dev), H3K36me3 and H3K27me3 (−0.01 to −0.03), but lose ATAC,
+  H3K4me1 (−0.13 to −0.20), H3K27ac and CTCF (−0.07 to −0.14), and H3K9me3 (−0.05 to −0.09). Accessibility carries
+  the enhancer-type marks and CTCF; CpG carries the gene-body and Polycomb marks; H3K4me3 is carried by both.
+
+**Sources:** training logs `logs/2026-11-07_0{2,3,4}_train_abl_*`; evals `logs/2026-11-08_0{0..8}_eval_abl_*`
+(single-cell sets a and b ~21–24 min, pairs ~58–61 min); results `results/*_eval_ABL_V1_*` on nibi. Tables and
+figures: `plots_code/26_nov_13/ablations.py` (model names in `abl_common.py`), outputs in
+`plots/26_nov_13/ablations/` (`bulk_r.tsv`, `bulk_groups.tsv`, `offsets.tsv`, `log_ablations.txt`).
+
+## 7. CTCF footprints on single molecules (T5e)
+
+> **Question:** the model was trained on bulk CTCF ChIP only; per-molecule binding was never a label. Does a
+> fiber's predicted CTCF follow whether CTCF is bound **on that molecule**, read from the CTCF footprint in its m6A
+> pattern?
+
+**Targets** (`data_prep/build_targets.py`, `ctcf_sites_chr21.bed`, chr21 only):
+- CTCF motif hits from JASPAR MA0139.2 (15 bp) at p ≤ 1e-5 (score ≥ 13.44 bits, exact threshold from the PWM's
+  score distribution).
+- **Bound:** the best hit inside each ENCODE CTCF peak of a dev line, merged across lines (330 sites). Per line, a
+  site is *bound* if that line has a peak there, and *bound_other_line* if only another dev line does.
+- **Unbound:** motif hits more than 500 bp from every dev line's peak, sampled to match the bound sites' motif score
+  in 1-bit bins (272; the highest-score bins have too few unbound hits).
+- Per line: GM12878 184 bound / 146 other line / 268 unbound; K562 252 / 78 / 265.
+
+**Per-fiber state at the motif** (fixed before looking at results):
+- *nucleosome:* ≥ 50% of the motif covered by a nucleosome call;
+- *footprint:* ≥ 50% inside an MSP **and** the motif's m6A rate ≤ 0.5 × the mean rate of the 100 bp flanks
+  (protected);
+- *open:* inside an MSP, not protected;
+- *other:* anything else (read ends, < 4 A/T positions in the motif, no flank m6A calls).
+
+**Hypotheses (fixed in advance, in the script header):**
+- **H1 (main):** at bound sites, footprint fibers get higher predicted CTCF than open fibers at the same site
+  (per-site difference, Wilcoxon signed-rank over sites with ≥ 3 fibers in both states).
+- **H2 (specificity):** that difference is larger for CTCF than for ATAC (both states are accessible).
+- **H3:** nucleosome-covered fibers get the lowest predicted CTCF.
+- **H4 (data, no model):** footprints are more frequent among accessible fibers at bound than at unbound sites.
+- **H5 (null):** unbound sites get lower predicted CTCF than bound sites of the same motif score.
+
+Caveat: the model sees m6A (so the footprint) and the reference sequence (so the motif, in both sets). The test is
+whether bulk supervision taught it that a protected motif on an accessible molecule means CTCF. The
+no-accessibility model sees neither m6A nor MSPs, so it is a built-in null.
+
+### Data check (H4)
+
+Fiber states, measured input (the same for every model):
+
+| Sample | Site set | Sites | Fibers | Nucleosome | Open | Footprint | Other | Footprint / accessible |
+|---|---|---|---|---|---|---|---|---|
+| GM12878 | bound | 184 | 21,964 | .36 | .29 | .22 | .12 | **.43** |
+| | bound, other line | 146 | 18,033 | .67 | .24 | .04 | .05 | .13 |
+| | unbound | 268 | 30,482 | .66 | .28 | .04 | .02 | .12 |
+| K562 | bound | 252 | 22,742 | .34 | .31 | .21 | .14 | **.41** |
+| | bound, other line | 78 | 6,878 | .54 | .36 | .05 | .06 | .12 |
+| | unbound | 265 | 21,892 | .52 | .39 | .06 | .03 | .13 |
+
+**H4 holds:** 41–43% of accessible fibers carry the footprint at bound sites, against 12–13% at unbound and
+other-line sites (the background rate of our simple call). The literature value is ~30% in K562 (Stergachis 2020),
+with a different footprint caller.
+
+### Model results
+
+![CTCF footprints, DEV4](../plots/26_nov_13/molecules/ctcf_footprints_DEV4.png)
+
+![CTCF footprints, no FIRE](../plots/26_nov_13/molecules/ctcf_footprints_noFIRE.png)
+
+Each figure, per sample: fiber states by site set; per-fiber predicted CTCF by state at bound sites; the per-site
+footprint − open difference for CTCF and ATAC; site mean predicted CTCF against the line's CTCF peak signal. The
+no-CpG and no-accessibility figures are `ctcf_footprints_noCpG.png` / `_noAcc.png` in the same folder.
+
+At bound sites (per-site medians; n = 135 GM12878 / 184 K562 sites with both states):
+
+| Model | Sample | Footprint − open, CTCF (fraction of sites > 0, p) | Footprint − open, ATAC | Footprint − open, H3K4me3 | CTCF − ATAC (p) | Open − nucleosome, CTCF |
+|---|---|---|---|---|---|---|
+| DEV4 | GM12878 | +0.11 (0.64, 7e-5) | +0.09 | −0.10 | +0.02 (0.05) | +1.01 |
+| | K562 | +0.04 (0.56, 0.05) | +0.02 | −0.09 | +0.05 (9e-8) | +0.71 |
+| No CpG | GM12878 | +0.18 (0.70, 9e-8) | +0.27 | +0.09 | −0.12 (2e-13) | +1.00 |
+| | K562 | +0.10 (0.59, 0.003) | +0.11 | +0.02 | −0.02 (0.007) | +0.64 |
+| **No FIRE** | GM12878 | **+1.14 (0.94, 6e-23)** | +0.41 | −0.08 | **+0.67 (7e-24)** | +1.11 |
+| | K562 | **+0.84 (0.83, 3e-25)** | +0.30 | −0.07 | **+0.54 (2e-31)** | +0.83 |
+| No accessibility | GM12878 | 0.00 (0.52, 0.39) | 0.00 | +0.01 | 0.00 (0.90) | −0.01 |
+| | K562 | 0.00 (0.55, 0.04) | +0.01 | 0.00 | 0.00 (0.08) | 0.00 |
+
+Unbound and other-line sites (per-site medians):
+
+| Model | Sample | Unbound: footprint − open, CTCF (p) | Unbound: CTCF − ATAC | Other line: footprint − open, CTCF (n sites, p) |
+|---|---|---|---|---|
+| DEV4 | GM12878 | −0.02 (0.62) | +0.04 | +0.04 (79, 0.002) |
+| | K562 | −0.01 (0.95) | +0.04 | +0.21 (43, 0.001) |
+| No CpG | GM12878 | −0.07 (0.45) | +0.05 | +0.04 (79, 0.009) |
+| | K562 | −0.06 (0.24) | +0.06 | +0.15 (43, 0.01) |
+| No FIRE | GM12878 | −0.05 (0.84) | +0.20 | +0.05 (79, 9e-4) |
+| | K562 | −0.04 (0.60) | +0.27 | +0.42 (43, 8e-5) |
+| No accessibility | both | ≈ 0 | ≈ 0 | ≈ 0 |
+
+Site level (H5): mean predicted CTCF at bound / unbound sites is 1.25 / 0.58 (GM12878) and 1.09 / 0.60 (K562) for
+DEV4, 1.63 / 0.61 and 1.45 / 0.64 without FIRE, and 0.71 / 0.57 and 0.66 / 0.58 without accessibility. Within
+1-bit motif-score bins, bound sites score higher in every bin except the 20-bit bin, which has only 5 unbound sites
+(`ctcf_bound_vs_unbound_by_score_<model>.tsv`). Across bound sites, the site mean follows the line's CTCF peak
+strength (Spearman 0.81 / 0.80 for DEV4, 0.81 / 0.85 without FIRE).
+
+### Outcomes
+
+- **H1 holds for every model that sees m6A**, but weakly in DEV4 (+0.11 GM12878, +0.04 K562, p = 0.05). **Without
+  FIRE the effect is ~10× larger** (+1.14 / +0.84; 94% / 83% of sites in the expected direction).
+- **H2:** weak in DEV4 (CTCF − ATAC +0.02 / +0.05). **Fails without CpG** (−0.12 / −0.02: there, predicted ATAC
+  moves more than CTCF, so its footprint response is accessibility-like). **Strong without FIRE** (+0.67 / +0.54).
+  H3K4me3 goes slightly *down* on footprint fibers in every model with m6A except no CpG, so the response is
+  CTCF-specific, not a general "more signal".
+- **Caveat on H2:** CTCF − ATAC is also positive at unbound sites (+0.20 / +0.27 without FIRE). There, predicted
+  ATAC drops on protected-looking fibers while predicted CTCF doesn't move. At bound sites the no-FIRE CTCF
+  increase itself (+1.14 / +0.84) has no counterpart at unbound sites (−0.05 / −0.04), so the main result stands,
+  but CTCF − ATAC overstates specificity by about 0.2.
+- **H3 holds:** nucleosome-covered fibers are lowest in every model with accessibility (open − nucleosome +0.64 to
+  +1.11).
+- **H5 holds** for every model with accessibility, including at matched motif scores. The no-accessibility model
+  separates bound and unbound sites only slightly (~0.1), from CpG and sequence context.
+- **The no-accessibility null is clean:** every per-fiber difference is 0.00. The test does not pick up something
+  other than m6A.
+- **Other-line sites** (a peak in another dev line only) show a smaller effect, largest in K562 without FIRE (+0.42,
+  43 sites): some of these sites may be weakly bound in K562 below the peak caller's threshold.
+- **Interpretation (not tested):** with the FIRE channel, the model seems to take "this is a CTCF-type element" from
+  FIRE, at the site level, and has little reason to read the m6A pattern inside the MSP. Without FIRE it has to
+  read the m6A pattern, and it learns that a protected motif on an accessible molecule means CTCF, from bulk
+  supervision alone. Together with section 6 (no bulk cost), this makes the no-FIRE model the better main model.
+
+**Sources:** targets `data_prep/build_targets.py` + `targets_spec.yaml` → `DATA_FIBER/regions/targets/`
+(`manifest.json`); per-fiber predictions `molecule_predict.py`, jobs `logs/2026-11-07_05_molecules_ctcf_chr21`,
+`logs/2026-11-08_{09,11,13}_molecules_ctcf_abl_*` (~4.5 min each); analysis
+`plots_code/26_nov_13/ctcf_footprints.py --model <m>` → `plots/26_nov_13/molecules/ctcf_*_<m>.{tsv,png}`.
+
+## 8. X inactivation per haplotype in GM12878 (T5b)
+
+> **Question:** the models were trained on bulk tracks, in which both X copies are mixed, and never saw haplotypes
+> or chrX (training is chr20 only). Do their per-fiber predictions differ between the active (Xa) and the inactive
+> X (Xi) the way X-inactivation biology says?
+
+**Setup:**
+- **Targets** (`tss_chrX_chr21.bed`): TSS ± 500 bp of protein-coding genes plus XIST, on chrX and chr21 (the test
+  chromosome, as autosomal null). Classes: *subject* (X-inactivated, 825), *escape* (14), *PAR* (20, hg38
+  pseudoautosomal coordinates), *xist* (1), *autosomal* (chr21, 220). CpG-island promoters flagged from the UCSC
+  CpG-island track.
+- **The escape list is provisional** (15 well-known escape genes from memory; JPX dropped as non-coding). It still
+  needs checking against Tukiainen et al. 2017.
+- **Haplotypes:** GM12878 is trio-phased (one phase block per chromosome), so HiPhase HP1 / HP2 are whole-chromosome
+  haplotypes. **Xi = the haplotype whose XIST promoter is CpG-unmethylated** (XIST is expressed from the Xi). This is
+  measured input, not a model output: XIST promoter CpG methylation 0.355 on HP1 (58 fibers) vs 0.085 on HP2 (49
+  fibers), so **Xi = HP2**.
+- **Per gene:** d = mean over Xa fibers − mean over Xi fibers, for genes with ≥ 5 fibers on each haplotype. 113,151
+  phased fiber × TSS rows over 1,073 TSSs; genes kept: subject 787 (425 with a CGI promoter), escape + PAR 33,
+  autosomal 211. On chr21, "Xa" / "Xi" are just HP1 / HP2, an arbitrary pairing, so d should be ~0.
+
+**Hypotheses (fixed in advance, in the script header).** Xi promoters are silent, CGI-methylated, depleted of
+active marks and enriched for H3K27me3 / H3K9me3; escape and PAR genes are expressed from both copies.
+- **H1:** subject genes have d > 0 for ATAC, H3K4me3, H3K27ac and d < 0 for H3K27me3, H3K9me3; strongest at CGI
+  promoters.
+- **H2:** escape + PAR genes have smaller |d| than subject genes.
+- **H3 (null):** chr21 genes have d ~ 0.
+- **H4:** XIST is the reverse of H1.
+
+Caveat: the model sees the fibers' CpG methylation and accessibility, which already differ between Xa and Xi. The
+test shows that its predictions follow X-inactivation biology on unseen chromosomes and haplotypes; the ablations
+show which input carries it.
+
+### Data check (inputs)
+
+Median Xa − Xi per gene, measured input:
+
+| Group | Genes | CpG methylation | MSP fraction |
+|---|---|---|---|
+| Subject | 787 | −0.063 | +0.040 |
+| Subject, CGI promoter | 425 | **−0.234** | **+0.082** |
+| Escape + PAR | 33 | 0.000 | −0.002 |
+| Autosomal (chr21) | 211 | −0.004 | −0.001 |
+
+The inputs behave as expected: the Xi's CGI promoters are methylated and less accessible, escape / PAR and chr21
+genes show no difference. The escape inputs also support the provisional escape list in aggregate.
+
+### Model results
+
+![X inactivation per gene, DEV4](../plots/26_nov_13/molecules/xi_promoters_DEV4.png)
+
+Each panel is one predicted assay or input: d per gene by group (box + points), red line at 0. The other models'
+figures are `xi_promoters_{noCpG,noFIRE,noAcc}.png` in the same folder.
+
+Fraction of genes with the expected sign, subject genes / subject genes with a CGI promoter:
+
+| Assay (expected on Xa) | DEV4 | No CpG | No FIRE | No accessibility |
+|---|---|---|---|---|
+| ATAC (higher) | .86 / .91 | .82 / .88 | .83 / .90 | .79 / .88 |
+| H3K4me3 (higher) | .73 / .84 | .75 / .85 | .79 / .87 | .85 / .88 |
+| H3K27ac (higher) | .82 / .84 | .82 / .89 | .87 / .90 | .87 / .90 |
+| H3K9me3 (lower) | .73 / .76 | .80 / .86 | .72 / .71 | **.33 / .21** |
+| H3K27me3 (lower) | **.43 / .26** | **.28 / .22** | .56 / .46 | **.46 / .29** |
+
+Median d at subject CGI promoters:
+
+| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K9me3 |
+|---|---|---|---|---|---|
+| DEV4 | +0.46 | +0.60 | +0.44 | +0.09 | −0.04 |
+| No CpG | +0.41 | +0.47 | +0.47 | +0.04 | −0.08 |
+| No FIRE | +0.53 | +0.62 | +0.53 | +0.01 | −0.02 |
+| No accessibility | +0.58 | +0.82 | +0.60 | +0.11 | +0.02 |
+
+DEV4 Wilcoxon p over subject genes: 1e-100 (ATAC) to 1e-12 (H3K27me3); every assay is significant, including
+H3K27me3 in the wrong direction.
+
+**Nulls:** over all four models, escape + PAR and chr21 medians are within ±0.06 for every assay, and the fraction
+of genes with the expected sign is 0.42–0.61. For DEV4 every null row has Wilcoxon p ≥ 0.06.
+
+**H2 (|d| subject > escape + PAR, Mann–Whitney, DEV4):** significant for ATAC (p 0.016), H3K27me3, H3K4me1,
+H3K36me3, H3K9me3 and CTCF (p ≤ 0.006), not for H3K4me3 (0.25) or H3K27ac (0.27). Same pattern for no CpG and no
+FIRE; all significant without accessibility. The comparison is diluted: many subject genes are probably not
+expressed in GM12878, so they are silent on both copies and have d ≈ 0 (the cloud around 0 in the figure).
+
+**XIST (Xa − Xi):**
+
+| | ATAC | H3K4me3 | H3K27ac | H3K9me3 | CpG methylation (input) | MSP fraction (input) |
+|---|---|---|---|---|---|---|
+| DEV4 | −0.66 | −1.21 | −1.31 | +0.17 | +0.27 | −0.14 |
+| No CpG | −0.60 | −1.18 | −1.16 | +0.11 | | |
+| No FIRE | −0.69 | −1.31 | −1.45 | +0.12 | | |
+| No accessibility | −0.26 | −0.26 | −0.24 | −0.01 | | |
+
+### Outcomes
+
+- **H1 holds for ATAC, H3K4me3, H3K27ac and H3K9me3** in DEV4 (73–86% of subject genes, 76–91% at CGI promoters).
+- **H1 fails for H3K27me3:** the models predict *more* H3K27me3 on the Xa, most clearly at CGI promoters (only 26%
+  of genes in the expected direction for DEV4; 46% without FIRE, i.e. chance). Possible reason: on autosomes,
+  promoter H3K27me3 sits at unmethylated CGIs (Polycomb targets), and the models learned that link. On the Xi,
+  CGIs are methylated and H3K27me3-enriched at the same time, a combination absent from the training chromosome.
+  Also, Xi H3K27me3 is broad and partly in different domains from H3K9me3, so promoter windows may not be the right
+  place to test it.
+- **H2 partly holds** (6 of 8 assays; see the dilution caveat above).
+- **H3 holds:** chr21 and escape / PAR genes show no difference.
+- **H4 holds:** XIST is reversed in every model (DEV4 H3K4me3 −1.21, i.e. higher on the Xi), and its input
+  confirms it (more accessible and unmethylated on the Xi).
+- **What the ablations show:**
+  - **Active marks:** every model passes, so either input alone is enough; the signal is redundant. CpG alone gives
+    the largest differences (H3K4me3 +0.82 at CGIs), in line with the input: the methylation difference at CGI
+    promoters (−0.23) is larger than the accessibility difference (+0.08).
+  - **H3K9me3** comes out right only with accessibility (no CpG 80% / 86%); from CpG alone it reverses (33% / 21%).
+    So the model's Xi H3K9me3 signal is "closed chromatin → H3K9me3", not methylation.
+  - **H3K27me3** is wrong for every model, worst without CpG (22% at CGIs), closest to chance without FIRE.
+
+**Sources:** targets as in section 7 (`tss_chrX_chr21.bed`); per-fiber predictions `molecule_predict.py`, jobs
+`logs/2026-11-07_07_molecules_tss_chrX` (DEV4; job 06 crashed on a column-name bug, fixed in 55c22a8) and
+`logs/2026-11-08_{10,12,14}_molecules_tss_abl_*`; analysis `plots_code/26_nov_13/xi_promoters.py --model <m>` →
+`plots/26_nov_13/molecules/xi_*_<m>.{tsv,png}`.
+
+## Decisions and next steps
+
+- **Make the no-FIRE model the main model** (the decision rule fixed in `TODO.md` §2c): the same bulk accuracy, no
+  bulk-assay knowledge in the input, and a ~10× stronger, CTCF-specific molecule-level CTCF response. Before
+  switching, train a second seed of DEV4 and no FIRE (~2.2 h each on a 2g.20gb slice) to confirm the bulk numbers
+  are level.
+- **X inactivation:** restrict the subject / escape comparison to genes expressed in GM12878 (RNA-seq), check the
+  escape list against Tukiainen 2017, and test H3K27me3 over broader windows (gene bodies, Xi domains) as well as
+  promoters.
+- **Remaining tests from `TODO.md` §2:**
+  - in-silico CpG flips (I21);
+  - held-out methylation with the no-CpG model (T5a): that model now exists, so a molecule's measured methylation is
+    held-out data;
+  - imprinted control regions and allele-specific ChIP;
+  - the search for external single-molecule histone data (§2f).
+- **Bulk:** H3K36me3 is read from CpG, which suggests its weakness in held-out cell types comes from methylation
+  patterns that differ between lines, not from context length alone. Worth keeping in mind for the longer-context
+  runs (`TODO.md` §3).
