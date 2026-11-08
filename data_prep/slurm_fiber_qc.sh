@@ -9,6 +9,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=0-1:00:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=ara199@sfu.ca
 
 # Fiber-seq data QC (data_prep/fiber_qc.py): library stats and agreement with ENCODE for every sample; outputs in
 # DATA_FIBER/qc/. Extra arguments are passed on, e.g. sbatch data_prep/slurm_fiber_qc.sh --samples Panc1_200U.

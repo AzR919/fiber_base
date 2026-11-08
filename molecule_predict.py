@@ -163,8 +163,7 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
     fasta = pysam.FastaFile(m["fasta_path"])
     extra = [c for c in targets.columns if c not in ("chrom", "t_start", "t_end", "target", "t_strand")]
     rows, arrays = [], {}
-    for k, t in enumerate(targets.itertuples(index=False)):
-        t = t._asdict()
+    for k, t in enumerate(targets.to_dict("records")):   # not itertuples: it renames columns like "class"
         chrom, ts, te = t["chrom"], int(t["t_start"]), int(t["t_end"])
         if te - ts + 2 * args.flank > context_length:
             print(f"  skip {t['target']}: target + flanks longer than the window", flush=True)

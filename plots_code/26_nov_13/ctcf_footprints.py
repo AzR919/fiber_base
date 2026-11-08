@@ -32,13 +32,15 @@ Writes plots/26_nov_13/molecules/ctcf_*.tsv and ctcf_footprints.png.
 import argparse
 import glob
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy import stats
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
 
 OUT = "plots/26_nov_13/molecules"
 MIN_AT, MIN_PER_CLASS = 4, 3
@@ -76,7 +78,7 @@ def wilcoxon(x):
     x = x.dropna()
     if len(x) < 5:
         return np.nan
-    return stats.wilcoxon(x).pvalue
+    return wilcoxon_p(x)
 
 
 def main():
@@ -188,7 +190,7 @@ def main():
             g = site[site.site_set == s]
             ax[i, 3].scatter(np.log1p(g.sig), g.pred, s=8, alpha=0.6, color=c, label=s)
         g = site[site.site_set == "bound"]
-        r = stats.spearmanr(g.sig, g.pred).correlation if len(g) > 3 else np.nan
+        r = spearman(g.sig, g.pred) if len(g) > 3 else np.nan
         ax[i, 3].set_xlabel(f"log1p {cell} CTCF peak signalValue")
         ax[i, 3].set_ylabel("site mean pred CTCF")
         ax[i, 3].set_title(f"site level (bound: Spearman {r:.2f})")

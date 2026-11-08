@@ -9,6 +9,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=0-0:30:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=ara199@sfu.ca
 
 # One-off job (Nov 13 report): the K562-H1 CTCF offset. Part 1 (tracks, model predictions) plus part 2 (fiber
 # accessibility of K562_200U / H1_200U at the CTCF differential bins and at constitutive sites). Writes

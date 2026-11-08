@@ -30,13 +30,15 @@ Writes plots/26_nov_13/molecules/xi_*.tsv and xi_promoters.png.
 import argparse
 import glob
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy import stats
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
 
 OUT = "plots/26_nov_13/molecules"
 MIN_FIBERS = 5
@@ -94,13 +96,13 @@ def main():
             rows.append({"group": gname, "column": c, "n_genes": len(v), "median_d": v.median(),
                          "mean_d": v.mean(), "frac_pos": (v > 0).mean(),
                          "frac_expected_sign": ((np.sign(v) == e).mean() if e else np.nan),
-                         "wilcoxon_p": stats.wilcoxon(v).pvalue if len(v) >= 5 else np.nan})
+                         "wilcoxon_p": wilcoxon_p(v)})
     res = pd.DataFrame(rows)
     # H2: |d| subject vs escape+par
     for c in cols:
         s, e = dlt[groups["subject"]][c].abs().dropna(), dlt[groups["escape+par"]][c].abs().dropna()
         if len(s) >= 5 and len(e) >= 5:
-            p = stats.mannwhitneyu(s, e, alternative="greater").pvalue
+            p = mannwhitney_greater_p(s, e)
             res.loc[(res.group == "escape+par") & (res.column == c), "mwu_p_subject_absd_greater"] = p
     res.to_csv(os.path.join(OUT, "xi_summary.tsv"), sep="\t", index=False, float_format="%.4g")
     with pd.option_context("display.width", 250, "display.max_rows", 200):

@@ -9,6 +9,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=0-0:25:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=ara199@sfu.ca
 
 # One-off job (Nov 13 report): the CTCF decomposition (track scale / fiber accessibility / constant model shift) for
 # every assay on both pairs. Writes plots/26_nov_13/offsets/. See plots_code/26_nov_13/pair_offsets.py.
