@@ -24,8 +24,8 @@ Caveat: the model sees the fibers' CpG methylation and accessibility, which alre
 test shows its predictions follow X-inactivation biology on unseen chromosomes; the input ablations (model19 no
 CpG, model20 CpG only, model16 no FIRE) show which input carries it.
 
-    python plots_code/26_nov_13/xi_promoters.py [--dir results/<ts>_molecules_<run>_tss_chrX_chr21]
-Writes plots/26_nov_13/molecules/xi_*.tsv and xi_promoters.png.
+    python plots_code/26_nov_13/xi_promoters.py [--model DEV4|noCpG|noFIRE|noAcc] [--dir DIR]
+Writes plots/26_nov_13/molecules/xi_*_<model>.tsv and xi_promoters_<model>.png.
 """
 import argparse
 import glob
@@ -39,6 +39,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
+from abl_common import MODELS, molecule_dir
 
 OUT = "plots/26_nov_13/molecules"
 MIN_FIBERS = 5
@@ -51,13 +52,15 @@ GROUPS = ["subject", "subject_cgi", "escape+par", "autosomal"]
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--dir", default=None, help="molecule_predict output dir (default: newest *_tss_chrX_chr21)")
+    p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
+    p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_tss_chrX_chr21)")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    d = args.dir or max(glob.glob("results/*_molecules_*_tss_chrX_chr21"), key=os.path.getmtime)
+    d = args.dir or molecule_dir(args.model, "tss_chrX_chr21")
+    tag = args.model
     os.makedirs(OUT, exist_ok=True)
     df = pd.read_csv(os.path.join(d, f"fibers_{SAMPLE}.tsv.gz"), sep="\t")
     df = df[df.hp.isin([1, 2, 1.0, 2.0])].copy()
@@ -80,7 +83,7 @@ def main():
     dlt = dlt.reset_index()
     dlt["n_xa"] = dlt.target.map(n[xa])
     dlt["n_xi"] = dlt.target.map(n[xi])
-    dlt.to_csv(os.path.join(OUT, "xi_per_gene.tsv"), sep="\t", index=False, float_format="%.4g")
+    dlt.to_csv(os.path.join(OUT, f"xi_per_gene_{tag}.tsv"), sep="\t", index=False, float_format="%.4g")
 
     groups = {"subject": dlt["class"] == "subject",
               "subject_cgi": (dlt["class"] == "subject") & (dlt.cgi == 1),
@@ -104,7 +107,7 @@ def main():
         if len(s) >= 5 and len(e) >= 5:
             p = mannwhitney_greater_p(s, e)
             res.loc[(res.group == "escape+par") & (res.column == c), "mwu_p_subject_absd_greater"] = p
-    res.to_csv(os.path.join(OUT, "xi_summary.tsv"), sep="\t", index=False, float_format="%.4g")
+    res.to_csv(os.path.join(OUT, f"xi_summary_{tag}.tsv"), sep="\t", index=False, float_format="%.4g")
     with pd.option_context("display.width", 250, "display.max_rows", 200):
         print(res, flush=True)
     xr = dlt[dlt["class"] == "xist"]
@@ -124,10 +127,10 @@ def main():
         e = EXPECT.get(c.replace("pred_", ""))
         a.set_title(name + (f"  (expected {'+' if e > 0 else '-'} on subject)" if e else ""), fontsize=10)
         a.tick_params(axis="x", labelsize=7)
-    fig.suptitle(f"GM12878 promoters: Xa (HP{xa}) - Xi (HP{xi}) per gene, DEV4 per-fiber predictions", y=1.0)
+    fig.suptitle(f"GM12878 promoters: Xa (HP{xa}) - Xi (HP{xi}) per gene, {tag} per-fiber predictions", y=1.0)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUT, "xi_promoters.png"), dpi=130, bbox_inches="tight")
-    print(f"\nwrote {OUT}/xi_promoters.png", flush=True)
+    fig.savefig(os.path.join(OUT, f"xi_promoters_{tag}.png"), dpi=130, bbox_inches="tight")
+    print(f"\nwrote {OUT}/xi_promoters_{tag}.png", flush=True)
 
 
 if __name__ == "__main__":

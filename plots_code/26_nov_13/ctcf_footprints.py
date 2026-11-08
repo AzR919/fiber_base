@@ -26,8 +26,8 @@ Hypotheses and expected directions (fixed in advance):
 Caveat: the model sees m6A (so it sees the footprint) and the reference sequence (so it sees the motif in both
 sets). The test is whether bulk supervision taught it that a protected motif on an accessible molecule means CTCF.
 
-    python plots_code/26_nov_13/ctcf_footprints.py [--dir results/<ts>_molecules_<run>_ctcf_sites_chr21]
-Writes plots/26_nov_13/molecules/ctcf_*.tsv and ctcf_footprints.png.
+    python plots_code/26_nov_13/ctcf_footprints.py [--model DEV4|noCpG|noFIRE|noAcc] [--dir DIR]
+Writes plots/26_nov_13/molecules/ctcf_*_<model>.tsv and ctcf_footprints_<model>.png.
 """
 import argparse
 import glob
@@ -41,6 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
+from abl_common import MODELS, molecule_dir
 
 OUT = "plots/26_nov_13/molecules"
 MIN_AT, MIN_PER_CLASS = 4, 3
@@ -51,7 +52,8 @@ ASSAYS = ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--dir", default=None, help="molecule_predict output dir (default: newest *_ctcf_sites_chr21)")
+    p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
+    p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_ctcf_sites_chr21)")
     return p.parse_args()
 
 
@@ -83,7 +85,8 @@ def wilcoxon(x):
 
 def main():
     args = parse_args()
-    d = args.dir or max(glob.glob("results/*_molecules_*_ctcf_sites_chr21"), key=os.path.getmtime)
+    d = args.dir or molecule_dir(args.model, "ctcf_sites_chr21")
+    tag = args.model
     os.makedirs(OUT, exist_ok=True)
     print(f"reading {d}", flush=True)
     files = sorted(glob.glob(os.path.join(d, "fibers_*.tsv.gz")))
@@ -134,7 +137,7 @@ def main():
             summary.append(row)
 
     summary = pd.DataFrame(summary)
-    summary.to_csv(os.path.join(OUT, "ctcf_summary.tsv"), sep="\t", index=False, float_format="%.4g")
+    summary.to_csv(os.path.join(OUT, f"ctcf_summary_{tag}.tsv"), sep="\t", index=False, float_format="%.4g")
     with pd.option_context("display.width", 250, "display.max_columns", 50):
         print("\n", summary.T, flush=True)
 
@@ -150,7 +153,7 @@ def main():
                 h5.append({"sample": sample, "score_bin": b, "n_bound": len(bd), "n_unbound": len(ub),
                            "bound_mean": bd.mean(), "unbound_mean": ub.mean()})
     h5 = pd.DataFrame(h5)
-    h5.to_csv(os.path.join(OUT, "ctcf_bound_vs_unbound_by_score.tsv"), sep="\t", index=False, float_format="%.4g")
+    h5.to_csv(os.path.join(OUT, f"ctcf_bound_vs_unbound_by_score_{tag}.tsv"), sep="\t", index=False, float_format="%.4g")
     print("\n", h5, flush=True)
 
     # figure: per sample, (a) state fractions by site set, (b) pred_ctcf by state at bound sites,
@@ -196,8 +199,8 @@ def main():
         ax[i, 3].set_title(f"site level (bound: Spearman {r:.2f})")
         ax[i, 3].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(os.path.join(OUT, "ctcf_footprints.png"), dpi=130)
-    print(f"\nwrote {OUT}/ctcf_footprints.png", flush=True)
+    fig.savefig(os.path.join(OUT, f"ctcf_footprints_{tag}.png"), dpi=130)
+    print(f"\nwrote {OUT}/ctcf_footprints_{tag}.png", flush=True)
 
 
 if __name__ == "__main__":
