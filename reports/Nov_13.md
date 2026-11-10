@@ -36,31 +36,33 @@ model should become the main model.
 
 **4–5. Why some assays fail on the pairs** (sections 4–5). Three failure types:
 1. **Track-scale outliers fibers cannot show:** H1's CTCF ChIP is weakly enriched everywhere; HepG2's and H1's
-   H3K9me3 tracks are globally strong. Every model fails these, trained on the pair or not.
+   H3K9me3 tracks are globally strong. Every model fails these, trained on the pair or not. The models also
+   predict more CTCF for H1 at equal accessibility; the no-CpG model (6) keeps this shift, so it isn't from CpG.
 2. **Compression** on cell types the model never saw.
 3. **Cell-level offsets:** a line's track sits above what its fibers' accessibility implies (H3K27ac, H3K36me3).
 
-**6. Input ablations** (section 6). Three DEV4 retrains: no CpG, no FIRE, no accessibility (CpG + DNA only).
+**6. Input ablations** (section 6). Four DEV4 retrains: no CpG, no FIRE, no accessibility (CpG + DNA only), and
+m6A + CpG only (no fibertools calls: no MSP, nucleosome or FIRE).
 
 ![Bulk r per assay for DEV4 and the ablations](../plots/26_nov_13/ablations/ablation_bulk.png)
 
-| Assay | DEV4 r (dev) | Δ no CpG | Δ no FIRE | Δ no accessibility |
-|---|---|---|---|---|
-| ATAC | 0.76 | −0.01 | 0.00 | **−0.14** |
-| H3K4me3 | 0.53 | −0.05 | +0.01 | −0.04 |
-| H3K27ac | 0.49 | −0.04 | +0.02 | −0.09 |
-| H3K4me1 | 0.54 | −0.03 | +0.03 | **−0.13** |
-| CTCF | 0.39 | −0.01 | +0.01 | −0.08 |
-| H3K36me3 | 0.48 | **−0.25** | +0.01 | −0.01 |
-| H3K27me3 | 0.44 | **−0.09** | +0.01 | −0.03 |
-| H3K9me3 | 0.39 | −0.01 | 0.00 | −0.09 |
+| Assay | DEV4 r (dev) | Δ no FIRE | Δ m6A + CpG | Δ no accessibility | Δ no CpG |
+|---|---|---|---|---|---|
+| ATAC | 0.76 | 0.00 | 0.00 | **−0.14** | −0.01 |
+| H3K4me3 | 0.53 | +0.01 | 0.00 | −0.04 | −0.05 |
+| H3K27ac | 0.49 | +0.02 | +0.02 | −0.09 | −0.04 |
+| H3K4me1 | 0.54 | +0.03 | +0.03 | **−0.13** | −0.03 |
+| CTCF | 0.39 | +0.01 | 0.00 | −0.08 | −0.01 |
+| H3K36me3 | 0.48 | +0.01 | +0.01 | −0.01 | **−0.25** |
+| H3K27me3 | 0.44 | +0.01 | +0.01 | −0.03 | **−0.09** |
+| H3K9me3 | 0.39 | 0.00 | 0.00 | −0.09 | −0.01 |
 
 - **No FIRE costs nothing** (slightly better almost everywhere). This confirms the hypothesis.
+- **Dropping all fibertools calls costs nothing either** (m6A + CpG: +0.009 dev, +0.012 held out, same as no FIRE).
+  In bulk, the model gets everything it needs from raw m6A and CpG.
 - **CpG carries H3K36me3** (−0.25; −0.46 in K562), consistent with gene-body methylation, and H3K27me3. Without
   accessibility, H3K36me3 stays intact. I had predicted CTCF and H3K9me3 would lose too; they don't.
 - **Accessibility carries** ATAC, H3K4me1, H3K27ac and CTCF.
-- **The H1 CTCF shift is not caused by CpG:** without CpG the K562–H1 CTCF difference is still wrong (−0.19, true
-  +0.32), so H1's weak track remains the explanation.
 
 **7. CTCF footprints on single molecules** (section 7)
 - At bound CTCF sites on chr21, fibers whose motif is protected from m6A (a footprint) were compared with open
@@ -70,15 +72,19 @@ model should become the main model.
 | Model | Footprint − open, predicted CTCF (GM12878 / K562) | Same for ATAC | Unbound sites |
 |---|---|---|---|
 | DEV4 | +0.11 / +0.04 | +0.09 / +0.02 | ≈ 0 |
-| No CpG | +0.18 / +0.10 | +0.27 / +0.11 | ≈ 0 |
 | **No FIRE** | **+1.14 / +0.84** | +0.41 / +0.30 | ≈ 0 |
+| m6A + CpG (no fibertools calls) | +0.26 / +0.20 | +0.06 / +0.04 | ≈ 0 |
 | No accessibility (null: sees no m6A) | 0.00 / 0.00 | 0.00 / 0.00 | 0 |
+| No CpG | +0.18 / +0.10 | +0.27 / +0.11 | ≈ 0 |
 
 ![CTCF footprints, no-FIRE model](../plots/26_nov_13/molecules/ctcf_footprints_noFIRE.png)
 
 - The response is CTCF-specific (H3K4me3 doesn't rise) and absent at unbound motifs of the same score.
 - **Likely reason it is weak in DEV4:** FIRE's classifier was trained on CTCF ChIP, so with FIRE the model takes
   "CTCF site" from that channel. Without FIRE it reads the footprint on each molecule.
+- **Without any fibertools calls the response falls to a quarter** of no FIRE's and is less specific (H3K4me3 rises
+  a little too). The MSP / nucleosome calls seem to help the model find the accessible patch the footprint sits
+  in, so FIRE is the one call to drop.
 
 **8. X inactivation per haplotype in GM12878** (section 8)
 - The inactive X (Xi) is identified from measured XIST promoter methylation (0.09 vs 0.36), so Xi = HP2.
@@ -98,15 +104,15 @@ model should become the main model.
 - **H3K27me3 has the wrong sign.** The model probably applies the autosomal rule that Polycomb sits at unmethylated
   CpG islands; on the Xi, methylation and H3K27me3 occur together.
 - **Ablations:** the active marks pass from CpG alone or from accessibility alone. H3K9me3 needs accessibility;
-  from CpG alone it reverses.
+  from CpG alone it reverses, and raw m6A without the fibertools calls brings it back partly (68% of genes).
 
 ## Scorecard
 
 | Test | Hypothesis | Result |
 |---|---|---|
 | Mixture supervision (T3, T3b) | Mixtures reach the own-track ceiling | ✅ both pairs |
-| H1 CTCF shift | Comes from CpG | ❌ not CpG; H1's track is weak |
 | No FIRE | Costs little | ✅ costs nothing |
+| m6A + CpG only (no fibertools calls) | Costs little | ✅ costs nothing in bulk; CTCF footprint response 4× weaker than no FIRE |
 | No CpG | CpG-linked marks lose most | ◐ H3K36me3 / H3K4me3 yes; CTCF / H3K9me3 no; H3K27me3 unexpectedly |
 | CTCF footprints | Footprint fibers get more CTCF than open fibers, more than ATAC | ◐ weak in DEV4; ✅ strong without FIRE; null clean |
 | X inactivation | Xa > Xi for active marks, Xa < Xi for repressive; nulls ≈ 0; XIST reversed | ✅ ATAC, H3K4me3, H3K27ac, H3K9me3, nulls, XIST; ❌ H3K27me3 |
@@ -114,7 +120,7 @@ model should become the main model.
 ## Next
 
 - **Switch to the no-FIRE model**, after a second seed of DEV4 and no FIRE (~2.2 h each) to confirm the bulk
-  numbers are level.
+  numbers are level. Keep the MSP / nucleosome inputs (the m6A + CpG run shows they matter per molecule).
 - **X inactivation:** restrict to genes expressed in GM12878, check the escape list against Tukiainen 2017, and test
   H3K27me3 over broader windows.
 - **Remaining single-molecule tests:** in-silico CpG flips, measured methylation as held-out data for the no-CpG

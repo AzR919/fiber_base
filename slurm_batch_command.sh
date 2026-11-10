@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-11-03_05_train_spec_gm12878
+#SBATCH --job-name=2026-11-08_15_train_abl_m6acpg
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -36,7 +36,7 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # CELL=pairB (K562 + H1, data34), the two main models, each the other's matched reference.
 # Mixture-only models of the same pairs: CELL=mixA (data27) and CELL=mixB (data35, no ATAC: H1 has none).
 # Input ablations of DEV4 (reports/TODO_extended.md T10), same data (data24) and budget: CELL=nocpg (model19),
-# CELL=nofire (model16), CELL=noacc (model20: CpG + DNA only).
+# CELL=nofire (model16), CELL=noacc (model20: CpG + DNA only), CELL=m6acpg (model21: m6A + CpG, no fibertools calls).
 # If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
 PREFIX=SPEC_V1
 MODEL=model15_uct_mid_8A
@@ -53,6 +53,7 @@ case "${CELL:-gm12878}" in
   nocpg)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model19_uct_mid_8A_no_cpg ;;
   nofire)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   noacc)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model20_uct_mid_8A_cpg_only ;;
+  m6acpg)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model21_uct_mid_8A_m6a_cpg ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 echo "Model: $PREFIX $DATA $MODEL"
