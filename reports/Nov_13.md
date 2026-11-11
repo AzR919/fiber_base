@@ -13,7 +13,9 @@ most part, on chromosomes the model never trained on:
 - per-haplotype predictions follow X inactivation.
 
 Dropping the FIRE input costs nothing in bulk and makes the CTCF footprint response ~10× stronger, so the no-FIRE
-model should become the main model.
+model should become the main model. ENCODE replicates agree at only r ≈ 0.4, so the best reachable r is ~0.74;
+DEV4 gets two thirds of it in dev cell types, and the remaining gap is mostly cell-specific CTCF, H3K36me3 and
+H3K27me3 in held-out cell types.
 
 ## Results
 
@@ -106,6 +108,27 @@ m6A + CpG only (no fibertools calls: no MSP, nucleosome or FIRE).
 - **Ablations:** the active marks pass from CpG alone or from accessibility alone. H3K9me3 needs accessibility;
   from CpG alone it reverses, and raw m6A without the fibertools calls brings it back partly (68% of genes).
 
+**9. ENCODE replicate ceiling** (section 9)
+- Two replicates of the same ENCODE experiment were scored against each other at our eval positions on chr21. That
+  gives the best r any prediction could reach against the pooled target (the ceiling).
+- **Histone and CTCF replicates agree at only r 0.26–0.50**, so the ceiling is ~0.65–0.80 (ATAC 0.93). It is the
+  same in dev, held-out and Panc1 targets.
+
+| Fraction of the ceiling (DEV4) | Dev | Held out | Panc1 |
+|---|---|---|---|
+| Pearson r | 66% | 58% | 46% |
+| Cell-type r | 53% | 40% | 23% |
+
+![Fraction of the ceiling, five models](../plots/26_nov_13/ceiling/ceiling_models.png)
+
+- **In dev cell types every assay is at 55–79% of its ceiling.** H3K36me3 and H3K27me3 (67%) are as close as the
+  active marks: their low raw r was mostly target noise. H3K9me3 is furthest (55%).
+- **ATAC and the active marks transfer to held-out cell types unchanged.** The held-out drop is the cell-specific
+  part of CTCF, H3K36me3 (8% of its cell-type ceiling) and H3K27me3. For these, the cross-cell average is closer to
+  the ceiling than any model.
+- **The ablation results hold on this scale:** no FIRE and m6A + CpG ≥ DEV4; no accessibility −10 points; no CpG
+  halves dev H3K36me3. No model fixes held-out H3K36me3.
+
 ## Scorecard
 
 | Test | Hypothesis | Result |
@@ -116,11 +139,15 @@ m6A + CpG only (no fibertools calls: no MSP, nucleosome or FIRE).
 | No CpG | CpG-linked marks lose most | ◐ H3K36me3 / H3K4me3 yes; CTCF / H3K9me3 no; H3K27me3 unexpectedly |
 | CTCF footprints | Footprint fibers get more CTCF than open fibers, more than ATAC | ◐ weak in DEV4; ✅ strong without FIRE; null clean |
 | X inactivation | Xa > Xi for active marks, Xa < Xi for repressive; nulls ≈ 0; XIST reversed | ✅ ATAC, H3K4me3, H3K27ac, H3K9me3, nulls, XIST; ❌ H3K27me3 |
+| Replicate ceiling | Weak broad marks are target noise; held-out gap is not | ◐ H3K36me3 / H3K27me3 in dev yes, H3K9me3 no; ✅ held-out targets as reproducible as dev |
 
 ## Next
 
-- **Switch to the no-FIRE model**, after a second seed of DEV4 and no FIRE (~2.2 h each) to confirm the bulk
-  numbers are level. Keep the MSP / nucleosome inputs (the m6A + CpG run shows they matter per molecule).
+- **Switch to the no-FIRE model**, after the second seed confirms the bulk numbers are level (seed 2 of all five
+  models submitted 11 Nov, with the same evals and molecule jobs). Keep the MSP / nucleosome inputs (the m6A + CpG
+  run shows they matter per molecule).
+- **Where to improve (ceiling):** the cell-specific CTCF, H3K36me3 and H3K27me3 in held-out cell types, and
+  H3K9me3 everywhere. Report future models as a fraction of the ceiling.
 - **X inactivation:** restrict to genes expressed in GM12878, check the escape list against Tukiainen 2017, and test
   H3K27me3 over broader windows.
 - **Remaining single-molecule tests:** in-silico CpG flips, measured methylation as held-out data for the no-CpG

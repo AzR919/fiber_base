@@ -16,9 +16,11 @@ figures, and the outcome. The short version is `Nov_13.md`. Plan and test defini
 | 6 | [Input ablations](#6-input-ablations-t10-which-fiber-inputs-does-the-model-use) | Which fiber inputs does the model use? Five models: all inputs, no FIRE, m6A + CpG (no fibertools calls), no accessibility (CpG only), no CpG | Fibertools calls add nothing in bulk. m6A carries ATAC, H3K4me1, H3K27ac, CTCF, H3K9me3; CpG carries H3K36me3 (−0.25 without it) and H3K27me3 |
 | 7 | [CTCF footprints on single molecules](#7-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A; weak in DEV4 (+0.11), **10× stronger without FIRE** (+1.14), in between from m6A + CpG only (+0.26). No-accessibility model is a clean null |
 | 8 | [X inactivation per haplotype](#8-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac, H3K9me3 (73–91% of genes), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign) |
+| 9 | [ENCODE replicate ceiling](#9-encode-replicate-ceiling-i11-how-much-of-each-target-can-a-model-get) | How much of each target is reproducible? Which "weak" assays are target noise? | Replicates agree at r ≈ 0.4, so the reachable r is ~0.74. DEV4 gets 66% of it in dev, 58% held out, 46% in Panc1. Dev H3K36me3 / H3K27me3 are as close as the active marks; the held-out gap is cell-specific CTCF, H3K36me3, H3K27me3 |
 
 Experiments 1–5 are bulk or paired readouts; 6–8 are the first tests from the biological-validation plan
-(`TODO.md` §2). Decisions and next steps are at the end.
+(`TODO.md` §2); 9 rescales the bulk numbers by how reproducible each target is. Decisions and next steps are at
+the end.
 
 ## What changed since 30 Oct
 
@@ -777,6 +779,8 @@ Panc1 means: 0.166 / 0.192 / 0.168 / 0.126 / 0.141 (same model order).
 In bulk, no FIRE and m6A + CpG are interchangeable. Sections 7 and 8 show where they differ: per molecule.
 
 Caveat: one seed per model, so bulk differences of ±0.02 (such as no FIRE's small gains) are within seed noise.
+A second seed of all five models is training (submitted 11 Nov, see next steps). Section 9 puts these numbers on
+the scale of the ENCODE replicate ceiling.
 
 **Sources:** training logs `logs/2026-11-07_0{2,3,4}_train_abl_*` and `logs/2026-11-08_15_train_abl_m6acpg`;
 evals `logs/2026-11-08_*_eval_abl_*_{a,b}` (dev and held-out sets, ~21–24 min each); results
@@ -1051,13 +1055,215 @@ expressed in GM12878, so they are silent on both copies and have d ≈ 0 (the cl
 `logs/2026-11-08_{10,12,14,20}_molecules_tss_abl_*`; analysis `plots_code/26_nov_13/xi_promoters.py --model <m>` →
 `plots/26_nov_13/molecules/xi_*_<m>.{tsv,png}`.
 
+## 9. ENCODE replicate ceiling (I11): how much of each target can a model get?
+
+> **Question:** ENCODE tracks are themselves noisy. How high could any prediction score on each assay, given the
+> noise in the target? This separates "hard for the model" from "noisy target", and puts sections 1 and 6 on one
+> scale: the fraction of the reachable score each model gets.
+
+### Setup
+
+- **Data:** for each of the 62 pooled targets we train and evaluate on (8 cell types × 8 assays, minus ATAC for H1
+  and H9), the per-replicate fold-change bigWigs of the *same* ENCODE experiment: the two lowest-numbered biological
+  replicates, cropped to chr21 (`data_prep/setup_replicates.py` → `data_prep/encode_replicates_lock.yaml`;
+  124 files, ~1 GB). Every experiment had two.
+- **Scoring** (`replicate_ceiling.py`): replicate A against replicate B at exactly the positions `eval.py` scores
+  (all chr21 tiles, ≥ 5 fibers, asinh), with the same three metrics and the same cross-cell baseline.
+- **From replicate agreement to a ceiling.** The pooled target averages k replicates (k = 2 for 50 targets, 3 for
+  12), so it is less noisy than one replicate. With replicate agreement ρ:
+  - the pooled track's reliability is the Spearman–Brown value kρ / (1 + (k − 1)ρ), and the best r any prediction
+    can reach against it is the square root of that: the **ceiling r**;
+  - the same for cell-type r (**ceiling cell-type r**);
+  - **MSE floor** = replicate MSE / (2k), the pooled track's own noise if replicate noise is independent.
+- **Fraction of the ceiling** = model r / ceiling r per cell type × assay, then averaged. 1 = as good as the
+  replicates allow. Cell-type groups as in section 6: dev, held out (H9, HCT116, MCF-7), Panc1.
+
+| | Question | Result |
+|---|---|---|
+| Q1 | Is the low r on H3K36me3, H3K27me3, H3K9me3 and CTCF target noise? | In dev cell types mostly yes for H3K36me3 and H3K27me3 (67% of the ceiling, like the active marks); H3K9me3 stays furthest from its ceiling |
+| Q2 | Is the dev → held-out drop caused by noisier held-out targets? | No: the ceilings are the same (0.74 / 0.74 / 0.75). The drop is the model's, and only in CTCF, H3K36me3, H3K27me3 (and H3K9me3 in Panc1) |
+| Q3 | Do the ablation conclusions of section 6 hold on this scale? | Yes: fibertools calls add nothing, accessibility is worth ~10 points of the ceiling, CpG half of dev H3K36me3 |
+
+### The ceiling per assay (all 8 cell types)
+
+| Assay | n | Replicate r | Ceiling r | DEV4 r | Baseline r | Replicate cell-type r | Ceiling cell-type r | MSE floor | DEV4 MSE | Baseline MSE |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ATAC | 6 | 0.76 | 0.93 | 0.73 | 0.69 | 0.59 | 0.86 | 0.021 | 0.086 | 0.109 |
+| H3K4me3 | 8 | 0.44 | 0.77 | 0.55 | 0.50 | 0.31 | 0.67 | 0.082 | 0.176 | 0.218 |
+| H3K27ac | 8 | 0.38 | 0.75 | 0.47 | 0.35 | 0.33 | 0.70 | 0.099 | 0.196 | 0.281 |
+| H3K4me1 | 8 | 0.50 | 0.80 | 0.52 | 0.43 | 0.42 | 0.75 | 0.084 | 0.196 | 0.272 |
+| CTCF | 8 | 0.30 | 0.68 | 0.37 | 0.42 | 0.21 | 0.58 | 0.100 | 0.179 | 0.206 |
+| H3K36me3 | 8 | 0.30 | 0.69 | 0.34 | 0.52 | 0.17 | 0.55 | 0.131 | 0.249 | 0.233 |
+| H3K27me3 | 8 | 0.26 | 0.66 | 0.35 | 0.39 | 0.20 | 0.59 | 0.133 | 0.216 | 0.264 |
+| H3K9me3 | 8 | 0.34 | 0.69 | 0.38 | 0.44 | 0.26 | 0.61 | 0.120 | 0.287 | 0.359 |
+| **Mean** | 62 | 0.40 | 0.74 | 0.45 | 0.46 | 0.30 | 0.66 | 0.099 | 0.202 | 0.247 |
+
+![Replicate agreement, ceiling, DEV4 and baseline](../plots/26_nov_13/ceiling/ceiling_overview.png)
+
+- **Two replicates of the same histone or CTCF experiment agree at only r 0.26–0.50** at base-pair resolution on
+  chr21. Only ATAC is reproducible (0.76; 0.85 in the dev cell types).
+- So **the reachable r against our targets is ~0.65–0.80**, not 1, and DEV4's mean r of 0.45 is 60% of it.
+- **Predictions often beat a single replicate** (DEV4 r > replicate r in 42 of 62): a smooth prediction is compared
+  with the pooled track, while a replicate carries its own sampling noise. That is why the ceiling is scaled to the
+  pooled track rather than read off replicate r.
+- **Held-out and Panc1 targets are as reproducible as dev ones** (mean ceiling 0.74 dev, 0.74 held out, 0.75
+  Panc1). Panc1's ENCODE tracks are fine; if its data is a problem (section 2), it is on the fiber side.
+
+### DEV4 against the ceiling, per cell-type group
+
+Fraction of the ceiling (model / ceiling), with the baseline's fraction of the r ceiling for comparison.
+
+| Assay | r: dev | r: held out | r: Panc1 | cell-type r: dev | cell-type r: held out | cell-type r: Panc1 | baseline r: dev | baseline r: held out | baseline r: Panc1 |
+|---|---|---|---|---|---|---|---|---|---|
+| ATAC | 79% | 81% | 70% | 60% | 65% | 40% | 73% | 72% | 82% |
+| H3K4me3 | 71% | 75% | 63% | 57% | 61% | 42% | 60% | 72% | 66% |
+| H3K27ac | 65% | 63% | 54% | 58% | 55% | 42% | 43% | 49% | 51% |
+| H3K4me1 | 66% | 68% | 51% | 58% | 56% | 31% | 46% | 61% | 64% |
+| CTCF | 61% | 48% | 55% | 49% | 24% | 32% | 58% | 64% | 72% |
+| H3K36me3 | 67% | 32% | 18% | 53% | 8% | −10% | 77% | 75% | 67% |
+| H3K27me3 | 67% | 45% | 21% | 54% | 34% | 5% | 64% | 56% | 44% |
+| H3K9me3 | 55% | 57% | 39% | 35% | 30% | 4% | 57% | 75% | 64% |
+| **Mean** | 66% | 58% | 46% | 53% | 40% | 23% | 59% | 65% | 64% |
+
+- **In dev cell types every assay reaches 55–79% of its ceiling.** H3K36me3 and H3K27me3 (67%) are as close as
+  H3K27ac and H3K4me1, so their low raw r is mostly target noise (Q1). H3K9me3 is furthest (55%; cell-type r 35%).
+- **ATAC and the active marks transfer to held-out cell types unchanged** (63–81%, within 2 points of dev).
+- **The held-out drop comes from CTCF, H3K36me3 and H3K27me3** (Q2). Their cell-type r falls to 8–34% of the
+  ceiling. The cell-specific H3K36me3 is almost entirely missed (8%), although the replicates show it is there
+  (cell-type ceiling 0.41–0.70). Panc1 adds H3K9me3 and is lowest overall (46%).
+- **On held-out cell types the cross-cell baseline is closer to the ceiling than DEV4 for CTCF, H3K36me3, H3K27me3
+  and H3K9me3** (56–75% against 32–57%), and over all cell types its r beats DEV4's in 28 of 62 pairs. Most of
+  what is reproducible in these marks is shared across cell types, so the average gets it for free; on held-out
+  cell types DEV4 predicts them worse than copying the average.
+
+### All five models against the ceiling
+
+Top: fraction of the r ceiling (with the baseline in grey). Bottom: fraction of the cell-type r ceiling.
+
+![Fraction of the ceiling, five models](../plots/26_nov_13/ceiling/ceiling_models.png)
+
+#### Pearson r / ceiling, dev
+
+| Assay | DEV4 | no FIRE | m6A + CpG | no acc. | no CpG | baseline |
+|---|---|---|---|---|---|---|
+| ATAC | **0.79** | **0.79** | **0.79** | 0.64 | 0.77 | 0.73 |
+| H3K4me3 | 0.71 | **0.72** | 0.71 | 0.65 | 0.65 | 0.60 |
+| H3K27ac | 0.65 | **0.67** | **0.67** | 0.54 | 0.60 | 0.43 |
+| H3K4me1 | 0.66 | **0.69** | **0.69** | 0.49 | 0.63 | 0.46 |
+| CTCF | 0.61 | **0.62** | 0.60 | 0.48 | 0.59 | 0.58 |
+| H3K36me3 | 0.67 | 0.68 | 0.68 | 0.65 | 0.33 | **0.77** |
+| H3K27me3 | 0.67 | 0.68 | **0.69** | 0.62 | 0.54 | 0.65 |
+| H3K9me3 | 0.55 | 0.54 | 0.55 | 0.44 | 0.54 | **0.57** |
+| **Mean** | 0.66 | **0.67** | **0.67** | 0.56 | 0.57 | 0.59 |
+
+#### Pearson r / ceiling, held out (H9, HCT116, MCF-7)
+
+| Assay | DEV4 | no FIRE | m6A + CpG | no acc. | no CpG | baseline |
+|---|---|---|---|---|---|---|
+| ATAC | 0.81 | **0.82** | **0.82** | 0.60 | 0.80 | 0.72 |
+| H3K4me3 | 0.75 | 0.77 | **0.78** | 0.73 | 0.71 | 0.72 |
+| H3K27ac | 0.63 | 0.63 | **0.65** | 0.54 | 0.59 | 0.49 |
+| H3K4me1 | 0.68 | **0.73** | 0.71 | 0.45 | 0.66 | 0.61 |
+| CTCF | 0.48 | 0.50 | 0.48 | 0.30 | 0.49 | **0.64** |
+| H3K36me3 | 0.32 | 0.33 | 0.34 | 0.32 | 0.25 | **0.75** |
+| H3K27me3 | 0.45 | 0.50 | 0.49 | 0.47 | 0.40 | **0.56** |
+| H3K9me3 | 0.57 | 0.57 | 0.56 | 0.49 | 0.52 | **0.75** |
+| **Mean** | 0.58 | 0.60 | 0.59 | 0.48 | 0.54 | **0.65** |
+
+#### Cell-type r / ceiling, dev
+
+| Assay | DEV4 | no FIRE | m6A + CpG | no acc. | no CpG |
+|---|---|---|---|---|---|
+| ATAC | 0.60 | **0.61** | 0.60 | 0.38 | 0.58 |
+| H3K4me3 | 0.57 | **0.58** | **0.58** | 0.47 | 0.50 |
+| H3K27ac | 0.58 | 0.60 | **0.61** | 0.45 | 0.52 |
+| H3K4me1 | 0.58 | **0.62** | **0.62** | 0.38 | 0.54 |
+| CTCF | 0.49 | **0.51** | 0.48 | 0.36 | 0.47 |
+| H3K36me3 | 0.53 | 0.54 | **0.55** | 0.52 | 0.19 |
+| H3K27me3 | 0.54 | **0.57** | 0.56 | 0.49 | 0.35 |
+| H3K9me3 | 0.35 | 0.35 | **0.36** | 0.25 | **0.36** |
+| **Mean** | 0.53 | **0.55** | 0.54 | 0.41 | 0.43 |
+
+#### Cell-type r / ceiling, held out (H9, HCT116, MCF-7)
+
+| Assay | DEV4 | no FIRE | m6A + CpG | no acc. | no CpG |
+|---|---|---|---|---|---|
+| ATAC | 0.65 | **0.68** | 0.67 | 0.30 | 0.64 |
+| H3K4me3 | 0.61 | 0.63 | **0.65** | 0.55 | 0.57 |
+| H3K27ac | 0.55 | 0.54 | **0.57** | 0.43 | 0.50 |
+| H3K4me1 | 0.56 | **0.62** | 0.60 | 0.27 | 0.53 |
+| CTCF | 0.24 | **0.26** | 0.24 | 0.05 | 0.25 |
+| H3K36me3 | 0.08 | 0.09 | **0.10** | **0.10** | 0.06 |
+| H3K27me3 | 0.34 | **0.44** | 0.37 | 0.40 | 0.20 |
+| H3K9me3 | 0.30 | **0.31** | 0.30 | 0.23 | 0.28 |
+| **Mean** | 0.41 | **0.44** | 0.43 | 0.29 | 0.37 |
+
+Panc1 is in the figure (third column) and in `ceiling_groups.tsv`.
+
+#### MSE / floor, mean over assays (lower is better)
+
+| Group | DEV4 | no FIRE | m6A + CpG | no acc. | no CpG | baseline |
+|---|---|---|---|---|---|---|
+| Dev | **2.77** | 2.84 | 2.78 | 3.40 | 2.96 | 3.87 |
+| Held out | 2.20 | **2.15** | 2.17 | 2.54 | 2.20 | 2.57 |
+| Panc1 | 2.69 | **2.59** | 2.68 | 2.89 | 2.64 | 2.81 |
+
+Per assay in `ceiling_groups.tsv`. Dev ATAC (7.8×) and dev H3K9me3 (3.8×) are the highest because their floors are
+small. ATAC is very reproducible. HepG2's H3K9me3 replicates agree at r 0.83, while DEV4's MSE there is 0.69
+against a floor of 0.07: the HepG2 H3K9me3 scale problem from section 5 is a real, reproducible track. On held-out
+H3K36me3 the baseline is closer to the floor than every model (2.04 against 2.25–2.46).
+
+### What the ceiling shows
+
+1. **The targets cap r at ~0.74, and DEV4 gets 60% of that** (66% in dev, 58% held out, 46% in Panc1). Most of the
+   "weak broad marks" in dev cell types is target noise: H3K36me3 and H3K27me3 are as close to their ceiling as the
+   active marks.
+2. **The real gaps are the cell-type-specific signal in held-out cell types** for CTCF, H3K36me3 and H3K27me3 (and
+   H3K9me3 in Panc1), plus H3K9me3 everywhere. There, the reproducible part is mostly shared across cell types,
+   and the cross-cell average is closer to the ceiling than any model.
+3. **The ablation conclusions hold on this scale.** No FIRE and m6A + CpG are level with or above DEV4 in r and
+   cell-type r in every group (0 to +0.04 of the ceiling), and within 0.1 of it in MSE / floor. Without accessibility the models lose ~10 points of the ceiling
+   (cell-type r of ATAC 0.60 → 0.38 dev, 0.65 → 0.30 held out). Without CpG, dev H3K36me3 halves (0.67 → 0.33).
+4. **No input fixes held-out H3K36me3:** every model gets 6–10% of its cell-specific ceiling. That is a
+   generalization failure, not a missing input.
+5. **No FIRE's H3K27me3 gain is the largest difference between DEV4 and the models that keep both raw inputs**
+   (held-out cell-type r 0.44 against 0.34; Panc1 0.26 against 0.05). With one seed it could be noise; the second
+   seeds will tell.
+
+### Caveats
+
+- **Unequal replicates.** In 14 of 62 experiments one replicate matches the pooled track much better than the
+  other (difference > 0.15, e.g. H1 CTCF 0.55 / 0.92, MCF-7 H3K27me3 0.52 / 0.94). The pooled track is then
+  mostly one replicate, the true ceiling is higher, and the fractions there are too generous (H1 CTCF's 86% of the
+  ceiling is one of them). The list is in `log_ceiling.txt`.
+- **Spearman–Brown assumes equally good replicates**, and the pooled ENCODE fold change is computed from pooled
+  reads, not as the mean of the replicate tracks. The MSE floor (replicate MSE / 2k) is the rougher of the two
+  estimates.
+- **The 12 targets pooled from three replicates** are scaled from two of the three.
+- **Base-pair resolution.** Ceilings would be higher at 200 bp or 1 kb, most of all for the broad marks.
+- **One seed per model** (section 6): differences of ~0.02 of the ceiling are within that noise until the second
+  seeds are in.
+
+**Sources:** download job `logs/2026-11-11_00_setup_replicates` (124 / 124 files); scoring jobs
+`logs/2026-11-11_0{2,3}_eval_replicate_ceiling*` (`slurm_batch_command_replicates.sh`, CPU only, ~18 min per cell
+type); results `results/*_replicates_data24_dev_loo_Panc1_200U/replicate_summary.json` on nibi. Tables and
+figures: `plots_code/26_nov_13/ceiling.py` (uses `ablations.py`'s `bulk_{r,mse,ctr}.tsv`), outputs in
+`plots/26_nov_13/ceiling/` (`ceiling_cells.tsv`, `ceiling_groups.tsv`, `log_ceiling.txt`).
+
 ## Decisions and next steps
 
 - **Make the no-FIRE model the main model** (the decision rule fixed in `TODO.md` §2c): the same bulk accuracy, no
   bulk-assay knowledge in the input, and a ~10× stronger, CTCF-specific molecule-level CTCF response. Before
-  switching, train a second seed of DEV4 and no FIRE (~2.2 h each on a 2g.20gb slice) to confirm the bulk numbers
-  are level. The m6A + CpG run supports keeping the MSP / nucleosome calls: they add nothing in bulk, but without
-  them the per-molecule CTCF response falls to a quarter of no FIRE's.
+  switching, confirm with a second seed. **Submitted 11 Nov:** seed 2 of all five models (`SEED=2` in
+  `slurm_batch_command.sh`; jobs `2026-11-11_04`–`33`, run prefix `*_seed2`), each chained to the dev, held-out and
+  pair evals and both molecule jobs, as for seed 919. Readouts: seed-to-seed difference per assay (the noise level
+  for section 6), no FIRE's H3K27me3 gain (section 9), and the CTCF footprint response (+1.14 against +0.11).
+  The m6A + CpG run supports keeping the MSP / nucleosome calls: they add nothing in bulk, but without them the
+  per-molecule CTCF response falls to a quarter of no FIRE's.
+- **What to improve, from the ceiling (section 9):** in dev cell types the model is at 55–79% of every ceiling, so
+  the room is in held-out cell types, in the cell-specific part of CTCF, H3K36me3 and H3K27me3, where the
+  cross-cell average currently does better. H3K9me3 is the one assay far from its ceiling everywhere. Score future
+  models as a fraction of the ceiling; rerun the ceiling at 200 bp / 1 kb if we change output resolution.
 - **X inactivation:** restrict the subject / escape comparison to genes expressed in GM12878 (RNA-seq), check the
   escape list against Tukiainen 2017, and test H3K27me3 over broader windows (gene bodies, Xi domains) as well as
   promoters.

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=2026-11-08_15_train_abl_m6acpg
+#SBATCH --job-name=2026-11-11_04_train_dev4_seed2
 #SBATCH --account=def-maxwl_gpu
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --output=logs/%x.out
@@ -38,6 +38,8 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # Input ablations of DEV4 (reports/TODO_extended.md T10), same data (data24) and budget: CELL=nocpg (model19),
 # CELL=nofire (model16), CELL=noacc (model20: CpG + DNA only), CELL=m6acpg (model21: m6A + CpG, no fibertools calls).
 # If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
+# DEV4 itself: CELL=dev4 (model15 on data24, run prefix LOO_Panc1_V1). Another training seed of any of these: add
+# SEED=<n> (default 919); the run prefix gets _seed<n>, so evals and analyses never pick it up as the seed-919 run.
 PREFIX=SPEC_V1
 MODEL=model15_uct_mid_8A
 case "${CELL:-gm12878}" in
@@ -50,13 +52,15 @@ case "${CELL:-gm12878}" in
   pairB)   DATA=data34_K562_H1_200U;       EVAL=eval22_K562_200U_mini;              PREFIX=PAIR_V1 ;;
   mixA)    DATA=data27_mix_GM12878_HepG2_200U; EVAL=eval26_mix_GM12878_HepG2_200U_mini; PREFIX=MIX_V1 ;;
   mixB)    DATA=data35_mix_K562_H1_200U;       EVAL=eval30_mix_K562_H1_200U_mini;       PREFIX=MIX_V1 ;;
+  dev4)    DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=LOO_Panc1_V1 ;;
   nocpg)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model19_uct_mid_8A_no_cpg ;;
   nofire)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   noacc)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model20_uct_mid_8A_cpg_only ;;
   m6acpg)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model21_uct_mid_8A_m6a_cpg ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
-echo "Model: $PREFIX $DATA $MODEL"
+if [ -n "${SEED:-}" ]; then PREFIX="${PREFIX}_seed${SEED}"; fi
+echo "Model: $PREFIX $DATA $MODEL seed ${SEED:-919}"
 python -u main.py \
   --data_config configs/data/$DATA.yaml \
   --model_config configs/models/$MODEL.yaml \
@@ -64,6 +68,7 @@ python -u main.py \
   --eval_configs configs/evals/$EVAL.yaml \
   --num_workers 3 \
   --name_prefix $PREFIX \
+  --seed ${SEED:-919} \
   ${RESUME:+--resume "$RESUME"}
 
 # Print job completion time
