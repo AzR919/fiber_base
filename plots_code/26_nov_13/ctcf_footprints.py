@@ -26,7 +26,7 @@ Hypotheses and expected directions (fixed in advance):
 Caveat: the model sees m6A (so it sees the footprint) and the reference sequence (so it sees the motif in both
 sets). The test is whether bulk supervision taught it that a protected motif on an accessible molecule means CTCF.
 
-    python plots_code/26_nov_13/ctcf_footprints.py [--model DEV4|noCpG|noFIRE|noAcc] [--dir DIR]
+    python plots_code/26_nov_13/ctcf_footprints.py [--model DEV4|noFIRE|m6aCpG|noAcc|noCpG] [--seed 919|2] [--dir DIR]
 Writes plots/26_nov_13/molecules/ctcf_*_<model>.tsv and ctcf_footprints_<model>.png.
 """
 import argparse
@@ -41,7 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
-from abl_common import MODELS, molecule_dir
+from abl_common import MODELS, SEEDS, molecule_dir, tag as out_tag
 
 OUT = "plots/26_nov_13/molecules"
 MIN_AT, MIN_PER_CLASS = 4, 3
@@ -53,6 +53,7 @@ ASSAYS = ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
+    p.add_argument("--seed", type=int, default=919, choices=SEEDS, help="training seed (output suffix _seed<n> if not 919)")
     p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_ctcf_sites_chr21)")
     return p.parse_args()
 
@@ -85,8 +86,8 @@ def wilcoxon(x):
 
 def main():
     args = parse_args()
-    d = args.dir or molecule_dir(args.model, "ctcf_sites_chr21")
-    tag = args.model
+    d = args.dir or molecule_dir(args.model, "ctcf_sites_chr21", args.seed)
+    tag = out_tag(args.model, args.seed)
     os.makedirs(OUT, exist_ok=True)
     print(f"reading {d}", flush=True)
     files = sorted(glob.glob(os.path.join(d, "fibers_*.tsv.gz")))

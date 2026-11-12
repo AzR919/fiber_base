@@ -13,14 +13,15 @@ figures, and the outcome. The short version is `Nov_13.md`. Plan and test defini
 | 3 | [Mixture test on two pairs](#3-mixture-test-on-two-pairs-t3-repeated-on-k562h1) | Mixture-only supervision reaches the own-track ceiling (T3), also on a second pair; how does it transfer to an unseen pair? | Ceiling reached on both pairs (AUC 0.637 vs 0.635, 0.666 vs 0.665). On an unseen pair supervision type doesn't matter; transfer to K562–H1 is poor |
 | 4 | [CTCF on K562–H1](#4-ctcf-on-k562h1-a-weak-h1-track-plus-a-model-shift) | (a) H1's CTCF track is weak, or (b) H1's fibers are more accessible | (a) yes, (b) no; plus a constant model shift toward H1 |
 | 5 | [Offset breakdown, all assays](#5-the-same-breakdown-for-every-assay-on-both-pairs) | Which failures are track problems, compression or cell-level offsets? | Three failure types; track outliers H1 CTCF, HepG2 / H1 H3K9me3 |
-| 6 | [Input ablations](#6-input-ablations-t10-which-fiber-inputs-does-the-model-use) | Which fiber inputs does the model use? Five models: all inputs, no FIRE, m6A + CpG (no fibertools calls), no accessibility (CpG only), no CpG | Fibertools calls add nothing in bulk. m6A carries ATAC, H3K4me1, H3K27ac, CTCF, H3K9me3; CpG carries H3K36me3 (−0.25 without it) and H3K27me3 |
-| 7 | [CTCF footprints on single molecules](#7-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A; weak in DEV4 (+0.11), **10× stronger without FIRE** (+1.14), in between from m6A + CpG only (+0.26). No-accessibility model is a clean null |
-| 8 | [X inactivation per haplotype](#8-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac, H3K9me3 (73–91% of genes), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign) |
+| 6 | [Input ablations](#6-input-ablations-t10-which-fiber-inputs-does-the-model-use) | Which fiber inputs does the model use? Five models: all inputs, no FIRE, m6A + CpG (no fibertools calls), no accessibility (CpG only), no CpG | Fibertools calls add nothing in bulk (no FIRE and m6A + CpG even gain +0.02–0.03 on H3K27ac / H3K4me1). m6A carries ATAC, H3K4me1, H3K27ac, CTCF, H3K9me3; CpG carries H3K36me3 (−0.25 without it) and H3K27me3. All replicate in a second seed |
+| 7 | [CTCF footprints on single molecules](#7-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A, in both seeds; null clean. The size varies 2–10× between trainings (DEV4 +0.11 / +0.73). **No FIRE is the only model strong and CTCF-specific in both seeds** (+1.14 / +0.95) |
+| 8 | [X inactivation per haplotype](#8-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac (71–91% of genes, both seeds), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign). H3K9me3 passes robustly only without CpG; seed-dependent otherwise |
 | 9 | [ENCODE replicate ceiling](#9-encode-replicate-ceiling-i11-how-much-of-each-target-can-a-model-get) | How much of each target is reproducible? Which "weak" assays are target noise? | Replicates agree at r ≈ 0.4, so the reachable r is ~0.74. DEV4 gets 66% of it in dev, 58% held out, 46% in Panc1. Dev H3K36me3 / H3K27me3 are as close as the active marks; the held-out gap is cell-specific CTCF, H3K36me3, H3K27me3 |
+| 10 | [Second training seed](#10-second-training-seed-which-results-replicate) | Which results of 6–9 survive retraining every model with another seed? | Bulk: yes, one training moves a group mean by ~0.005–0.01. Molecules: directions replicate, sizes vary 2–10×; "10× stronger without FIRE" was mostly a weak DEV4 run |
 
 Experiments 1–5 are bulk or paired readouts; 6–8 are the first tests from the biological-validation plan
-(`TODO.md` §2); 9 rescales the bulk numbers by how reproducible each target is. Decisions and next steps are at
-the end.
+(`TODO.md` §2); 9 rescales the bulk numbers by how reproducible each target is; 10 repeats 6–9 with a second
+training seed. Decisions and next steps are at the end.
 
 ## What changed since 30 Oct
 
@@ -574,7 +575,7 @@ except which fiber channels the model sees (`input_flags`):
   trained on GM12878 DNase and CTCF ChIP peaks, so it carries knowledge of bulk assays.
 - The first four models drop inputs step by step: FIRE, then all the calls, then m6A too. No CpG drops the other
   raw channel.
-- All models trained for ~2 h 10–15 min, single seed. Each was evaluated like DEV4, on every cell type on chr21
+- All models trained for ~2 h 10–15 min, seed 919 (section 10 repeats all five with a second seed). Each was evaluated like DEV4, on every cell type on chr21
   (bulk). This section covers bulk accuracy; the same five models run through the molecule tests in sections 7
   and 8.
 
@@ -585,7 +586,7 @@ planned, after H-A's result was known.
 
 | | Model | Expected | Result |
 |---|---|---|---|
-| H-A | no FIRE | Costs little: FIRE is derived from the m6A the model already sees | ✅ costs nothing (mean r +0.01, cell-type r +0.01); one exception: H3K27me3 MSE +0.04 in the dev lines (see MSE) |
+| H-A | no FIRE | Costs little: FIRE is derived from the m6A the model already sees | ✅ costs nothing (mean r +0.01, cell-type r +0.01). The one exception in seed 919, H3K27me3 MSE +0.04 in the dev lines, does not replicate (section 10) |
 | H-E | m6A + CpG | Costs little: MSP and nucleosome calls are also derived from the m6A | ✅ costs nothing (mean r +0.01) |
 | H-D | no accessibility | No direction fixed: how much is left from CpG + DNA alone | Loses ATAC, H3K4me1, H3K27ac, CTCF, H3K9me3; keeps H3K36me3, H3K27me3, most of H3K4me3 |
 | H-B | no CpG | H3K4me3, H3K36me3, H3K9me3, CTCF lose more than ATAC, H3K27ac, H3K4me1 | ◐ H3K36me3 (−0.25) and H3K4me3 (−0.05) yes; CTCF and H3K9me3 no. H3K27me3 (−0.09) loses, not predicted |
@@ -639,7 +640,7 @@ Held-out cell types:
 | *Mean* | *0.445* | *0.460* | *0.457* | *0.365* | *0.419* | ***0.488*** |
 
 Panc1 follows the same pattern (mean 0.360 / 0.382 / 0.364 / 0.313 / 0.331 in the same model order). The one
-outlier is no FIRE's Panc1 H3K27me3 (0.27 vs DEV4 0.16).
+outlier is no FIRE's Panc1 H3K27me3 (0.27 vs DEV4 0.16), which shrinks to +0.03 in a second seed (section 10).
 
 H3K36me3 per cell type, the clearest single result:
 
@@ -713,6 +714,8 @@ H3K27me3 per cell type, the one place where MSE and r disagree:
   cell-type r are slightly *better* there. So its H3K27me3 predictions follow the track's pattern as well as DEV4's
   but sit at the wrong level or scale in those lines. In the held-out lines it has the lowest H3K27me3 MSE. This is
   the one cost of dropping FIRE that Pearson doesn't show; it isn't in m6A + CpG, which also lacks FIRE.
+  **Second seed (section 10): this is seed noise.** With seed 2 no FIRE's H3K27me3 MSE in these lines is 0.003–0.010
+  *below* DEV4's.
 - **Held-out H3K36me3:** every ablation has a lower MSE than DEV4, and the baseline is lowest (0.193). All models
   are poor here (r 0.18–0.25), and a flatter prediction probably loses less than a confidently wrong one. No CpG
   has the lowest MSE of the models but also the lowest r, so this is not a gain.
@@ -761,6 +764,8 @@ Panc1 means: 0.166 / 0.192 / 0.168 / 0.126 / 0.141 (same model order).
 - **H3K4me3 uses both inputs:** it loses 0.07 without m6A and 0.05 without CpG.
 - **No FIRE has the highest H3K27me3 cell-type r** (+0.02 dev, +0.06 held out, Panc1 .03 → .18). Read together
   with the MSE: its H3K27me3 gets the cell-specific pattern better and the level worse in the dev lines.
+  **Second seed:** the held-out gain falls to +0.00 and Panc1's to +0.03, within that assay's seed noise there
+  (SD 0.03–0.04).
 - **Held-out H3K36me3 is ~0 for every model** (0.04–0.07): no model predicts how a held-out line's H3K36me3 differs
   from the average, with or without CpG.
 
@@ -769,7 +774,9 @@ Panc1 means: 0.166 / 0.192 / 0.168 / 0.126 / 0.141 (same model order).
 1. **FIRE and the other fibertools calls add nothing to bulk accuracy.** Without FIRE, or without any call, every
    assay stays within about ±0.03 of DEV4 in Pearson r and cell-type r (H-A, H-E; the one exception is no FIRE's
    Panc1 H3K27me3, +0.11 r). MSE agrees except for no FIRE's H3K27me3 in the dev lines (+0.04): right pattern, wrong
-   level. m6A + CpG doesn't show it. The model gets what it needs from the raw m6A.
+   level. m6A + CpG doesn't show it. The model gets what it needs from the raw m6A. **Second seed (section 10):**
+   both no-FIRE exceptions were seed noise, and no FIRE and m6A + CpG are slightly *better* than DEV4 on H3K27ac
+   and H3K4me1 (+0.02–0.03 r in both seeds).
 2. **m6A carries the accessibility-type assays.** Without it (no accessibility), ATAC, H3K4me1, H3K27ac, CTCF and
    H3K9me3 drop 0.05–0.20 in r, and their cell-type r drops the most (H-D).
 3. **CpG methylation carries H3K36me3 and H3K27me3.** Without it, H3K36me3 drops 0.25 (0.46 in K562) and H3K27me3
@@ -778,9 +785,9 @@ Panc1 means: 0.166 / 0.192 / 0.168 / 0.126 / 0.141 (same model order).
 
 In bulk, no FIRE and m6A + CpG are interchangeable. Sections 7 and 8 show where they differ: per molecule.
 
-Caveat: one seed per model, so bulk differences of ±0.02 (such as no FIRE's small gains) are within seed noise.
-A second seed of all five models is training (submitted 11 Nov, see next steps). Section 9 puts these numbers on
-the scale of the ENCODE replicate ceiling.
+Seed noise: section 10 retrains all five models with a second seed. One training moves a group mean by
+~0.005–0.01 (up to 0.03–0.04 for held-out H3K27me3 / H3K9me3), and points 1–3 above all replicate. Section 9 puts
+these numbers on the scale of the ENCODE replicate ceiling.
 
 **Sources:** training logs `logs/2026-11-07_0{2,3,4}_train_abl_*` and `logs/2026-11-08_15_train_abl_m6acpg`;
 evals `logs/2026-11-08_*_eval_abl_*_{a,b}` (dev and held-out sets, ~21–24 min each); results
@@ -892,12 +899,21 @@ site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 
 
 ### Outcomes
 
+> **Second seed (section 10):** the tables above are seed 919. Retrained with seed 2, every model that sees m6A
+> responds strongly (DEV4 +0.73 / +0.44, m6A + CpG +0.56 / +0.58, no CpG +0.75 / +0.46, no FIRE +0.95 / +0.68),
+> unbound sites stay ≈ 0 and the no-accessibility null stays 0. So H1, H3 and H5 replicate, but **the size of the
+> response varies 2–10× between trainings, and the comparisons between models below hold only for no FIRE**: it is
+> the strongest and the most CTCF-specific model in both seeds. Statements about DEV4, m6A + CpG and no CpG being
+> weak are single-seed.
+
 - **H1 holds for every model that sees m6A**, but weakly in DEV4 (+0.11 GM12878, +0.04 K562, p = 0.05). **Without
-  FIRE the effect is ~10× larger** (+1.14 / +0.84; 94% / 83% of sites in the expected direction).
+  FIRE the effect is ~10× larger** (+1.14 / +0.84; 94% / 83% of sites in the expected direction). *Seed 2: DEV4
+  +0.73 / +0.44 (p ≤ 6e-20), no FIRE +0.95 / +0.68, so 1.3–1.5×, not 10×.*
 - **H2:** weak in DEV4 (CTCF − ATAC +0.02 / +0.05). **Fails without CpG** (−0.12 / −0.02: there, predicted ATAC
   moves more than CTCF, so its footprint response is accessibility-like). **Strong without FIRE** (+0.67 / +0.54).
   H3K4me3 goes slightly *down* on footprint fibers in every model with m6A except no CpG, so the response is
-  CTCF-specific, not a general "more signal".
+  CTCF-specific, not a general "more signal". *Seed 2: H2 holds for every model with m6A, no CpG included
+  (+0.33 / +0.31); no FIRE stays the most specific (+0.85 / +0.63, against DEV4 +0.23 / +0.21).*
 - **Caveat on H2:** CTCF − ATAC is also positive at unbound sites (+0.20 / +0.27 without FIRE). There, predicted
   ATAC drops on protected-looking fibers while predicted CTCF doesn't move. At bound sites the no-FIRE CTCF
   increase itself (+1.14 / +0.84) has no counterpart at unbound sites (−0.05 / −0.04), so the main result stands,
@@ -914,6 +930,8 @@ site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 
   FIRE, at the site level, and has little reason to read the m6A pattern inside the MSP. Without FIRE it has to
   read the m6A pattern, and it learns that a protected motif on an accessible molecule means CTCF, from bulk
   supervision alone. Together with section 6 (no bulk cost), this makes the no-FIRE model the better main model.
+  *Seed 2 weakens this account: DEV4 can also learn a strong response with FIRE in the input, though a less
+  specific one. What replicates is that without FIRE the response is reliably strong and specific.*
 - **m6A + CpG (no fibertools calls) sits in between:** footprint − open CTCF +0.26 / +0.20 (81% / 64% of sites),
   about twice DEV4 but a quarter of no FIRE. It is still absent at unbound sites (−0.04 / −0.03), and nucleosome
   fibers are still lowest (+1.15 / +0.88), so H1, H3 and H5 hold. Specificity is weaker: CTCF − ATAC is +0.20 /
@@ -925,6 +943,8 @@ site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 
   them it has to find the patch from the m6A density itself, and a short gap inside an MSP is harder to tell apart
   from linker DNA. With FIRE on top, the model takes the site-level answer from FIRE. So the fibertools calls cost
   nothing to drop in bulk (section 6) but help the molecule-level read, and FIRE is the one call to drop.
+  *Seed 2: m6A + CpG reaches 60–85% of no FIRE (+0.56 / +0.58, CTCF − ATAC +0.55 / +0.50), so the evidence that the
+  MSP / nucleosome calls help is now weak: no FIRE ≥ m6A + CpG in both seeds, but by 1.2–4.4×.*
 
 **Sources:** targets `data_prep/build_targets.py` + `targets_spec.yaml` → `DATA_FIBER/regions/targets/`
 (`manifest.json`); per-fiber predictions `molecule_predict.py`, jobs `logs/2026-11-07_05_molecules_ctcf_chr21`,
@@ -1028,9 +1048,14 @@ expressed in GM12878, so they are silent on both copies and have d ≈ 0 (the cl
 
 ### Outcomes
 
+> **Second seed (section 10):** ATAC, H3K4me3, H3K27ac, the nulls, XIST and the H3K27me3 failure all replicate in
+> every model. H3K9me3 does not, except without CpG: DEV4's falls from 76% to 52% at CGI promoters, and the
+> no-accessibility reversal (21%) becomes 67% right. The H3K9me3 statements below are single-seed.
+
 - **H1 holds for ATAC, H3K4me3, H3K27ac and H3K9me3** in DEV4 (73–86% of subject genes, 76–91% at CGI promoters).
+  *H3K9me3 is at chance at CGIs in DEV4's second seed (64% / 52%).*
 - **H1 fails for H3K27me3:** the models predict *more* H3K27me3 on the Xa, most clearly at CGI promoters (only 26%
-  of genes in the expected direction for DEV4; 46% without FIRE, i.e. chance). Possible reason: on autosomes,
+  of genes in the expected direction for DEV4; 46% without FIRE, i.e. chance; 17% in no FIRE's second seed). Possible reason: on autosomes,
   promoter H3K27me3 sits at unmethylated CGIs (Polycomb targets), and the models learned that link. On the Xi,
   CGIs are methylated and H3K27me3-enriched at the same time, a combination absent from the training chromosome.
   Also, Xi H3K27me3 is broad and partly in different domains from H3K9me3, so promoter windows may not be the right
@@ -1044,11 +1069,15 @@ expressed in GM12878, so they are silent on both copies and have d ≈ 0 (the cl
     the largest differences (H3K4me3 +0.82 at CGIs), in line with the input: the methylation difference at CGI
     promoters (−0.23) is larger than the accessibility difference (+0.08).
   - **H3K9me3** comes out right only with accessibility (no CpG 80% / 86%); from CpG alone it reverses (33% / 21%).
-    So the model's Xi H3K9me3 signal is "closed chromatin → H3K9me3", not methylation.
+    So the model's Xi H3K9me3 signal is "closed chromatin → H3K9me3", not methylation. *Seed 2: no CpG again
+    79% / 86%, but CpG alone now gets 57% / 67% right, so only the no-CpG result is solid. The per-gene H3K9me3
+    differences are small (median |d| ≤ 0.08 at CGIs) and flip between trainings when CpG is an input.*
   - **m6A + CpG** passes every active mark (81–87% of subject genes, 88–91% at CGIs) and reverses XIST as strongly
     as DEV4. Raw m6A restores the H3K9me3 direction that CpG alone gets wrong (68% / 64%, against 33% / 21%), but
-    less cleanly than with the MSP / nucleosome calls (72–80%).
+    less cleanly than with the MSP / nucleosome calls (72–80%). *Seed 2: m6A + CpG 68% / 61% again, but the CpG-only
+    comparison it rests on did not replicate.*
   - **H3K27me3** is wrong for every model, worst without CpG (22% at CGIs), closest to chance without FIRE.
+    *Seed 2: wrong for every model, 17–24% at CGIs; no FIRE's "closest to chance" was seed noise.*
 
 **Sources:** targets as in section 7 (`tss_chrX_chr21.bed`); per-fiber predictions `molecule_predict.py`, jobs
 `logs/2026-11-07_07_molecules_tss_chrX` (DEV4; job 06 crashed on a column-name bug, fixed in 55c22a8) and
@@ -1228,7 +1257,8 @@ H3K36me3 the baseline is closer to the floor than every model (2.04 against 2.25
    generalization failure, not a missing input.
 5. **No FIRE's H3K27me3 gain is the largest difference between DEV4 and the models that keep both raw inputs**
    (held-out cell-type r 0.44 against 0.34; Panc1 0.26 against 0.05). With one seed it could be noise; the second
-   seeds will tell.
+   seeds will tell. *They did (section 10): it is mostly noise. Averaged over both seeds no FIRE's held-out
+   H3K27me3 cell-type r is 0.37 of the ceiling against DEV4's 0.32.*
 
 ### Caveats
 
@@ -1241,8 +1271,8 @@ H3K36me3 the baseline is closer to the floor than every model (2.04 against 2.25
   estimates.
 - **The 12 targets pooled from three replicates** are scaled from two of the three.
 - **Base-pair resolution.** Ceilings would be higher at 200 bp or 1 kb, most of all for the broad marks.
-- **One seed per model** (section 6): differences of ~0.02 of the ceiling are within that noise until the second
-  seeds are in.
+- **Seed noise:** the tables are seed 919. With both seeds averaged the fractions move by ≤ 0.01 on the mean
+  (DEV4 65 / 58 / 47%; section 10, `seeds_ceiling.tsv`).
 
 **Sources:** download job `logs/2026-11-11_00_setup_replicates` (124 / 124 files); scoring jobs
 `logs/2026-11-11_0{2,3}_eval_replicate_ceiling*` (`slurm_batch_command_replicates.sh`, CPU only, ~18 min per cell
@@ -1250,16 +1280,191 @@ type); results `results/*_replicates_data24_dev_loo_Panc1_200U/replicate_summary
 figures: `plots_code/26_nov_13/ceiling.py` (uses `ablations.py`'s `bulk_{r,mse,ctr}.tsv`), outputs in
 `plots/26_nov_13/ceiling/` (`ceiling_cells.tsv`, `ceiling_groups.tsv`, `log_ceiling.txt`).
 
+## 10. Second training seed: which results replicate?
+
+> **Question:** sections 6–9 rest on one training per model. How much do the numbers move when the same model is
+> trained again with a different seed, and which model differences survive that?
+
+### Setup
+
+- **Runs:** all five models of section 6 retrained with `--seed 2` instead of 919 (`SEED=2` in
+  `slurm_batch_command.sh`; run prefix `*_seed2`). The configs, data, budget and slice are unchanged. The seed sets
+  weight initialization, training-region order and fiber sampling, and the validation windows.
+- **Evals:** each run was chained to the same jobs as seed 919: dev and held-out bulk evals, pair evals, and both
+  molecule jobs (`2026-11-11_04`–`33`, all completed, trainings 2 h 11–19 min). The test evals take their seed from
+  the eval config, so both seeds are scored on the same fibers.
+- **Seed noise of a table entry:** for each group mean (one model, one assay, one cell-type group), d = seed 2 −
+  seed 919. Pooling d over the five models gives the SD of one training, sd = √(mean d² / 2). A difference between
+  two models, each averaged over its two seeds, has the same SD. Below, an ablation effect counts as **clear** if
+  its two-seed mean is beyond 2 SD and both seeds give the same sign.
+
+### Bulk: the numbers barely move
+
+![Seed 2 against seed 919, every cell type × assay](../plots/26_nov_13/seeds/seeds_scatter.png)
+
+- **Per cell type × assay, the two seeds differ by a median of 0.010 in r** (90th percentile 0.036, largest 0.09:
+  no CpG, HCT116 H3K9me3) and 0.012 in cell-type r (largest 0.11: no FIRE, Panc1 H3K27me3).
+- **Group means move less.** The SD of one training is 0.005–0.009 for the mean over assays, and per assay mostly
+  0.003–0.013:
+
+| Assay | r: dev | r: held out | r: Panc1 | cell-type r: dev | cell-type r: held out | cell-type r: Panc1 | MSE: dev | MSE: held out | MSE: Panc1 |
+|---|---|---|---|---|---|---|---|---|---|
+| ATAC | 0.006 | 0.007 | 0.005 | 0.010 | 0.007 | 0.007 | 0.002 | 0.002 | 0.010 |
+| H3K4me3 | 0.013 | 0.020 | 0.021 | 0.014 | 0.022 | 0.021 | 0.007 | 0.014 | 0.024 |
+| H3K27ac | 0.005 | 0.006 | 0.007 | 0.005 | 0.007 | 0.007 | 0.004 | 0.003 | 0.005 |
+| H3K4me1 | 0.008 | 0.011 | 0.004 | 0.009 | 0.013 | 0.004 | 0.004 | 0.006 | 0.009 |
+| CTCF | 0.003 | 0.004 | 0.004 | 0.003 | 0.004 | 0.006 | 0.001 | 0.002 | 0.003 |
+| H3K36me3 | 0.009 | 0.005 | 0.010 | 0.009 | 0.007 | 0.009 | 0.003 | 0.009 | 0.021 |
+| H3K27me3 | 0.004 | **0.028** | **0.028** | 0.005 | **0.034** | **0.037** | 0.012 | 0.008 | 0.004 |
+| H3K9me3 | 0.007 | 0.012 | **0.032** | 0.009 | 0.008 | **0.039** | 0.017 | 0.011 | 0.004 |
+| **Mean** | 0.005 | 0.008 | 0.007 | 0.006 | 0.009 | 0.008 | 0.003 | 0.002 | 0.003 |
+
+  H3K4me3 is the noisiest assay everywhere (~0.02), and H3K27me3 / H3K9me3 outside the dev lines are the least
+  stable (0.03–0.04).
+- **The ceiling fractions of section 9 hold.** Averaged over both seeds, DEV4 gets 65% of the r ceiling in dev,
+  58% held out and 47% in Panc1 (seed 919: 66 / 58 / 46%). No FIRE 66 / 59 / 49%, m6A + CpG 67 / 58 / 47%
+  (`seeds_ceiling.tsv`).
+
+### Bulk: ablation effects in both seeds
+
+Ablation − DEV4, each seed paired with the DEV4 of the same seed (seed 919 / seed 2); **bold** = clear; last
+column = SD of one training.
+
+![Ablation effects on Pearson r, both seeds](../plots/26_nov_13/seeds/seeds_effects_r.png)
+
+#### Pearson r, dev
+
+| Assay | no FIRE | m6A + CpG | no acc. | no CpG | 1 SD |
+|---|---|---|---|---|---|
+| ATAC | +0.004 / +0.009 | +0.001 / +0.009 | **−0.140 / −0.147** | −0.015 / +0.004 | 0.006 |
+| H3K4me3 | +0.006 / −0.011 | +0.004 / −0.006 | **−0.043 / −0.047** | **−0.047 / −0.032** | 0.013 |
+| H3K27ac | **+0.016 / +0.018** | **+0.017 / +0.022** | **−0.088 / −0.101** | **−0.037 / −0.033** | 0.005 |
+| H3K4me1 | **+0.030 / +0.019** | **+0.028 / +0.033** | **−0.134 / −0.135** | −0.025 / −0.003 | 0.008 |
+| CTCF | **+0.009 / +0.007** | −0.003 / −0.000 | **−0.085 / −0.085** | −0.009 / −0.001 | 0.003 |
+| H3K36me3 | +0.009 / −0.012 | +0.011 / −0.003 | −0.013 / −0.020 | **−0.250 / −0.234** | 0.009 |
+| H3K27me3 | **+0.009 / +0.008** | **+0.012 / +0.014** | **−0.032 / −0.034** | **−0.090 / −0.076** | 0.004 |
+| H3K9me3 | −0.003 / +0.010 | +0.001 / +0.011 | **−0.087 / −0.080** | −0.012 / +0.015 | 0.007 |
+| **Mean** | +0.010 / +0.006 | +0.009 / +0.010 | **−0.076 / −0.079** | **−0.062 / −0.046** | 0.005 |
+
+#### Pearson r, held out (H9, HCT116, MCF-7)
+
+| Assay | no FIRE | m6A + CpG | no acc. | no CpG | 1 SD |
+|---|---|---|---|---|---|
+| ATAC | +0.009 / +0.005 | +0.006 / +0.003 | **−0.197 / −0.217** | −0.012 / −0.004 | 0.007 |
+| H3K4me3 | +0.012 / −0.036 | +0.021 / −0.027 | −0.015 / −0.033 | −0.033 / −0.024 | 0.020 |
+| H3K27ac | +0.003 / +0.019 | **+0.014 / +0.021** | **−0.067 / −0.065** | **−0.031 / −0.009** | 0.006 |
+| H3K4me1 | **+0.033 / +0.021** | **+0.024 / +0.030** | **−0.183 / −0.192** | −0.024 / +0.005 | 0.011 |
+| CTCF | **+0.014 / +0.006** | **−0.004 / −0.014** | **−0.139 / −0.140** | +0.005 / +0.006 | 0.004 |
+| H3K36me3 | +0.014 / +0.001 | **+0.018 / +0.004** | +0.006 / −0.015 | **−0.051 / −0.066** | 0.005 |
+| H3K27me3 | +0.030 / +0.008 | +0.023 / −0.010 | +0.011 / +0.010 | −0.031 / +0.005 | 0.028 |
+| H3K9me3 | +0.002 / +0.001 | −0.007 / −0.014 | **−0.054 / −0.077** | −0.033 / −0.009 | 0.012 |
+| **Mean** | +0.015 / +0.003 | +0.012 / −0.001 | **−0.075 / −0.086** | **−0.027 / −0.012** | 0.008 |
+
+#### Cell-type r, held out (H9, HCT116, MCF-7)
+
+| Assay | no FIRE | m6A + CpG | no acc. | no CpG | 1 SD |
+|---|---|---|---|---|---|
+| ATAC | **+0.019 / +0.018** | +0.015 / +0.005 | **−0.289 / −0.308** | −0.007 / +0.001 | 0.007 |
+| H3K4me3 | +0.013 / −0.047 | +0.028 / −0.025 | −0.032 / −0.053 | −0.028 / −0.025 | 0.022 |
+| H3K27ac | −0.000 / +0.019 | **+0.014 / +0.025** | **−0.073 / −0.071** | **−0.030 / −0.007** | 0.007 |
+| H3K4me1 | **+0.043 / +0.030** | **+0.030 / +0.039** | **−0.213 / −0.221** | −0.020 / +0.013 | 0.013 |
+| CTCF | **+0.014 / +0.004** | **−0.003 / −0.016** | **−0.123 / −0.127** | **+0.012 / +0.009** | 0.004 |
+| H3K36me3 | +0.008 / −0.013 | +0.012 / −0.006 | +0.016 / −0.009 | **−0.022 / −0.051** | 0.007 |
+| H3K27me3 | +0.060 / +0.001 | +0.016 / −0.040 | +0.033 / +0.032 | **−0.083 / −0.061** | 0.034 |
+| H3K9me3 | +0.005 / +0.004 | −0.004 / −0.016 | **−0.044 / −0.059** | −0.017 / +0.001 | 0.008 |
+| **Mean** | +0.020 / +0.002 | +0.013 / −0.005 | **−0.082 / −0.093** | **−0.025 / −0.016** | 0.009 |
+
+Cell-type r in the dev lines and MSE: `seeds_effects.tsv` and `seeds_effects_ctr.png`.
+
+- **Every large effect of section 6 replicates** at the same size: no accessibility (−0.08 mean r; ATAC, H3K4me1,
+  H3K27ac, CTCF, H3K9me3) and no CpG (dev H3K36me3 −0.25 / −0.23, H3K27me3 −0.09 / −0.08, H3K4me3 −0.05 / −0.03).
+  CTCF and H3K9me3 are again unaffected without CpG.
+- **No FIRE and m6A + CpG are not just "level" with DEV4: both are slightly better on H3K27ac and H3K4me1**
+  (+0.02–0.03 r in both seeds: H3K4me1 in dev and held out, H3K27ac in dev, and held out for m6A + CpG). Over all
+  assays their gain (−0.001 to +0.015) is within 2 SD.
+- **No FIRE's H3K27me3 gain mostly does not replicate.** Held-out cell-type r +0.060 → +0.001, Panc1 +0.148 →
+  +0.032 (r +0.113 → +0.031). Per cell type its r stays above DEV4's in 7 of 8 lines in seed 2, but by +0.00–0.03.
+- **No FIRE's dev H3K27me3 MSE exception is seed noise:** +0.050 / +0.050 / +0.038 in GM12878 / K562 / HepG2 with
+  seed 919, −0.009 / −0.010 / −0.003 with seed 2.
+
+### Molecules: much more seed-dependent
+
+![Single-molecule readouts, both seeds](../plots/26_nov_13/seeds/seeds_molecules.png)
+
+**CTCF footprints (section 7)**, bound sites, per-site medians (seed 919 / seed 2):
+
+| Model | Footprint − open, CTCF: GM12878 | K562 | CTCF − ATAC: GM12878 | K562 | Unbound sites: footprint − open, CTCF |
+|---|---|---|---|---|---|
+| DEV4 | +0.11 / **+0.73** | +0.04 / **+0.44** | +0.02 / +0.23 | +0.05 / +0.21 | −0.06 to −0.01 |
+| No FIRE | **+1.14 / +0.95** | **+0.84 / +0.68** | **+0.67 / +0.85** | **+0.54 / +0.63** | −0.05 to −0.02 |
+| m6A + CpG | +0.26 / +0.56 | +0.20 / +0.58 | +0.20 / +0.55 | +0.14 / +0.50 | −0.04 to +0.03 |
+| No accessibility | 0.00 / 0.00 | 0.00 / 0.01 | 0.00 / 0.00 | 0.00 / 0.00 | ≈ 0 |
+| No CpG | +0.18 / +0.75 | +0.10 / +0.46 | −0.12 / +0.33 | −0.02 / +0.31 | −0.07 to −0.03 |
+
+(CTCF − ATAC is also positive at unbound sites, +0.04–0.27 depending on model and seed; see the caveat in section 7.)
+
+- **What replicates:** H1 (footprint fibers get more predicted CTCF than open fibers at bound sites) for every
+  model that sees m6A, p ≤ 3e-17 in seed 2; no effect at unbound sites; the no-accessibility null.
+- **What does not:** the size of the response. It differs 2–10× between the two trainings of DEV4 (+0.11 → +0.73 in
+  GM12878, +0.04 → +0.44 in K562), m6A + CpG (+0.26 → +0.56) and no CpG (+0.18 → +0.75). So **"10× stronger without FIRE" was mostly DEV4's weak
+  seed-919 run**; in seed 2 no FIRE is 1.3–1.5× DEV4.
+- **No FIRE is the only model that is strong and CTCF-specific in both trainings**, and it is the highest in both
+  seeds and both lines. In seed 2, where DEV4 responds too, no FIRE's CTCF − ATAC is still 3–4× DEV4's (+0.85 / +0.63 against
+  +0.23 / +0.21).
+- No CpG's H2 failure (CTCF − ATAC < 0) and m6A + CpG's "a quarter of no FIRE" do not replicate either (seed 2:
+  +0.33 / +0.31, and 60–85% of no FIRE).
+
+**X inactivation (section 8)**, fraction of subject genes in the expected direction, all / CGI promoters (seed 919
+→ seed 2):
+
+| Assay (expected on Xa) | DEV4 | No CpG | No FIRE | No accessibility | m6A + CpG |
+|---|---|---|---|---|---|
+| ATAC (higher) | .86 / .91 → .86 / .91 | .82 / .88 → .84 / .89 | .83 / .90 → .85 / .90 | .79 / .88 → .81 / .88 | .84 / .89 → .87 / .90 |
+| H3K4me3 (higher) | .73 / .84 → .78 / .86 | .75 / .85 → .74 / .84 | .79 / .87 → .73 / .86 | .85 / .88 → .82 / .86 | .81 / .88 → .71 / .82 |
+| H3K27ac (higher) | .82 / .84 → .84 / .87 | .82 / .89 → .83 / .88 | .87 / .90 → .84 / .86 | .87 / .90 → .85 / .87 | .87 / .91 → .85 / .88 |
+| H3K9me3 (lower) | .73 / .76 → .64 / **.52** | .80 / .86 → .79 / .86 | .72 / .71 → .71 / .65 | **.33 / .21 → .57 / .67** | .68 / .64 → .68 / .61 |
+| H3K27me3 (lower) | .43 / .26 → .40 / .24 | .28 / .22 → .28 / .23 | .56 / .46 → **.29 / .17** | .46 / .29 → .41 / .23 | .48 / .35 → .28 / .17 |
+
+- **What replicates:** the active marks in every model (71–91%), XIST reversed in all ten runs, the H3K27me3
+  failure (now in every run but one), and no CpG's H3K9me3 (79–86% in both seeds).
+- **What does not:** H3K9me3 in the models that see CpG. It drops to chance at DEV4's CGI promoters (52%), and the
+  no-accessibility model's reversal (21% at CGIs) becomes 67% right. The per-gene H3K9me3 differences are small
+  (median |d| ≤ 0.08 at CGIs), so the fraction flips easily. No FIRE's "closest to chance" H3K27me3 (46%) is
+  17% in seed 2.
+
+### What the second seed shows
+
+1. **Bulk results are robust.** One training moves a reported group mean by ~0.005–0.01 (up to 0.03–0.04 for
+   held-out H3K27me3 / H3K9me3 and H3K4me3). Every ablation conclusion of section 6 holds; the ceiling fractions of
+   section 9 hold.
+2. **Small differences of ±0.02 need two seeds.** Two single-seed claims fell: no FIRE's H3K27me3 gain (section 9,
+   point 5) and its dev H3K27me3 MSE exception (section 6). A small real one appeared: no FIRE and m6A + CpG gain
+   +0.02–0.03 on H3K27ac and H3K4me1.
+3. **Molecule-level readouts vary far more between trainings than bulk does.** The direction of the CTCF footprint
+   response replicates; its size varies 2–10× for DEV4, m6A + CpG and no CpG. The H3K9me3 direction on the Xi
+   is unstable for every model that sees CpG.
+4. **The case for no FIRE stands, on a different basis:** it is the only model whose CTCF footprint response is
+   strong and specific in both trainings, with no bulk cost (a small gain on H3K27ac / H3K4me1). The ranking of
+   the other models' molecule responses cannot be read from one seed.
+
+**Sources:** training `logs/2026-11-11_{04,10,16,22,28}_train_*_seed2`, evals and molecule jobs
+`logs/2026-11-11_{05..33}_*_seed2*`; results `results/*_seed2_*` on nibi. Molecule analyses
+`ctcf_footprints.py` / `xi_promoters.py --model <m> --seed 2` → `plots/26_nov_13/molecules/*_<m>_seed2.*`. Tables and
+figures `plots_code/26_nov_13/seeds.py` → `plots/26_nov_13/seeds/` (`seeds_bulk.tsv`, `seeds_groups.tsv`,
+`seeds_noise.tsv`, `seeds_effects.tsv`, `seeds_ceiling.tsv`, `seeds_molecules.tsv`, `log_seeds.txt`). The pair
+evals of seed 2 ran too (`*_eval_*_seed2*/` with the pair keys) but are not analysed here.
+
 ## Decisions and next steps
 
-- **Make the no-FIRE model the main model** (the decision rule fixed in `TODO.md` §2c): the same bulk accuracy, no
-  bulk-assay knowledge in the input, and a ~10× stronger, CTCF-specific molecule-level CTCF response. Before
-  switching, confirm with a second seed. **Submitted 11 Nov:** seed 2 of all five models (`SEED=2` in
-  `slurm_batch_command.sh`; jobs `2026-11-11_04`–`33`, run prefix `*_seed2`), each chained to the dev, held-out and
-  pair evals and both molecule jobs, as for seed 919. Readouts: seed-to-seed difference per assay (the noise level
-  for section 6), no FIRE's H3K27me3 gain (section 9), and the CTCF footprint response (+1.14 against +0.11).
-  The m6A + CpG run supports keeping the MSP / nucleosome calls: they add nothing in bulk, but without them the
-  per-molecule CTCF response falls to a quarter of no FIRE's.
+- **Make the no-FIRE model the main model** (the decision rule fixed in `TODO.md` §2c). After the second seed
+  (section 10) the case is: the same bulk accuracy or slightly better (H3K27ac, H3K4me1 +0.02–0.03 r in both
+  seeds), no bulk-assay knowledge in the input, and **the only model whose molecule-level CTCF response is strong
+  and CTCF-specific in both trainings**. It is not "10× stronger" than DEV4: that was DEV4's weak seed-919 run.
+  Whether to keep the MSP / nucleosome calls is open (no FIRE ≥ m6A + CpG in both seeds, by 1.2–4.4×); keeping
+  them costs nothing in bulk.
+- **Molecule-level claims need several seeds.** Bulk numbers move ~0.01 between trainings, molecule readouts 2–10×.
+  Report molecule tests over at least two seeds (or an ensemble) from now on; for the main model, consider 3 seeds.
+  The seed-2 pair evals are done but not analysed yet.
 - **What to improve, from the ceiling (section 9):** in dev cell types the model is at 55–79% of every ceiling, so
   the room is in held-out cell types, in the cell-specific part of CTCF, H3K36me3 and H3K27me3, where the
   cross-cell average currently does better. H3K9me3 is the one assay far from its ceiling everywhere. Score future

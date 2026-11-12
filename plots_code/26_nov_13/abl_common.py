@@ -16,11 +16,29 @@ NAMES = {"DEV4": "DEV4 (all inputs)", "noFIRE": "no FIRE", "m6aCpG": "m6A + CpG"
          "noCpG": "no CpG"}
 
 
-def molecule_dir(model, targets):
+# Training seeds: 919 (the default, runs above) and 2 (second seed, 11 Nov; slurm_batch_command.sh SEED=2 puts
+# _seed2 after the run prefix).
+SEEDS = [919, 2]
+
+
+def run_name(model, seed=919):
+    """Training run name of a model for a training seed."""
+    if seed == 919:
+        return MODELS[model]
+    prefix, rest = MODELS[model].split("_data24", 1)
+    return f"{prefix}_seed{seed}_data24{rest}"
+
+
+def tag(model, seed=919):
+    """Output-file suffix: the model key, plus _seed<n> for other seeds (seed-919 files keep their old names)."""
+    return model if seed == 919 else f"{model}_seed{seed}"
+
+
+def molecule_dir(model, targets, seed=919):
     """Newest molecule_predict output dir of a model for a target set (e.g. 'ctcf_sites_chr21')."""
     import glob
     import os
-    dirs = glob.glob(f"results/*_molecules_{MODELS[model]}_{targets}")
+    dirs = glob.glob(f"results/*_molecules_{run_name(model, seed)}_{targets}")
     if not dirs:
-        raise FileNotFoundError(f"no molecule_predict output for {model} on {targets}")
+        raise FileNotFoundError(f"no molecule_predict output for {model} (seed {seed}) on {targets}")
     return max(dirs, key=os.path.getmtime)
