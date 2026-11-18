@@ -1,6 +1,6 @@
 # TODO
 
-Current plan only. Everything else (tests T1–T10, comparison ladder, implementation list, backlog, ideas, the
+Current plan only. Everything else (tests T1–T11, comparison ladder, implementation list, backlog, ideas, the
 registry of trained reference models) is in `TODO_extended.md`. Results go in the dated reports.
 
 ## Where we stand
@@ -91,6 +91,10 @@ Three experiments:
 - **Accessibility-only baseline:** a per-assay monotone function of each fiber's accessibility, fitted to the bulk
   (`TODO_extended.md` §4a, rule-based imputer). Our offset breakdown (`Nov_13.md`) suggests the models largely
   follow accessibility.
+- **Simple per-fiber baselines** (`TODO_extended.md` T11; I24, I25): a small learned model on per-fiber summary
+  features (same fiber averaging and bulk training, no motif-protection feature) and fixed hand-written rules per
+  assay, run through every existing test. Answers "does the network learn more than an obvious reading of the
+  input?". Careful: on the CTCF footprint test a footprint rule is circular (it is the test's label).
 - **Same-molecule cases where accessibility and the mark disagree:**
   - bivalent promoters in H1 (H3K4me3 and H3K27me3 together, unlike in the differentiated lines);
   - H3K36me3 and H3K27me3 rarely on the same molecule (PRC2 is inhibited by H3K36me3);
