@@ -388,6 +388,62 @@ seed.
 
 **Status.** Planned (`TODO.md` §2, step 2).
 
+### T11. Simple per-fiber baselines: does the network learn more than an obvious reading of the input?
+
+- **Why.** The standing objection to every T5 result: "the model just reads the fiber data, so of course
+  footprint fibers get more CTCF". That is what the model is supposed to do, so it can't be argued away; it can
+  be measured. A simple per-fiber model run through the same tests says how much the network adds over an
+  obvious reading of the same input.
+- **Hypothesis.** The network beats a simple per-fiber model on the readouts the simple model was not built
+  from, most of all where no clean rule is known (H3K27ac, H3K4me1) and on held-out cell types.
+- **How to read the outcome** (all three are reportable):
+  - network ≈ simple model: it learned the known biology from bulk alone, with no rule written in (a sanity
+    result, a weaker claim);
+  - network > simple model: it uses information an obvious reading misses (the stronger claim);
+  - both fail (e.g. H3K27me3 on the Xi, T5b): the information is likely not in those fiber features at all, not a
+    model-capacity problem.
+- **Two kinds of baseline:**
+  1. **Hand-written rules, one per assay** (§4a rule-based imputer). Easy to explain, but the comparison partly
+     measures how well the rule was written. Fix every rule before looking at results. Rough rules:
+
+     | Assay | Per-fiber rule |
+     |---|---|
+     | ATAC | fraction of the window inside an MSP |
+     | CTCF | footprint at a motif |
+     | H3K4me3 | accessible + unmethylated CpG near a CGI / TSS |
+     | H3K27ac / H3K4me1 | accessible, away from TSS (no clean rule) |
+     | H3K36me3 | high CpG methylation over a gene body |
+     | H3K27me3 | unmethylated CGI + closed |
+     | H3K9me3 | closed + methylated (+ repeats) |
+
+     Per-fiber scores need a per-assay scale to compare with bulk (fit one linear map per assay on chr20).
+  2. **A simple learned model, trained like ours (preferred, the fair comparison).** Per fiber: summary features
+     at a few window sizes (MSP fraction, nucleosome fraction, m6A rate, mean CpG methylation) plus reference
+     annotations (motif score, CGI / TSS distance); a linear or logistic map to the 8 outputs; the same Softplus +
+     coverage-normalized fiber average; trained on the same bulk targets, loss, data and budget. The only
+     differences from the network are capacity and fine spatial patterns, which answers "is a deep network
+     needed, or do local summary statistics do?" directly. **Leave out any hand-made motif-protection feature**,
+     so that a CTCF footprint response in the network and not here is evidence it found the pattern unaided.
+- **Trap: the CTCF footprint test is circular for a hand rule.** T5e labels fibers with a rule (motif m6A ≤ 0.5 ×
+  flanks, inside an MSP); a rule "fewer m6A at the motif → CTCF" is the same rule and scores near-perfectly by
+  construction. There it is a reference ceiling for that test ("what reading the footprint directly gives"), not
+  a competitor. Compare on what the rule was not built from: bulk CTCF r (fiber-averaged rule vs ChIP), bound vs
+  unbound sites at matched motif score and the site-mean vs peak-strength Spearman (T5e H5), and the pair /
+  held-out-cell differences (T2, T3).
+- **Readouts:** every existing test, unchanged: bulk r and fraction of the replicate ceiling (I11), mixture
+  fiber-origin AUC and differential readouts (T3), CTCF footprints (T5e), X inactivation (T5b), later T5a–d.
+  Molecule tests over ≥ 2 seeds for the learned baseline too (`Nov_13_extended.md` §10).
+- **Expected** (write the final version down before running):
+  - ATAC: simple model close; not where the claim lives.
+  - CTCF: learned summary model without a motif-protection feature has little footprint response; the hand rule
+    has it by construction.
+  - H3K36me3: windowed CpG methylation may carry most of it, so the simple model could be close (consistent with
+    the no-CpG ablation, T10).
+  - H3K27ac, H3K4me1, held-out cell types: the largest gap, if there is one.
+- **If the gap is small almost everywhere,** know it before writing: the pitch shifts from "deep model" to
+  "bulk-supervised per-fiber imputation works, and this is what is learnable from fiber features".
+- **Status.** Idea (17 Nov). Implementation I24 (learned), I25 (rules).
+
 ---
 
 ## 4. Comparison ladder
@@ -404,7 +460,8 @@ Scored with the molecule-level tests (T3 mixtures, T5 within-population), not bu
 |---|---|---|
 | Model trained with each cell type's own track (not only the mixture) | Upper bound for T3 | Best separation |
 | **fiberCANDI (us)** | | Should beat the two below |
-| **Rule-based single-molecule imputer**, e.g. "molecules accessible at an element carry the active mark", scaled to match the bulk | The obvious objection: did the model learn more than accessible = active? | Some separation for active marks, little for repressive ones |
+| **Simple learned per-fiber model** (T11): summary features per fiber → linear map, same fiber averaging, same bulk training | Same information and supervision, no deep network: is the network needed? | Close on ATAC (and maybe H3K36me3); weaker on the T5e footprint response and H3K27ac / H3K4me1 |
+| **Rule-based single-molecule imputer** (T11), e.g. "molecules accessible at an element carry the active mark", scaled to match the bulk | The obvious objection: did the model learn more than accessible = active? | Some separation for active marks, little for repressive ones. Circular on T5e (the footprint rule is the test's label): a ceiling there, not a competitor |
 | **Bulk on every molecule** (the mixture / cross-cell bulk assigned to each molecule) | H0 | No separation, by construction |
 | Random per-molecule values with the right mean | Noise floor | None |
 
@@ -463,6 +520,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I21 | In-silico CpG flips: set a molecule's CpG calls in a region (e.g. a CGI) to methylated / unmethylated and rerun the model on the same fibers | T5a | Inference-only tool |
 | I22 | CTCF footprint calls per fiber at CTCF motifs (fibertools `ft footprint` or an m6A-gap caller), joined to per-fiber CTCF predictions | T5e | |
 | I23 | Ablation model configs: no CpG [1, 0, 1, 1, 1], no accessibility [0, 1, 0, 0, 0]; no FIRE = `model16` | T10 | Next free model numbers |
+| I24 | Learned summary-feature baseline: a new model in `models.py` (per-fiber window summaries at a few scales + reference annotations → linear / 1×1 layer → Softplus → coverage-normalized average), trained with the usual `main.py` pipeline and data / train configs | T11 | No motif-protection feature. `molecule_predict.py` and the evals should then work unchanged; 2 seeds |
+| I25 | Hand-written per-assay rules, fixed before running, as a scorer over `molecule_predict.py` outputs (input summaries) plus a per-assay linear scale fit on chr20 for bulk | T11 | Rules in the T11 table; needs CGI / TSS / gene-body / motif annotations per target |
 
 ## 6. Engineering backlog (performance and quality)
 
