@@ -849,15 +849,28 @@ with a different footprint caller.
 
 ### Model results
 
+The three figures below are the same model trained with different input channels (section 6), everything else
+equal. They remove the fibertools calls, which are all derived from the m6A pattern, one step at a time. All three
+are seed 919; the seed-2 runs are in section 10.
+
 ![CTCF footprints, DEV4](../plots/26_nov_13/molecules/ctcf_footprints_DEV4.png)
+
+*DEV4: all inputs (m6A, CpG, MSP, nucleosome, FIRE). The reference.*
 
 ![CTCF footprints, no FIRE](../plots/26_nov_13/molecules/ctcf_footprints_noFIRE.png)
 
+*No FIRE: m6A, CpG, MSP, nucleosome. FIRE removed, the call whose classifier was trained on DNase and CTCF ChIP.
+Tests whether that bulk CTCF knowledge in the input changes how the model reads the molecule.*
+
 ![CTCF footprints, m6A + CpG only](../plots/26_nov_13/molecules/ctcf_footprints_m6aCpG.png)
+
+*m6A + CpG: all three fibertools calls removed (MSP, nucleosome, FIRE). Tests whether the model can find the
+footprint from raw m6A alone, without the calls that mark the accessible patch.*
 
 Each figure, per sample: fiber states by site set; per-fiber predicted CTCF by state at bound sites; the per-site
 footprint − open difference for CTCF and ATAC; site mean predicted CTCF against the line's CTCF peak signal. The
-no-CpG and no-accessibility figures are `ctcf_footprints_noCpG.png` / `_noAcc.png` in the same folder. The fiber
+no-CpG (CpG removed) and no-accessibility (CpG only: the null, which cannot see the footprint) figures are
+`ctcf_footprints_noCpG.png` / `_noAcc.png` in the same folder. The fiber
 states are computed from the measured MSP / nucleosome calls for every model, including the two that don't see
 them as input.
 
