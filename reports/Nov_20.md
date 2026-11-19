@@ -3,7 +3,7 @@
 The two single-molecule tests (CTCF footprints, X inactivation), moved here from `Nov_13_extended.md` (sections 7
 and 8). Section 1 is unchanged apart from the model name. Section 2 is rewritten around the main model and the one
 gene group the test is about. Bulk results, the replicate ceiling and the second-seed analysis stay in
-`Nov_13_extended.md` (sections 6, 9, 10).
+`Nov_13_extended.md` (sections 6, 9, 10). Single-molecule locus figures for both tests are in `Nov_20_figs.md`.
 
 ## Models
 
@@ -39,6 +39,10 @@ GM12878 DNase and CTCF ChIP peaks, so it carries bulk-assay knowledge into the i
 - **Unbound:** motif hits more than 500 bp from every dev line's peak, sampled to match the bound sites' motif score
   in 1-bit bins (272; the highest-score bins have too few unbound hits).
 - Per line: GM12878 184 bound / 146 other line / 268 unbound; K562 252 / 78 / 265.
+- **Correction (18 Nov):** 74 of the 272 unbound sites have no bulk short-read data (CTCF or ATAC fold change
+  exactly 0 over ± 1 kb in a dev line), so they are "not measured" rather than unbound. The unbound results are rerun without
+  them in [the last subsection](#rerun-without-the-sites-that-have-no-chip-data-18-nov). The tables below are the
+  original runs on all sites.
 
 **Per-fiber state at the motif** (fixed before looking at results):
 - *nucleosome:* ≥ 50% of the motif covered by a nucleosome call;
@@ -74,7 +78,7 @@ Fiber states, measured input (the same for every model):
 
 **H4 holds:** 41–43% of accessible fibers carry the footprint at bound sites, against 12–13% at unbound and
 other-line sites (the background rate of our simple call). The literature value is ~30% in K562 (Stergachis 2020),
-with a different footprint caller.
+with a different footprint caller. *Without the sites lacking ChIP data: 10% / 10% at unbound sites.*
 
 ### Model results
 
@@ -171,11 +175,13 @@ site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 
 - **Caveat on H2:** CTCF − ATAC is also positive at unbound sites (+0.20 / +0.27 in DEV4NF). There, predicted
   ATAC drops on protected-looking fibers while predicted CTCF doesn't move. At bound sites the DEV4NF CTCF
   increase itself (+1.14 / +0.84) has no counterpart at unbound sites (−0.05 / −0.04), so the main result stands,
-  but CTCF − ATAC overstates specificity by about 0.2.
+  but CTCF − ATAC overstates specificity by about 0.2. *Without the sites lacking ChIP data the caveat stays
+  (+0.16 / +0.25), and the unbound CTCF increase is slightly negative (−0.07 / −0.06).*
 - **H3 holds:** nucleosome-covered fibers are lowest in every model with accessibility (open − nucleosome +0.64 to
   +1.11).
 - **H5 holds** for every model with accessibility, including at matched motif scores. The no-accessibility model
-  separates bound and unbound sites only slightly (~0.1), from CpG and sequence context.
+  separates bound and unbound sites only slightly (~0.1), from CpG and sequence context. *Without the sites lacking
+  ChIP data, bound sites are higher in all 9 motif-score bins; the 20-bit exception came from those sites.*
 - **The no-accessibility null is clean:** every per-fiber difference is 0.00. The test does not pick up something
   other than m6A.
 - **Other-line sites** (a peak in another dev line only) show a smaller effect, largest in K562 for DEV4NF (+0.42,
@@ -200,10 +206,57 @@ site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 
   *Seed 2: m6A + CpG reaches 60–85% of DEV4NF (+0.56 / +0.58, CTCF − ATAC +0.55 / +0.50), so the evidence that the
   MSP / nucleosome calls help is now weak: DEV4NF ≥ m6A + CpG in both seeds, but by 1.2–4.4×.*
 
+### Rerun without the sites that have no ChIP data (18 Nov)
+
+Overlaying the ENCODE CTCF track on the locus figures (`Nov_20_figs.md`) showed that the most accessible "unbound"
+motif sits where the GM12878 and K562 CTCF fold change is exactly 0 for 20 kb. Short reads do not map there, so the
+absence of a peak says nothing.
+
+- **Hole sites:** the CTCF or the ATAC fold change is exactly 0 over the whole motif ± 1 kb in at least one dev
+  line (`ctcf_holes.py`).
+  - Why both tracks: the CTCF track is sparse (exact zeros cover a median 28% of the bp around bound sites), so
+    only a fully zero 2 kb counts.
+  - ATAC is dense (no bound site has a fully zero 2 kb), so a fully zero ATAC window marks unmapped reads even
+    where CTCF has a few non-zero bins. That catches the second "unbound" pick, `ctcf_unbound_52`: 105 accessible
+    fibers but no ATAC reads.
+- **How many:** 72 unbound sites have no CTCF reads and 19 no ATAC reads, 74 of the 272 in total. Also 1 of the 330
+  bound sites, which is bound in another line only.
+- **Where they are:** 46 of the 75 lie in the repetitive 5–9 Mb of chr21, the rest in a few clusters (11–13, 34
+  and 43–46 Mb).
+- **Rerun:** the same analysis without the 75 sites, for every model and seed. That leaves 198 unbound sites with
+  fibers per sample, against 268 / 265 before.
+
+Unbound sites without the holes, GM12878 / K562 (per-site medians; seed 919 | seed 2):
+
+| Model | Footprint − open, CTCF | CTCF − ATAC | Site mean predicted CTCF, bound vs unbound (seed 919) |
+|---|---|---|---|
+| **DEV4NF** | −0.07 / −0.06 \| −0.03 / −0.05 | +0.16 / +0.25 \| +0.10 / +0.14 | 1.63 vs 0.49 / 1.45 vs 0.52 |
+| DEV4 | −0.02 / −0.01 \| −0.06 / −0.08 | +0.05 / +0.03 \| +0.06 / +0.09 | 1.25 vs 0.49 / 1.09 vs 0.51 |
+| m6A + CpG | −0.05 / −0.03 \| −0.01 / +0.02 | +0.14 / +0.11 \| +0.18 / +0.22 | 1.44 vs 0.52 / 1.28 vs 0.54 |
+| No accessibility | −0.01 / 0.00 \| −0.01 / −0.01 | +0.01 / 0.00 \| 0.00 / +0.01 | 0.71 vs 0.54 / 0.66 vs 0.57 |
+| No CpG | −0.08 / −0.08 \| −0.09 / −0.10 | +0.06 / +0.07 \| +0.13 / +0.14 | 1.32 vs 0.51 / 1.14 vs 0.53 |
+
+**What changes:**
+- **The unbound null holds, and is cleaner.** Footprint fibers at unbound sites get no more predicted CTCF than
+  open fibers: −0.01 to −0.10 in every model with m6A, slightly negative where it reaches significance (DEV4NF seed
+  919, p = 0.009 / 0.03). The one positive value is m6A + CpG seed 2 in K562 (+0.02, p = 0.01).
+- **H4 is stronger:** footprints are 10% / 10% of accessible fibers at unbound sites (from 12% / 13%), against
+  41–43% at bound sites.
+- **H5 is stronger:** the unbound site mean drops by ~0.1 in every model with m6A (DEV4NF 0.61 → 0.49 in GM12878).
+  Bound sites are now higher in all 9 motif-score bins in every model with accessibility, where before the
+  20-bit bin was the exception. The no-accessibility model has 8 of 9 in K562.
+- **The H2 caveat stays:** CTCF − ATAC is still positive at unbound sites (DEV4NF +0.10 to +0.25). It comes from
+  predicted ATAC dropping on protected-looking fibers, not from the hole sites.
+- **Bound and other-line results are unchanged** (the one bound hole site is only bound in another line).
+
 **Sources:** targets `data_prep/build_targets.py` + `targets_spec.yaml` → `DATA_FIBER/regions/targets/`
 (`manifest.json`); per-fiber predictions `molecule_predict.py`, jobs `logs/2026-11-07_05_molecules_ctcf_chr21`,
 `logs/2026-11-08_{09,11,13,19}_molecules_ctcf_abl_*` (~4.5 min each); analysis
-`plots_code/26_nov_13/ctcf_footprints.py --model <m>` → `plots/26_nov_13/molecules/ctcf_*_<m>.{tsv,png}`.
+`plots_code/26_nov_13/ctcf_footprints.py --model <m>` → `plots/26_nov_13/molecules/ctcf_*_<m>.{tsv,png}`. Rerun
+without the hole sites: `plots_code/26_nov_20/ctcf_holes.py` → `plots/26_nov_20/ctcf_noholes/holes.txt`;
+`ctcf_sites_bulk_holes.tsv`; `ctcf_footprints.py --model <m> --seed <s> --exclude plots/26_nov_20/ctcf_noholes/holes.txt --out
+plots/26_nov_20/ctcf_noholes`; comparison `plots_code/26_nov_20/ctcf_noholes_compare.py` → `compare.tsv`,
+`compare_h5.tsv`, `log_compare.txt`.
 
 ## 2. X inactivation per haplotype in GM12878 (T5b)
 

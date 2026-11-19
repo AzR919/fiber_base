@@ -27,7 +27,10 @@ Caveat: the model sees m6A (so it sees the footprint) and the reference sequence
 sets). The test is whether bulk supervision taught it that a protected motif on an accessible molecule means CTCF.
 
     python plots_code/26_nov_13/ctcf_footprints.py [--model DEV4|noFIRE|m6aCpG|noAcc|noCpG] [--seed 919|2] [--dir DIR]
-Writes plots/26_nov_13/molecules/ctcf_*_<model>.tsv and ctcf_footprints_<model>.png.
+                                                   [--exclude SITES.txt] [--out DIR]
+Writes plots/26_nov_13/molecules/ctcf_*_<model>.tsv and ctcf_footprints_<model>.png (or into --out).
+--exclude drops sites before any statistic: used on 18 Nov to drop the sites without bulk ChIP data
+(plots_code/26_nov_20/ctcf_holes.py, output in plots/26_nov_20/ctcf_noholes/).
 """
 import argparse
 import glob
@@ -55,6 +58,9 @@ def parse_args():
     p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
     p.add_argument("--seed", type=int, default=919, choices=SEEDS, help="training seed (output suffix _seed<n> if not 919)")
     p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_ctcf_sites_chr21)")
+    p.add_argument("--exclude", default=None, help="file of site names to leave out, one per line (e.g. the sites "
+                   "without bulk ChIP data, plots_code/26_nov_20/ctcf_holes.py)")
+    p.add_argument("--out", default=OUT, help="output folder")
     return p.parse_args()
 
 
@@ -88,7 +94,12 @@ def main():
     args = parse_args()
     d = args.dir or molecule_dir(args.model, "ctcf_sites_chr21", args.seed)
     tag = out_tag(args.model, args.seed)
+    global OUT
+    OUT = args.out
     os.makedirs(OUT, exist_ok=True)
+    exclude = set(open(args.exclude).read().split()) if args.exclude else set()
+    if exclude:
+        print(f"leaving out {len(exclude)} sites listed in {args.exclude}", flush=True)
     print(f"reading {d}", flush=True)
     files = sorted(glob.glob(os.path.join(d, "fibers_*.tsv.gz")))
     summary, perfib = [], {}
@@ -96,6 +107,7 @@ def main():
         sample = os.path.basename(f)[len("fibers_"):-len(".tsv.gz")]
         cell = sample.split("_")[0]
         df = pd.read_csv(f, sep="\t")
+        df = df[~df.target.isin(exclude)].copy()
         df["state"] = fiber_state(df)
         # a site is bound *in this cell line* when this line has a peak there; bound elsewhere only = 'other_line'
         df["site_set"] = np.where(df["set"] == "unbound", "unbound",
