@@ -455,3 +455,42 @@ fixed in 55c22a8), `logs/2026-11-08_{10,12,14,20}_molecules_tss_abl_*` (seed 919
 `plots/26_nov_13/molecules/xi_per_gene_<m>[_seed2].tsv`; this section's tables and figures
 `plots_code/26_nov_20/xi_cgi.py` → `plots/26_nov_20/xi/` (`xi_cgi_summary.tsv`, `xi_cgi_inputs.tsv`,
 `xi_cgi_h2.tsv`, `xi_cgi_xist.tsv`, `xi_DEV4NF.png`, `xi_cgi_fractions.png`, `log_xi_cgi.txt`).
+
+## Next steps: comparison against simpler models
+
+Both tests show that DEV4NF's per-fiber predictions follow each molecule's own data. The standing objection is that
+an obvious reading of the same input might do as well ("of course footprint fibers get more CTCF"). That can't be
+argued away; it can be measured. The plan (`TODO_extended.md` T11, updated 18 Nov):
+
+- **Against DEV4NF, in both seeds,** with the baselines given the same channels (m6A, CpG, MSP, nucleosome; no
+  FIRE).
+- **On the tests as tightened here:**
+  - CTCF footprints without the sites lacking bulk data, with height and shape against the bulk track
+    (`Nov_20_figs.md`);
+  - X inactivation on silenced CGI promoters.
+- **Two baselines:**
+  - **Hand-written rules, one per assay** (I25). For example: ATAC = fraction of the window in an MSP; H3K4me3 =
+    accessible with unmethylated CpG near a CGI or TSS. On the CTCF footprint test a footprint rule is the test's
+    own label, so there it is a ceiling, not a competitor.
+  - **A learned summary model** (I24): per-fiber averages of the inputs at a few window sizes, a linear map to the
+    8 outputs, and the same fiber averaging and bulk training as DEV4NF. It has no motif-protection feature, so a
+    footprint response in DEV4NF that this model lacks was learned unaided.
+- **How to read the outcome:**
+  - DEV4NF ≈ simple model: it learned the known biology from bulk alone;
+  - DEV4NF > simple model: it uses information an obvious reading misses (the stronger claim);
+  - both fail: the information isn't in the fiber features. H3K27me3 on the Xi is the case to watch. If the simple
+    model also puts more H3K27me3 on the Xa, that link is in the features, not a network quirk.
+
+**Order:**
+1. Write the expected results down before running.
+2. Score the hand rules on the two molecule tests. The per-fiber tables already hold the summaries, so no new
+   predictions are needed.
+3. Shuffle controls for DEV4NF (T7): shuffled inputs across fibers or loci should break the per-fiber predictions.
+4. Train the learned summary model (2 seeds) with two window settings: smallest window ≈ 50 bp (cannot see a
+   footprint), and ≈ 25 bp (a linear map might pick up part of it). Score it with every test, and add it to the
+   locus figures.
+5. Later: a bulk model on fiber-averaged inputs (T6).
+
+**Open choices** for the learned model:
+- explicit annotations (motif score, CGI, TSS distance) or only local GC / CpG density from the DNA;
+- linear only, or also a one-hidden-layer MLP to separate nonlinearity from fine spatial patterns.

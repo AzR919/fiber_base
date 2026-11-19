@@ -95,6 +95,13 @@ Three experiments:
   features (same fiber averaging and bulk training, no motif-protection feature) and fixed hand-written rules per
   assay, run through every existing test. Answers "does the network learn more than an obvious reading of the
   input?". Careful: on the CTCF footprint test a footprint rule is circular (it is the test's label).
+  **Next (18 Nov):** against DEV4NF in both seeds, on the tightened tests (`Nov_20.md`). In order:
+  1. write the expected results down;
+  2. hand rules on the molecule tests, from the existing per-fiber TSVs;
+  3. shuffle controls (T7);
+  4. the learned summary model, 2 seeds, with and without ≈ 25 bp windows.
+  
+  Details and open choices in `TODO_extended.md` T11.
 - **Same-molecule cases where accessibility and the mark disagree:**
   - bivalent promoters in H1 (H3K4me3 and H3K27me3 together, unlike in the differentiated lines);
   - H3K36me3 and H3K27me3 rarely on the same molecule (PRC2 is inhibited by H3K36me3);

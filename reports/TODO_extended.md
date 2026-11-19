@@ -442,7 +442,31 @@ seed.
   - H3K27ac, H3K4me1, held-out cell types: the largest gap, if there is one.
 - **If the gap is small almost everywhere,** know it before writing: the pitch shifts from "deep model" to
   "bulk-supervised per-fiber imputation works, and this is what is learnable from fiber features".
-- **Status.** Idea (17 Nov). Implementation I24 (learned), I25 (rules).
+- **Update (18 Nov), after `Nov_20.md`:**
+  - **Compare against DEV4NF** (the main model since 18 Nov), in both seeds. Give the baselines the same channels:
+    m6A, CpG, MSP, nucleosome, no FIRE.
+  - **Run the tightened tests:** CTCF footprints without the 75 sites lacking bulk data (`ctcf_holes.py`), with
+    height and shape against the bulk track (`Nov_20_figs.md`); X inactivation scored on silenced CGI promoters.
+  - **H3K27me3 on the Xi is the clearest "both fail?" case.** If the simple model also puts more H3K27me3 on the
+    Xa, the "open, unmethylated CGI → H3K27me3" link is in the fiber features, not a network quirk. Check expressed
+    genes separately (PTCHD1, `Nov_20_figs.md`).
+  - **Order:**
+    1. Fix the designs and write the expected results down before running (the list above, updated for DEV4NF).
+    2. Hand rules on the molecule tests only (I25). The per-fiber TSVs already hold the summaries; no new
+       predictions needed.
+    3. Shuffle controls for DEV4NF (T7).
+    4. Learned summary model (I24), 2 seeds, scored with every test as above. Add a baseline column to the locus
+       figures.
+    5. Later: the bulk model on fiber-averaged inputs (T6); bulk scoring for the hand rules.
+  - **Open choices for I24:**
+    - Window sizes: start at ≈ 50 bp, so the baseline cannot see footprints. Also run a second arm with ≈ 25 bp,
+      to test whether a linear map already gets part of the footprint response (it cannot tie protection to the
+      motif, since a linear map cannot multiply them).
+    - DNA input: local GC / CpG density (a CGI proxy), or explicit annotations (motif score, CGI, TSS distance).
+      The annotations make I24 and I25 comparable but need annotation tracks.
+    - Linear, or also a one-hidden-layer MLP on the same summaries, to separate "nonlinearity" from "fine spatial
+      pattern".
+- **Status.** Idea (17 Nov); plan updated 18 Nov. Implementation I24 (learned), I25 (rules).
 
 ---
 
@@ -520,8 +544,8 @@ Priority within 4b: replicate ceiling → DNA-only model → similar-cell averag
 | I21 | In-silico CpG flips: set a molecule's CpG calls in a region (e.g. a CGI) to methylated / unmethylated and rerun the model on the same fibers | T5a | Inference-only tool |
 | I22 | CTCF footprint calls per fiber at CTCF motifs (fibertools `ft footprint` or an m6A-gap caller), joined to per-fiber CTCF predictions | T5e | |
 | I23 | Ablation model configs: no CpG [1, 0, 1, 1, 1], no accessibility [0, 1, 0, 0, 0]; no FIRE = `model16` | T10 | Next free model numbers |
-| I24 | Learned summary-feature baseline: a new model in `models.py` (per-fiber window summaries at a few scales + reference annotations → linear / 1×1 layer → Softplus → coverage-normalized average), trained with the usual `main.py` pipeline and data / train configs | T11 | No motif-protection feature. `molecule_predict.py` and the evals should then work unchanged; 2 seeds |
-| I25 | Hand-written per-assay rules, fixed before running, as a scorer over `molecule_predict.py` outputs (input summaries) plus a per-assay linear scale fit on chr20 for bulk | T11 | Rules in the T11 table; needs CGI / TSS / gene-body / motif annotations per target |
+| I24 | Learned summary-feature baseline: a new model in `models.py` (per-fiber window summaries at a few scales + reference annotations → linear / 1×1 layer → Softplus → coverage-normalized average), trained with the usual `main.py` pipeline and data / train configs | T11 | No motif-protection feature. `molecule_predict.py` and the evals should then work unchanged; 2 seeds. DEV4NF's channels (no FIRE). Two window arms (smallest ≈ 50 bp, and ≈ 25 bp); see T11 update |
+| I25 | Hand-written per-assay rules, fixed before running, as a scorer over `molecule_predict.py` outputs (input summaries) plus a per-assay linear scale fit on chr20 for bulk | T11 | Rules in the T11 table; needs CGI / TSS / gene-body / motif annotations per target. First step: molecule tests only, from the existing per-fiber TSVs (CTCF without holes, X inactivation at CGI promoters) |
 
 ## 6. Engineering backlog (performance and quality)
 
