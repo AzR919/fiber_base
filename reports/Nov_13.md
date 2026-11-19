@@ -1,7 +1,7 @@
 # 13th Nov
 
 Short version. Every experiment with its setup, full tables, figures and sources is in `Nov_13_extended.md`
-(section numbers below refer to it).
+(section numbers below refer to it; its sections 7 and 8, the molecule tests, are now in `Nov_20.md`).
 
 ## Summary
 

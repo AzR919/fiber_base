@@ -14,8 +14,8 @@ figures, and the outcome. The short version is `Nov_13.md`. Plan and test defini
 | 4 | [CTCF on K562–H1](#4-ctcf-on-k562h1-a-weak-h1-track-plus-a-model-shift) | (a) H1's CTCF track is weak, or (b) H1's fibers are more accessible | (a) yes, (b) no; plus a constant model shift toward H1 |
 | 5 | [Offset breakdown, all assays](#5-the-same-breakdown-for-every-assay-on-both-pairs) | Which failures are track problems, compression or cell-level offsets? | Three failure types; track outliers H1 CTCF, HepG2 / H1 H3K9me3 |
 | 6 | [Input ablations](#6-input-ablations-t10-which-fiber-inputs-does-the-model-use) | Which fiber inputs does the model use? Five models: all inputs, no FIRE, m6A + CpG (no fibertools calls), no accessibility (CpG only), no CpG | Fibertools calls add nothing in bulk (no FIRE and m6A + CpG even gain +0.02–0.03 on H3K27ac / H3K4me1). m6A carries ATAC, H3K4me1, H3K27ac, CTCF, H3K9me3; CpG carries H3K36me3 (−0.25 without it) and H3K27me3. All replicate in a second seed |
-| 7 | [CTCF footprints on single molecules](#7-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A, in both seeds; null clean. The size varies 2–10× between trainings (DEV4 +0.11 / +0.73). **No FIRE is the only model strong and CTCF-specific in both seeds** (+1.14 / +0.95) |
-| 8 | [X inactivation per haplotype](#8-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac (71–91% of genes, both seeds), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign). H3K9me3 passes robustly only without CpG; seed-dependent otherwise |
+| 7 | [CTCF footprints on single molecules](Nov_20.md#1-ctcf-footprints-on-single-molecules-t5e) | Fibers with a protected CTCF motif get higher predicted CTCF than open fibers at the same site, more than for ATAC | Yes for every model that sees m6A, in both seeds; null clean. The size varies 2–10× between trainings (DEV4 +0.11 / +0.73). **No FIRE is the only model strong and CTCF-specific in both seeds** (+1.14 / +0.95) |
+| 8 | [X inactivation per haplotype](Nov_20.md#2-x-inactivation-per-haplotype-in-gm12878-t5b) | At silenced chrX promoters, the active X gets more ATAC / H3K4me3 / H3K27ac and less H3K27me3 / H3K9me3 than the inactive X; escape / PAR / autosomal ≈ 0; XIST reversed | Pass for ATAC, H3K4me3, H3K27ac (71–91% of genes, both seeds), nulls flat, XIST reversed. **H3K27me3 fails** (opposite sign). H3K9me3 passes robustly only without CpG; seed-dependent otherwise |
 | 9 | [ENCODE replicate ceiling](#9-encode-replicate-ceiling-i11-how-much-of-each-target-can-a-model-get) | How much of each target is reproducible? Which "weak" assays are target noise? | Replicates agree at r ≈ 0.4, so the reachable r is ~0.74. DEV4 gets 66% of it in dev, 58% held out, 46% in Panc1. Dev H3K36me3 / H3K27me3 are as close as the active marks; the held-out gap is cell-specific CTCF, H3K36me3, H3K27me3 |
 | 10 | [Second training seed](#10-second-training-seed-which-results-replicate) | Which results of 6–9 survive retraining every model with another seed? | Bulk: yes, one training moves a group mean by ~0.005–0.01. Molecules: directions replicate, sizes vary 2–10×; "10× stronger without FIRE" was mostly a weak DEV4 run |
 
@@ -34,7 +34,7 @@ training seed. Decisions and next steps are at the end.
 - **Checkpointing:** training saves a checkpoint after every epoch and stops cleanly before the job's time limit;
   `--resume latest` continues it. Jobs stay under 3 h (fastest partition).
 - **Cluster:** runs moved to nibi (shorter queues for our group, same GPUs).
-- **Per-molecule predictions (sections 7–8):** `molecule_predict.py` runs a trained model on every fiber over a
+- **Per-molecule predictions (sections 7–8, now in `Nov_20.md`):** `molecule_predict.py` runs a trained model on every fiber over a
   BED of target loci and writes one row per (target, fiber): the predicted assays plus the fiber's input summaries
   (m6A rate, CpG methylation, MSP / nucleosome / FIRE fraction) over the target and its flanks, and the HiPhase
   haplotype tag. Target BEDs come from `data_prep/build_targets.py` (`data_prep/targets_spec.yaml`).
@@ -577,7 +577,7 @@ except which fiber channels the model sees (`input_flags`):
   raw channel.
 - All models trained for ~2 h 10–15 min, seed 919 (section 10 repeats all five with a second seed). Each was evaluated like DEV4, on every cell type on chr21
   (bulk). This section covers bulk accuracy; the same five models run through the molecule tests in sections 7
-  and 8.
+  and 8 (now `Nov_20.md`).
 
 ### Hypotheses and results
 
@@ -798,304 +798,13 @@ order in `abl_common.py`), outputs in `plots/26_nov_13/ablations/` (`bulk_{r,mse
 
 ## 7. CTCF footprints on single molecules (T5e)
 
-> **Question:** the model was trained on bulk CTCF ChIP only; per-molecule binding was never a label. Does a
-> fiber's predicted CTCF follow whether CTCF is bound **on that molecule**, read from the CTCF footprint in its m6A
-> pattern?
-
-**Targets** (`data_prep/build_targets.py`, `ctcf_sites_chr21.bed`, chr21 only):
-- CTCF motif hits from JASPAR MA0139.2 (15 bp) at p ≤ 1e-5 (score ≥ 13.44 bits, exact threshold from the PWM's
-  score distribution).
-- **Bound:** the best hit inside each ENCODE CTCF peak of a dev line, merged across lines (330 sites). Per line, a
-  site is *bound* if that line has a peak there, and *bound_other_line* if only another dev line does.
-- **Unbound:** motif hits more than 500 bp from every dev line's peak, sampled to match the bound sites' motif score
-  in 1-bit bins (272; the highest-score bins have too few unbound hits).
-- Per line: GM12878 184 bound / 146 other line / 268 unbound; K562 252 / 78 / 265.
-
-**Per-fiber state at the motif** (fixed before looking at results):
-- *nucleosome:* ≥ 50% of the motif covered by a nucleosome call;
-- *footprint:* ≥ 50% inside an MSP **and** the motif's m6A rate ≤ 0.5 × the mean rate of the 100 bp flanks
-  (protected);
-- *open:* inside an MSP, not protected;
-- *other:* anything else (read ends, < 4 A/T positions in the motif, no flank m6A calls).
-
-**Hypotheses (fixed in advance, in the script header):**
-- **H1 (main):** at bound sites, footprint fibers get higher predicted CTCF than open fibers at the same site
-  (per-site difference, Wilcoxon signed-rank over sites with ≥ 3 fibers in both states).
-- **H2 (specificity):** that difference is larger for CTCF than for ATAC (both states are accessible).
-- **H3:** nucleosome-covered fibers get the lowest predicted CTCF.
-- **H4 (data, no model):** footprints are more frequent among accessible fibers at bound than at unbound sites.
-- **H5 (null):** unbound sites get lower predicted CTCF than bound sites of the same motif score.
-
-Caveat: the model sees m6A (so the footprint) and the reference sequence (so the motif, in both sets). The test is
-whether bulk supervision taught it that a protected motif on an accessible molecule means CTCF. The
-no-accessibility model sees neither m6A nor MSPs, so it is a built-in null.
-
-### Data check (H4)
-
-Fiber states, measured input (the same for every model):
-
-| Sample | Site set | Sites | Fibers | Nucleosome | Open | Footprint | Other | Footprint / accessible |
-|---|---|---|---|---|---|---|---|---|
-| GM12878 | bound | 184 | 21,964 | .36 | .29 | .22 | .12 | **.43** |
-| | bound, other line | 146 | 18,033 | .67 | .24 | .04 | .05 | .13 |
-| | unbound | 268 | 30,482 | .66 | .28 | .04 | .02 | .12 |
-| K562 | bound | 252 | 22,742 | .34 | .31 | .21 | .14 | **.41** |
-| | bound, other line | 78 | 6,878 | .54 | .36 | .05 | .06 | .12 |
-| | unbound | 265 | 21,892 | .52 | .39 | .06 | .03 | .13 |
-
-**H4 holds:** 41–43% of accessible fibers carry the footprint at bound sites, against 12–13% at unbound and
-other-line sites (the background rate of our simple call). The literature value is ~30% in K562 (Stergachis 2020),
-with a different footprint caller.
-
-### Model results
-
-The three figures below are the same model trained with different input channels (section 6), everything else
-equal. They remove the fibertools calls, which are all derived from the m6A pattern, one step at a time. All three
-are seed 919; the seed-2 runs are in section 10.
-
-![CTCF footprints, DEV4](../plots/26_nov_13/molecules/ctcf_footprints_DEV4.png)
-
-*DEV4: all inputs (m6A, CpG, MSP, nucleosome, FIRE). The reference.*
-
-![CTCF footprints, no FIRE](../plots/26_nov_13/molecules/ctcf_footprints_noFIRE.png)
-
-*No FIRE: m6A, CpG, MSP, nucleosome. FIRE removed, the call whose classifier was trained on DNase and CTCF ChIP.
-Tests whether that bulk CTCF knowledge in the input changes how the model reads the molecule.*
-
-![CTCF footprints, m6A + CpG only](../plots/26_nov_13/molecules/ctcf_footprints_m6aCpG.png)
-
-*m6A + CpG: all three fibertools calls removed (MSP, nucleosome, FIRE). Tests whether the model can find the
-footprint from raw m6A alone, without the calls that mark the accessible patch.*
-
-Each figure, per sample: fiber states by site set; per-fiber predicted CTCF by state at bound sites; the per-site
-footprint − open difference for CTCF and ATAC; site mean predicted CTCF against the line's CTCF peak signal. The
-no-CpG (CpG removed) and no-accessibility (CpG only: the null, which cannot see the footprint) figures are
-`ctcf_footprints_noCpG.png` / `_noAcc.png` in the same folder. The fiber
-states are computed from the measured MSP / nucleosome calls for every model, including the two that don't see
-them as input.
-
-At bound sites (per-site medians; n = 135 GM12878 / 184 K562 sites with both states):
-
-| Model | Sample | Footprint − open, CTCF (fraction of sites > 0, p) | Footprint − open, ATAC | Footprint − open, H3K4me3 | CTCF − ATAC (p) | Open − nucleosome, CTCF |
-|---|---|---|---|---|---|---|
-| DEV4 | GM12878 | +0.11 (0.64, 7e-5) | +0.09 | −0.10 | +0.02 (0.05) | +1.01 |
-| | K562 | +0.04 (0.56, 0.05) | +0.02 | −0.09 | +0.05 (9e-8) | +0.71 |
-| No CpG | GM12878 | +0.18 (0.70, 9e-8) | +0.27 | +0.09 | −0.12 (2e-13) | +1.00 |
-| | K562 | +0.10 (0.59, 0.003) | +0.11 | +0.02 | −0.02 (0.007) | +0.64 |
-| **No FIRE** | GM12878 | **+1.14 (0.94, 6e-23)** | +0.41 | −0.08 | **+0.67 (7e-24)** | +1.11 |
-| | K562 | **+0.84 (0.83, 3e-25)** | +0.30 | −0.07 | **+0.54 (2e-31)** | +0.83 |
-| No accessibility | GM12878 | 0.00 (0.52, 0.39) | 0.00 | +0.01 | 0.00 (0.90) | −0.01 |
-| | K562 | 0.00 (0.55, 0.04) | +0.01 | 0.00 | 0.00 (0.08) | 0.00 |
-| m6A + CpG | GM12878 | +0.26 (0.81, 2e-14) | +0.06 | +0.03 | +0.20 (1e-21) | +1.15 |
-| | K562 | +0.20 (0.64, 2e-7) | +0.04 | +0.04 | +0.14 (6e-26) | +0.88 |
-
-Unbound and other-line sites (per-site medians):
-
-| Model | Sample | Unbound: footprint − open, CTCF (p) | Unbound: CTCF − ATAC | Other line: footprint − open, CTCF (n sites, p) |
-|---|---|---|---|---|
-| DEV4 | GM12878 | −0.02 (0.62) | +0.04 | +0.04 (79, 0.002) |
-| | K562 | −0.01 (0.95) | +0.04 | +0.21 (43, 0.001) |
-| No CpG | GM12878 | −0.07 (0.45) | +0.05 | +0.04 (79, 0.009) |
-| | K562 | −0.06 (0.24) | +0.06 | +0.15 (43, 0.01) |
-| No FIRE | GM12878 | −0.05 (0.84) | +0.20 | +0.05 (79, 9e-4) |
-| | K562 | −0.04 (0.60) | +0.27 | +0.42 (43, 8e-5) |
-| No accessibility | both | ≈ 0 | ≈ 0 | ≈ 0 |
-| m6A + CpG | GM12878 | −0.04 (0.07) | +0.14 | +0.04 (79, 0.02) |
-| | K562 | −0.03 (0.11) | +0.11 | +0.18 (43, 0.004) |
-
-Site level (H5): mean predicted CTCF at bound / unbound sites is 1.25 / 0.58 (GM12878) and 1.09 / 0.60 (K562) for
-DEV4, 1.63 / 0.61 and 1.45 / 0.64 without FIRE, 1.44 / 0.62 and 1.28 / 0.66 for m6A + CpG, and 0.71 / 0.57 and
-0.66 / 0.58 without accessibility. Within 1-bit motif-score bins, bound sites score higher in every bin except the
-20-bit bin, which has only 5 unbound sites (`ctcf_bound_vs_unbound_by_score_<model>.tsv`). Across bound sites, the
-site mean follows the line's CTCF peak strength (Spearman 0.81 / 0.80 for DEV4, 0.81 / 0.85 without FIRE, 0.81 /
-0.84 for m6A + CpG).
-
-### Outcomes
-
-> **Second seed (section 10):** the tables above are seed 919. Retrained with seed 2, every model that sees m6A
-> responds strongly (DEV4 +0.73 / +0.44, m6A + CpG +0.56 / +0.58, no CpG +0.75 / +0.46, no FIRE +0.95 / +0.68),
-> unbound sites stay ≈ 0 and the no-accessibility null stays 0. So H1, H3 and H5 replicate, but **the size of the
-> response varies 2–10× between trainings, and the comparisons between models below hold only for no FIRE**: it is
-> the strongest and the most CTCF-specific model in both seeds. Statements about DEV4, m6A + CpG and no CpG being
-> weak are single-seed.
-
-- **H1 holds for every model that sees m6A**, but weakly in DEV4 (+0.11 GM12878, +0.04 K562, p = 0.05). **Without
-  FIRE the effect is ~10× larger** (+1.14 / +0.84; 94% / 83% of sites in the expected direction). *Seed 2: DEV4
-  +0.73 / +0.44 (p ≤ 6e-20), no FIRE +0.95 / +0.68, so 1.3–1.5×, not 10×.*
-- **H2:** weak in DEV4 (CTCF − ATAC +0.02 / +0.05). **Fails without CpG** (−0.12 / −0.02: there, predicted ATAC
-  moves more than CTCF, so its footprint response is accessibility-like). **Strong without FIRE** (+0.67 / +0.54).
-  H3K4me3 goes slightly *down* on footprint fibers in every model with m6A except no CpG, so the response is
-  CTCF-specific, not a general "more signal". *Seed 2: H2 holds for every model with m6A, no CpG included
-  (+0.33 / +0.31); no FIRE stays the most specific (+0.85 / +0.63, against DEV4 +0.23 / +0.21).*
-- **Caveat on H2:** CTCF − ATAC is also positive at unbound sites (+0.20 / +0.27 without FIRE). There, predicted
-  ATAC drops on protected-looking fibers while predicted CTCF doesn't move. At bound sites the no-FIRE CTCF
-  increase itself (+1.14 / +0.84) has no counterpart at unbound sites (−0.05 / −0.04), so the main result stands,
-  but CTCF − ATAC overstates specificity by about 0.2.
-- **H3 holds:** nucleosome-covered fibers are lowest in every model with accessibility (open − nucleosome +0.64 to
-  +1.11).
-- **H5 holds** for every model with accessibility, including at matched motif scores. The no-accessibility model
-  separates bound and unbound sites only slightly (~0.1), from CpG and sequence context.
-- **The no-accessibility null is clean:** every per-fiber difference is 0.00. The test does not pick up something
-  other than m6A.
-- **Other-line sites** (a peak in another dev line only) show a smaller effect, largest in K562 without FIRE (+0.42,
-  43 sites): some of these sites may be weakly bound in K562 below the peak caller's threshold.
-- **Interpretation (not tested):** with the FIRE channel, the model seems to take "this is a CTCF-type element" from
-  FIRE, at the site level, and has little reason to read the m6A pattern inside the MSP. Without FIRE it has to
-  read the m6A pattern, and it learns that a protected motif on an accessible molecule means CTCF, from bulk
-  supervision alone. Together with section 6 (no bulk cost), this makes the no-FIRE model the better main model.
-  *Seed 2 weakens this account: DEV4 can also learn a strong response with FIRE in the input, though a less
-  specific one. What replicates is that without FIRE the response is reliably strong and specific.*
-- **m6A + CpG (no fibertools calls) sits in between:** footprint − open CTCF +0.26 / +0.20 (81% / 64% of sites),
-  about twice DEV4 but a quarter of no FIRE. It is still absent at unbound sites (−0.04 / −0.03), and nucleosome
-  fibers are still lowest (+1.15 / +0.88), so H1, H3 and H5 hold. Specificity is weaker: CTCF − ATAC is +0.20 /
-  +0.14 at bound sites but +0.14 / +0.11 at unbound ones, so most of it is the generic drop in predicted ATAC on
-  protected-looking fibers, and H3K4me3 rises slightly on footprint fibers (+0.03 / +0.04; also +0.05 at unbound
-  GM12878 sites) instead of falling as in DEV4 and no FIRE.
-- **Interpretation (not tested):** the strongest per-molecule CTCF read needs the MSP / nucleosome calls *without*
-  FIRE. The calls give the model the accessible patch, against which a 15 bp protected motif stands out; without
-  them it has to find the patch from the m6A density itself, and a short gap inside an MSP is harder to tell apart
-  from linker DNA. With FIRE on top, the model takes the site-level answer from FIRE. So the fibertools calls cost
-  nothing to drop in bulk (section 6) but help the molecule-level read, and FIRE is the one call to drop.
-  *Seed 2: m6A + CpG reaches 60–85% of no FIRE (+0.56 / +0.58, CTCF − ATAC +0.55 / +0.50), so the evidence that the
-  MSP / nucleosome calls help is now weak: no FIRE ≥ m6A + CpG in both seeds, but by 1.2–4.4×.*
-
-**Sources:** targets `data_prep/build_targets.py` + `targets_spec.yaml` → `DATA_FIBER/regions/targets/`
-(`manifest.json`); per-fiber predictions `molecule_predict.py`, jobs `logs/2026-11-07_05_molecules_ctcf_chr21`,
-`logs/2026-11-08_{09,11,13,19}_molecules_ctcf_abl_*` (~4.5 min each); analysis
-`plots_code/26_nov_13/ctcf_footprints.py --model <m>` → `plots/26_nov_13/molecules/ctcf_*_<m>.{tsv,png}`.
+Moved to [`Nov_20.md`, section 1](Nov_20.md#1-ctcf-footprints-on-single-molecules-t5e), unchanged apart from the
+model name (no FIRE is now called DEV4NF).
 
 ## 8. X inactivation per haplotype in GM12878 (T5b)
 
-> **Question:** the models were trained on bulk tracks, in which both X copies are mixed, and never saw haplotypes
-> or chrX (training is chr20 only). Do their per-fiber predictions differ between the active (Xa) and the inactive
-> X (Xi) the way X-inactivation biology says?
-
-**Setup:**
-- **Targets** (`tss_chrX_chr21.bed`): TSS ± 500 bp of protein-coding genes plus XIST, on chrX and chr21 (the test
-  chromosome, as autosomal null). Classes: *subject* (X-inactivated, 825), *escape* (14), *PAR* (20, hg38
-  pseudoautosomal coordinates), *xist* (1), *autosomal* (chr21, 220). CpG-island promoters flagged from the UCSC
-  CpG-island track.
-- **The escape list is provisional** (15 well-known escape genes from memory; JPX dropped as non-coding). It still
-  needs checking against Tukiainen et al. 2017.
-- **Haplotypes:** GM12878 is trio-phased (one phase block per chromosome), so HiPhase HP1 / HP2 are whole-chromosome
-  haplotypes. **Xi = the haplotype whose XIST promoter is CpG-unmethylated** (XIST is expressed from the Xi). This is
-  measured input, not a model output: XIST promoter CpG methylation 0.355 on HP1 (58 fibers) vs 0.085 on HP2 (49
-  fibers), so **Xi = HP2**.
-- **Per gene:** d = mean over Xa fibers − mean over Xi fibers, for genes with ≥ 5 fibers on each haplotype. 113,151
-  phased fiber × TSS rows over 1,073 TSSs; genes kept: subject 787 (425 with a CGI promoter), escape + PAR 33,
-  autosomal 211. On chr21, "Xa" / "Xi" are just HP1 / HP2, an arbitrary pairing, so d should be ~0.
-
-**Hypotheses (fixed in advance, in the script header).** Xi promoters are silent, CGI-methylated, depleted of
-active marks and enriched for H3K27me3 / H3K9me3; escape and PAR genes are expressed from both copies.
-- **H1:** subject genes have d > 0 for ATAC, H3K4me3, H3K27ac and d < 0 for H3K27me3, H3K9me3; strongest at CGI
-  promoters.
-- **H2:** escape + PAR genes have smaller |d| than subject genes.
-- **H3 (null):** chr21 genes have d ~ 0.
-- **H4:** XIST is the reverse of H1.
-
-Caveat: the model sees the fibers' CpG methylation and accessibility, which already differ between Xa and Xi. The
-test shows that its predictions follow X-inactivation biology on unseen chromosomes and haplotypes; the ablations
-show which input carries it.
-
-### Data check (inputs)
-
-Median Xa − Xi per gene, measured input:
-
-| Group | Genes | CpG methylation | MSP fraction |
-|---|---|---|---|
-| Subject | 787 | −0.063 | +0.040 |
-| Subject, CGI promoter | 425 | **−0.234** | **+0.082** |
-| Escape + PAR | 33 | 0.000 | −0.002 |
-| Autosomal (chr21) | 211 | −0.004 | −0.001 |
-
-The inputs behave as expected: the Xi's CGI promoters are methylated and less accessible, escape / PAR and chr21
-genes show no difference. The escape inputs also support the provisional escape list in aggregate.
-
-### Model results
-
-![X inactivation per gene, DEV4](../plots/26_nov_13/molecules/xi_promoters_DEV4.png)
-
-Each panel is one predicted assay or input: d per gene by group (box + points), red line at 0. The other models'
-figures are `xi_promoters_{noCpG,noFIRE,noAcc,m6aCpG}.png` in the same folder.
-
-Fraction of genes with the expected sign, subject genes / subject genes with a CGI promoter:
-
-| Assay (expected on Xa) | DEV4 | No CpG | No FIRE | No accessibility | m6A + CpG |
-|---|---|---|---|---|---|
-| ATAC (higher) | .86 / .91 | .82 / .88 | .83 / .90 | .79 / .88 | .84 / .89 |
-| H3K4me3 (higher) | .73 / .84 | .75 / .85 | .79 / .87 | .85 / .88 | .81 / .88 |
-| H3K27ac (higher) | .82 / .84 | .82 / .89 | .87 / .90 | .87 / .90 | .87 / .91 |
-| H3K9me3 (lower) | .73 / .76 | .80 / .86 | .72 / .71 | **.33 / .21** | .68 / .64 |
-| H3K27me3 (lower) | **.43 / .26** | **.28 / .22** | .56 / .46 | **.46 / .29** | **.48 / .35** |
-
-Median d at subject CGI promoters:
-
-| Model | ATAC | H3K4me3 | H3K27ac | H3K27me3 | H3K9me3 |
-|---|---|---|---|---|---|
-| DEV4 | +0.46 | +0.60 | +0.44 | +0.09 | −0.04 |
-| No CpG | +0.41 | +0.47 | +0.47 | +0.04 | −0.08 |
-| No FIRE | +0.53 | +0.62 | +0.53 | +0.01 | −0.02 |
-| No accessibility | +0.58 | +0.82 | +0.60 | +0.11 | +0.02 |
-| m6A + CpG | +0.51 | +0.71 | +0.52 | +0.07 | −0.02 |
-
-DEV4 Wilcoxon p over subject genes: 1e-100 (ATAC) to 1e-12 (H3K27me3); every assay is significant, including
-H3K27me3 in the wrong direction.
-
-**Nulls:** over all five models, escape + PAR and chr21 medians are within ±0.06 for every assay, and the fraction
-of genes with the expected sign is 0.42–0.61. For DEV4 every null row has Wilcoxon p ≥ 0.06.
-
-**H2 (|d| subject > escape + PAR, Mann–Whitney, DEV4):** significant for ATAC (p 0.016), H3K27me3, H3K4me1,
-H3K36me3, H3K9me3 and CTCF (p ≤ 0.006), not for H3K4me3 (0.25) or H3K27ac (0.27). Same pattern for no CpG, no
-FIRE and m6A + CpG (H3K4me3 0.36, H3K27ac 0.20); all significant without accessibility. The comparison is diluted: many subject genes are probably not
-expressed in GM12878, so they are silent on both copies and have d ≈ 0 (the cloud around 0 in the figure).
-
-**XIST (Xa − Xi):**
-
-| | ATAC | H3K4me3 | H3K27ac | H3K9me3 | CpG methylation (input) | MSP fraction (input) |
-|---|---|---|---|---|---|---|
-| DEV4 | −0.66 | −1.21 | −1.31 | +0.17 | +0.27 | −0.14 |
-| No CpG | −0.60 | −1.18 | −1.16 | +0.11 | | |
-| No FIRE | −0.69 | −1.31 | −1.45 | +0.12 | | |
-| No accessibility | −0.26 | −0.26 | −0.24 | −0.01 | | |
-| m6A + CpG | −0.60 | −1.35 | −1.45 | +0.09 | | |
-
-### Outcomes
-
-> **Second seed (section 10):** ATAC, H3K4me3, H3K27ac, the nulls, XIST and the H3K27me3 failure all replicate in
-> every model. H3K9me3 does not, except without CpG: DEV4's falls from 76% to 52% at CGI promoters, and the
-> no-accessibility reversal (21%) becomes 67% right. The H3K9me3 statements below are single-seed.
-
-- **H1 holds for ATAC, H3K4me3, H3K27ac and H3K9me3** in DEV4 (73–86% of subject genes, 76–91% at CGI promoters).
-  *H3K9me3 is at chance at CGIs in DEV4's second seed (64% / 52%).*
-- **H1 fails for H3K27me3:** the models predict *more* H3K27me3 on the Xa, most clearly at CGI promoters (only 26%
-  of genes in the expected direction for DEV4; 46% without FIRE, i.e. chance; 17% in no FIRE's second seed). Possible reason: on autosomes,
-  promoter H3K27me3 sits at unmethylated CGIs (Polycomb targets), and the models learned that link. On the Xi,
-  CGIs are methylated and H3K27me3-enriched at the same time, a combination absent from the training chromosome.
-  Also, Xi H3K27me3 is broad and partly in different domains from H3K9me3, so promoter windows may not be the right
-  place to test it.
-- **H2 partly holds** (6 of 8 assays; see the dilution caveat above).
-- **H3 holds:** chr21 and escape / PAR genes show no difference.
-- **H4 holds:** XIST is reversed in every model (DEV4 H3K4me3 −1.21, i.e. higher on the Xi), and its input
-  confirms it (more accessible and unmethylated on the Xi).
-- **What the ablations show:**
-  - **Active marks:** every model passes, so either input alone is enough; the signal is redundant. CpG alone gives
-    the largest differences (H3K4me3 +0.82 at CGIs), in line with the input: the methylation difference at CGI
-    promoters (−0.23) is larger than the accessibility difference (+0.08).
-  - **H3K9me3** comes out right only with accessibility (no CpG 80% / 86%); from CpG alone it reverses (33% / 21%).
-    So the model's Xi H3K9me3 signal is "closed chromatin → H3K9me3", not methylation. *Seed 2: no CpG again
-    79% / 86%, but CpG alone now gets 57% / 67% right, so only the no-CpG result is solid. The per-gene H3K9me3
-    differences are small (median |d| ≤ 0.08 at CGIs) and flip between trainings when CpG is an input.*
-  - **m6A + CpG** passes every active mark (81–87% of subject genes, 88–91% at CGIs) and reverses XIST as strongly
-    as DEV4. Raw m6A restores the H3K9me3 direction that CpG alone gets wrong (68% / 64%, against 33% / 21%), but
-    less cleanly than with the MSP / nucleosome calls (72–80%). *Seed 2: m6A + CpG 68% / 61% again, but the CpG-only
-    comparison it rests on did not replicate.*
-  - **H3K27me3** is wrong for every model, worst without CpG (22% at CGIs), closest to chance without FIRE.
-    *Seed 2: wrong for every model, 17–24% at CGIs; no FIRE's "closest to chance" was seed noise.*
-
-**Sources:** targets as in section 7 (`tss_chrX_chr21.bed`); per-fiber predictions `molecule_predict.py`, jobs
-`logs/2026-11-07_07_molecules_tss_chrX` (DEV4; job 06 crashed on a column-name bug, fixed in 55c22a8) and
-`logs/2026-11-08_{10,12,14,20}_molecules_tss_abl_*`; analysis `plots_code/26_nov_13/xi_promoters.py --model <m>` →
-`plots/26_nov_13/molecules/xi_*_<m>.{tsv,png}`.
+Moved to [`Nov_20.md`, section 2](Nov_20.md#2-x-inactivation-per-haplotype-in-gm12878-t5b) and rewritten around
+DEV4NF (the no-FIRE model) and the silenced genes with a CpG-island promoter, in both seeds.
 
 ## 9. ENCODE replicate ceiling (I11): how much of each target can a model get?
 
@@ -1404,7 +1113,7 @@ Cell-type r in the dev lines and MSE: `seeds_effects.tsv` and `seeds_effects_ctr
 
 ![Single-molecule readouts, both seeds](../plots/26_nov_13/seeds/seeds_molecules.png)
 
-**CTCF footprints (section 7)**, bound sites, per-site medians (seed 919 / seed 2):
+**CTCF footprints (`Nov_20.md` section 1)**, bound sites, per-site medians (seed 919 / seed 2):
 
 | Model | Footprint − open, CTCF: GM12878 | K562 | CTCF − ATAC: GM12878 | K562 | Unbound sites: footprint − open, CTCF |
 |---|---|---|---|---|---|
@@ -1414,7 +1123,7 @@ Cell-type r in the dev lines and MSE: `seeds_effects.tsv` and `seeds_effects_ctr
 | No accessibility | 0.00 / 0.00 | 0.00 / 0.01 | 0.00 / 0.00 | 0.00 / 0.00 | ≈ 0 |
 | No CpG | +0.18 / +0.75 | +0.10 / +0.46 | −0.12 / +0.33 | −0.02 / +0.31 | −0.07 to −0.03 |
 
-(CTCF − ATAC is also positive at unbound sites, +0.04–0.27 depending on model and seed; see the caveat in section 7.)
+(CTCF − ATAC is also positive at unbound sites, +0.04–0.27 depending on model and seed; see the caveat in `Nov_20.md` section 1.)
 
 - **What replicates:** H1 (footprint fibers get more predicted CTCF than open fibers at bound sites) for every
   model that sees m6A, p ≤ 3e-17 in seed 2; no effect at unbound sites; the no-accessibility null.
@@ -1427,7 +1136,7 @@ Cell-type r in the dev lines and MSE: `seeds_effects.tsv` and `seeds_effects_ctr
 - No CpG's H2 failure (CTCF − ATAC < 0) and m6A + CpG's "a quarter of no FIRE" do not replicate either (seed 2:
   +0.33 / +0.31, and 60–85% of no FIRE).
 
-**X inactivation (section 8)**, fraction of subject genes in the expected direction, all / CGI promoters (seed 919
+**X inactivation (`Nov_20.md` section 2; there restricted to CGI promoters)**, fraction of subject genes in the expected direction, all / CGI promoters (seed 919
 → seed 2):
 
 | Assay (expected on Xa) | DEV4 | No CpG | No FIRE | No accessibility | m6A + CpG |
