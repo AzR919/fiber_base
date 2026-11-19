@@ -249,6 +249,22 @@ from both copies. XIST is the one gene expressed only from the Xi.
   anything, and pooling them with the CGI genes (the *subject* numbers in `Nov_13_extended.md`) only diluted the
   result. They are left out from here on.
 
+**Which assays the test uses.** The models predict eight assays. The test window is the promoter (TSS ± 500 bp),
+and only five assays have a clear expected Xa − Xi direction there:
+
+| Assay | What it marks | Expected at a silenced promoter | Used |
+|---|---|---|---|
+| ATAC | open chromatin | Xa higher (the Xi promoter is closed) | ✓ |
+| H3K4me3 | active promoters | Xa higher | ✓ |
+| H3K27ac | active promoters and enhancers | Xa higher | ✓ |
+| H3K9me3 | heterochromatin, enriched on the Xi | Xa lower | ✓ |
+| H3K27me3 | Polycomb repression, enriched on the Xi | Xa lower | ✓ |
+| H3K4me1 | enhancers and the flanks of active promoters; depleted at the TSS itself, where H3K4me3 takes over | unclear: a ± 500 bp window mixes the depleted core with the enriched flanks | – |
+| H3K36me3 | bodies of transcribed genes; low in the first ~1 kb | none at the promoter: the window is the wrong place (needs gene-body windows) | – |
+| CTCF | specific motif sites; most promoters have none, and the Xi keeps CTCF only at a few loci (DXZ4, FIRRE) | none per promoter (needs chrX CTCF motif sites with a footprint per haplotype, as in section 1) | – |
+
+All the tables and figures below show only the five assays used.
+
 **Hypotheses** (fixed in advance, in the `xi_promoters.py` header; H1 already named CGI promoters as the strongest
 case, H2's restriction to CGI genes is new here):
 - **H1:** at silenced CGI promoters, d > 0 for ATAC, H3K4me3, H3K27ac and d < 0 for H3K27me3, H3K9me3.
