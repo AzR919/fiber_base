@@ -1,0 +1,759 @@
+%%
+%% SMIF paper (Single-Molecule Imputation using Fiber-seq). Built from the acmart template of proposal.tex (same
+%% class options, authors and bibliography). Unwritten sections carry a %TODO with the results they will draw on
+%% (reports/Nov_13_extended.md, Nov_20.md, Nov_20_figs.md).
+%%
+%% Commands for TeXCount
+%TC:macro \cite [option:text,text]
+%TC:macro \citep [option:text,text]
+%TC:macro \citet [option:text,text]
+%TC:envir table 0 1
+%TC:envir table* 0 1
+%TC:envir tabular [ignore] word
+%TC:envir displaymath 0 word
+%TC:envir math 0 word
+%TC:envir comment 0 0
+%%
+\documentclass[acmtog,nonacm]{acmart}   % nonacm: no ACM reference box, no journal footer
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% No ACM boilerplate: no copyright/permission block, no "Authors' Contact Information" footnote
+\setcopyright{none}
+\authorsaddresses{}
+
+\citestyle{acmauthoryear}
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{SMIF: Single-Molecule Imputation using Fiber-seq}
+
+\author{Azaan Rehman}
+\email{ara199@sfu.ca}
+\correspondingauthor
+\affiliation{%
+  \institution{Simon Fraser University}
+  \city{Burnaby}
+  \state{British Columbia}
+  \country{Canada}
+}
+
+\author{Mehdi Foroozandeh}
+\affiliation{%
+  \institution{Simon Fraser University}
+  \city{Burnaby}
+  \state{British Columbia}
+  \country{Canada}
+}
+
+\author{Andrew B. Stergachis}
+\affiliation{%
+  \institution{University of Washington}
+  \city{Seattle}
+  \state{Washington}
+  \country{USA}
+}
+
+\author{Christine Queitsch}
+\affiliation{%
+  \institution{University of Washington}
+  \city{Seattle}
+  \state{Washington}
+  \country{USA}
+}
+
+\author{Maxwell W. Libbrecht}
+\affiliation{%
+  \institution{Simon Fraser University}
+  \city{Burnaby}
+  \state{British Columbia}
+  \country{Canada}
+}
+
+\renewcommand{\shortauthors}{Rehman et al.}
+
+\begin{abstract}
+Bulk genomic assays such as ChIP-seq and ATAC-seq report how a chromatin property is distributed along the
+genome, but only as an average over millions of DNA molecules. Fiber-seq reads chromatin accessibility,
+nucleosome positions and CpG methylation on individual molecules, but no technology measures histone marks or
+protein binding on many molecules at once. We ask whether these bulk properties can be imputed onto each molecule
+when the only supervision is bulk. This is a weakly supervised regression problem: each training example is a bag
+of up to 100 molecules, and its label is the average over a large population. We present SMIF, which maps
+every Fiber-seq read, independently and with its reference sequence as context, to eight per-base tracks (ATAC,
+CTCF and six histone marks). It averages these predictions in fold-change space, so that the bag prediction can be
+trained against ENCODE tracks. Because no molecule-level labels exist, we also propose an evaluation protocol in
+which every test has a known value under the null that the model predicts the bulk average on every molecule. In
+bulk, the model predicts cell-type-specific signal beyond a cross-cell average, and in training cell types it
+reaches two thirds of the correlation that the agreement between ENCODE replicates allows. Trained only on
+mixtures of two cell types, it separates their molecules as well as a model trained on each cell type's own
+tracks. On single molecules, although its only CTCF supervision is bulk ChIP-seq, the model assigns more CTCF to
+molecules whose CTCF motif is protected than to open molecules at the same site (83--94\% of bound sites,
+replicated in a second training), and not at unbound motifs. On the X chromosome, never seen in training, it
+separates the active and inactive copies at 86--90\% of silenced promoters for the active marks, but not for
+H3K27me3. Two models with the same bulk accuracy can differ tenfold in these single-molecule readouts, so bulk
+accuracy alone cannot validate a per-molecule imputation.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:intro}
+% TODO: bulk vs single-molecule chromatin; what Fiber-seq measures and what it does not; the weak-supervision
+% problem (bag-average labels, instance-level predictions); why bulk accuracy alone cannot show
+% single-molecule information (the null H0); contributions.
+
+\section{Related work}
+\label{sec:related}
+
+\textbf{Single-molecule chromatin profiling.} Fiber-seq \citep{Stergachis20} marks accessible DNA with a
+non-specific adenine methyltransferase and reads each chromatin fiber end to end with long reads. One read gives
+the accessibility, nucleosome positions and CpG methylation of one molecule over 5--25\,kb, and fibertools
+\citep{Jha24} turns the raw calls into per-molecule features. DiMeLo-seq \citep{Altemose22} uses the same principle
+to map where one chosen protein binds on single molecules, one target per experiment. Single-cell CUT\&Tag
+\citep{Bartosovic21} profiles histone marks in single cells, but with sparse coverage and one or a few marks per
+cell. Together, these methods show that \emph{measuring} many chromatin properties on the same molecule is still
+out of reach. We instead \emph{impute} them onto Fiber-seq reads.
+
+\textbf{Epigenome imputation.} ChromImpute \citep{Ernst15}, PREDICTD \citep{Durham18} and Avocado
+\citep{Schreiber20Avocado} predict missing bulk tracks from the other tracks of the same cell type, by regression
+or by tensor factorization over cell types $\times$ assays $\times$ positions. CANDI \citep{Foroozandeh25} imputes
+and denoises bulk assays with self-supervision and calibrated confidence. dHICA \citep{Wen24} shows that one input
+assay can be enough: it predicts several histone-mark tracks from bulk accessibility (ATAC-seq or DNase-seq) and
+the DNA sequence, the bulk analogue of our input. All of these output population averages, and all need bulk data
+from the target cell type. SMIF keeps the targets (ENCODE assays) but changes the unit of prediction from a track
+to a molecule. Its input is accessibility measured on each molecule, so a new cell type needs only its fibers.
+\citet{Schreiber20Pitfall} showed that models predicting across cell types often fail to beat the average of the
+training cell types. We use that average as our bulk baseline and score the part of each track that it does not
+explain.
+
+\textbf{Learning from aggregate labels.} In multiple-instance learning \citep{Dietterich97, Ilse18}, a label
+belongs to a bag of instances, and in its standard form it says whether at least one instance is positive.
+Learning from label proportions \citep{Quadrianto09} uses the fraction of positive instances in each bag, and can
+recover instance labels only when bags differ in composition. Our problem is a regression analogue of the second
+setting: a bag is the stack of fibers over a window, its label is the bulk track, and the label is a mean over a
+much larger population than the bag. Bulk deconvolution methods such as CIBERSORT \citep{Newman15} also separate a
+bulk signal into its parts, but into cell-type proportions and profiles, not into molecules. The mixture test in
+Section~\ref{sec:eval-mixture} uses the identifiability argument of learning from label proportions: it varies the
+composition of the bags so that each population's signal is determined.
+
+Compared with these works, we connect bulk-assay imputation to single-molecule inputs, and we give an evaluation
+protocol for a setting in which no molecule-level labels exist.
+
+\section{Problem setup}
+\label{sec:problem}
+
+We set up the problem in four stages: the genome coordinates, the molecules (instances), the bulk tracks (bag
+labels), and what the model must output. Table~\ref{tab:data} summarizes the objects for one window, and
+Appendix~\ref{app:bio} gives the biology background.
+
+\textbf{Coordinates and reference.} The human genome is a string of about $3\times10^9$ letters over
+$\{A,C,G,T\}$, split into chromosomes. We work on windows of $L=5{,}000$ consecutive positions, given as
+(\emph{chromosome, start, end}). The reference sequence of a window enters the model one-hot,
+$S\in\{0,1\}^{4\times L}$. It is the same in every cell type and every molecule, so it tells the model \emph{where}
+it is, but not \emph{which} cell type, or which molecule, it is looking at.
+
+\textbf{Molecules: the instances.} A Fiber-seq read is one chromatin fiber of a cell population. After standard
+processing \citep{Jha24}, each read becomes $C=5$ event channels along the coordinate axis:
+\begin{itemize}
+  \item m6A-marked bases (accessible adenines, the raw Fiber-seq signal);
+  \item methylated CpGs (a second, independent chemical mark at C-G letter pairs);
+  \item methyltransferase-sensitive patches (MSPs), the accessible stretches;
+  \item nucleosomes;
+  \item FIRE elements, MSPs classified as regulatory elements.
+\end{itemize}
+The last three are computed from the m6A pattern. Each channel takes $+1$ (event present), $-1$ (measurable and
+absent) or $0$ (not measurable: outside the read, or at a letter where the event cannot occur). The $N$ reads
+overlapping a window (we use up to $N=100$) form a tensor of instances $X\in\{-1,0,1\}^{C\times L\times N}$, with a
+coverage mask $M\in\{0,1\}^{L\times N}$. The reads are an unordered set. Reads also carry a haplotype tag in phased
+samples; the model never sees it, and we use it only in evaluation (Section~\ref{sec:res-xi}).
+
+\textbf{Bulk tracks: the bag labels.} We want $K=8$ other properties on every read: accessibility measured by
+ATAC-seq, binding of the protein CTCF, and six histone marks (H3K4me3, H3K27ac, H3K4me1, H3K36me3, H3K27me3,
+H3K9me3), which indicate active promoters, enhancers, transcribed gene bodies and two kinds of silenced chromatin.
+No technology measures these on many single molecules at once. They are measured in \emph{bulk}: an assay pools
+millions of cells of one cell type and reports, per position, how enriched the property is relative to a control
+(\emph{fold change}, FC). For cell type $c$ this gives a track $y_{c,k}\in\mathbb{R}_{\ge0}^{L}$ per assay $k$.
+ENCODE \citep{ENCODE20} provides these tracks for the cell lines we use, which are also profiled by Fiber-seq. All
+cell types share one genome, so every difference between their tracks comes from cell-specific factors, which the
+fibers measure and the reference does not.
+
+\textbf{Observation model.} We think of each molecule $f$ as carrying an unobserved per-position value
+$u_{f,k}(x)\ge0$, its contribution to assay $k$ at position $x$, in FC units. A bulk track is then the population
+average of these values over the molecules covering $x$:
+\begin{equation}
+y_{c,k}(x)\;=\;\mathbb{E}_{f\sim P_c}\big[\,u_{f,k}(x)\;\big|\;f \text{ covers } x\,\big],
+\label{eq:obs}
+\end{equation}
+where $P_c$ is the population of molecules of cell type $c$. This rests on three assumptions:
+\begin{itemize}
+  \item[(A1)] a molecule's accessibility, nucleosome and methylation pattern, together with its sequence, carry
+    information about its other chromatin properties;
+  \item[(A2)] a fold-change track is linear in the fraction of molecules that carry the property, up to a scale
+    per experiment;
+  \item[(A3)] the Fiber-seq and ENCODE samples of a cell line describe the same population.
+\end{itemize}
+The fibers of a window are a small sample of $P_c$, and the label averages over the whole population, so the bag
+label is not an exact function of the bag.
+
+\textbf{Task.} We learn a function $g_\theta$ that maps one read and the reference to $K$ per-position values,
+$z_f=g_\theta(X_{\cdot,\cdot,f},S)\in\mathbb{R}^{K\times L}$, in $\operatorname{asinh}$ FC units, such that
+$z_{f,k}(x)\approx\operatorname{asinh}u_{f,k}(x)$. Reads are processed independently: no information passes
+between the instances of a bag. The stacked output $Z\in\mathbb{R}^{K\times L\times N}$ is the deliverable, a
+per-molecule imputation of every assay. Training sees only the 2-D labels $y_{c,k}$ ($K\times L$ per window); the
+model's per-molecule outputs are combined into a bag prediction that can be compared with them
+(Section~\ref{sec:aggregation}). The model must generalize to positions not seen in training (a held-out
+chromosome) and to cell types whose tracks were never used.
+
+\textbf{The null model.} A model can fit every bag label without using any molecule-specific information: it
+predicts the bulk average of the read's cell type on every read,
+\begin{equation}
+H_0:\quad z_{f,k}(x)=\operatorname{asinh}y_{c,k}(x)\quad\text{for every read } f \text{ of cell type } c.
+\label{eq:null}
+\end{equation}
+Under $H_0$ the bag prediction is perfect, but the per-molecule outputs carry no information beyond the cell type.
+Bulk accuracy is therefore necessary but not sufficient, and our hypothesis $H$, that the per-molecule outputs carry
+information specific to each molecule, has to be tested with readouts whose value under $H_0$ is known
+(Section~\ref{sec:evaluation}).
+
+\begin{table}[t]
+\caption{The data for one window of $L=5{,}000$ positions ($x$ the genomic position, $N\le100$ reads, $C=5$
+input channels, $K=8$ assays).}
+\label{tab:data}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Object & Shape & Values & Role \\
+\midrule
+Reference $S$ & $4\times L$ & one-hot & input, all cell types \\
+Reads $X$ & $C\times L\times N$ & $\{-1,0,1\}$ & input, per molecule \\
+Coverage $M$ & $L\times N$ & $\{0,1\}$ & reads covering $x$ \\
+Output $Z$ & $K\times L\times N$ & asinh FC & per-molecule output \\
+Bag pred.\ $\hat Y$ & $K\times L$ & asinh FC & aggregate of $Z$ \\
+Track $Y$ & $K\times L$ & FC $\ge0$ & bag label (bulk) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Method}
+\label{sec:method}
+
+SMIF has three parts: a network applied to each read on its own (Section~\ref{sec:model}), an aggregation that
+turns its per-read outputs into a bulk prediction (Section~\ref{sec:aggregation}), and a loss on that bulk
+prediction (Section~\ref{sec:training}).
+% TODO: overview figure (reads + reference -> per-read network -> Z -> FC-space average -> loss), referenced here
+% and in the architecture paragraph.
+
+\subsection{Per-molecule model}
+\label{sec:model}
+
+\textbf{Inputs.} SMIF reads four of the five channels of Section~\ref{sec:problem}: m6A, CpG methylation, MSPs and
+nucleosomes. We leave out FIRE. FIRE elements are called by a classifier trained on GM12878 DNase-seq and CTCF
+ChIP-seq peaks, so the channel brings bulk-assay knowledge into the input. Leaving it out costs nothing in bulk
+accuracy and gives a stronger and more specific single-molecule CTCF read (Section~\ref{sec:res-ctcf},
+Appendix~\ref{app:ablations}). Each
+read is scored over its \emph{span}: its alignment, trimmed to its first and last nucleosome call. Inputs are taken
+over the whole alignment, but the model's outputs, the coverage count and the loss use only the span ($M$ in
+Table~\ref{tab:data}).
+
+\textbf{Architecture.} The network maps one read and the window's reference to $K$ tracks of length $L$:
+\begin{itemize}
+  \item \emph{Encoders.} Two convolutional blocks with the same design, one for the read's channels and one for
+    the one-hot reference, each map their input to 8 features per position. Each block has two convolutions of
+    width 15 with group normalization, GELU activations and a residual connection. The reference is encoded once
+    per window and shared by all its reads. The two feature maps are concatenated.
+  \item \emph{U-Net.} Three encoder levels (24, 48 and 96 features, each a convolutional block followed by
+    max-pooling by 2) reduce the 5,000 positions to 625 tokens. Three decoder levels (transposed convolutions and
+    blocks, with skip connections from the encoder) bring them back to full resolution.
+  \item \emph{Transformer bottleneck.} Between the two halves, two transformer encoder layers (96 dimensions,
+    4 heads, sinusoidal positional encoding) attend over the 625 tokens, so every output position can use the
+    whole 5\,kb of the read.
+  \item \emph{Output.} A $1\times1$ convolution gives $K=8$ values per position, and a softplus makes them
+    non-negative: $z_f\in\mathbb{R}_{\ge0}^{K\times L}$, in $\operatorname{asinh}$ FC units. Outputs outside the
+    read's span are set to 0.
+\end{itemize}
+The reads of a window share the network's weights and the reference features, but nothing else: there is no
+attention or pooling across reads. A read's output therefore depends only on the read and the reference, and the
+model is equivariant to the order of the reads. Bulk information enters only through the loss.
+
+\subsection{Fold-change-consistent aggregation}
+\label{sec:aggregation}
+
+The label exists only for the bag, so the per-read outputs are combined into a bulk prediction. We read
+$z_{f,k}(x)$ as the $\operatorname{asinh}$ of the fold change that a population of molecules like $f$ would show.
+Under assumption (A2) a bulk track is an average over molecules in FC units (Eq.~\ref{eq:obs}), so we average in FC
+space and map the result back:
+\begin{equation}
+\hat y_k(x)=\operatorname{asinh}\Big(\frac{1}{|F_x|}\sum_{f\in F_x}\sinh z_{f,k}(x)\Big),
+\qquad F_x=\{f: M_{x,f}=1\},
+\label{eq:agg}
+\end{equation}
+where $F_x$ is the set of reads whose span covers $x$. Three properties follow:
+\begin{itemize}
+  \item if all reads agree, $\hat y_k(x)=z_{f,k}(x)$, so a read's output is on the same scale as the bulk track;
+  \item a read with a high value moves the bulk prediction as much as the same signal would move a real bulk
+    assay, rather than being damped by averaging in a compressed scale;
+  \item a bag that pools the reads of two cell types in proportions $q_A,q_B$ has, under (A2), the exact label
+    $\operatorname{asinh}(q_A\sinh t_A+q_B\sinh t_B)$, where $t=\operatorname{asinh}y$. The mixture test
+    (Section~\ref{sec:eval-mixture}) relies on this.
+\end{itemize}
+Working in $\operatorname{asinh}$ units compresses the range of the tracks (fold changes reach about 40 at strong
+CTCF peaks) while staying linear near 0, where most positions lie. For numerical stability, $z$ is clipped at 15
+before the $\sinh$; real targets stay below about 8.
+
+\subsection{Loss and training}
+\label{sec:training}
+
+\textbf{Loss.} The loss is the squared error between the bulk prediction and the track, in $\operatorname{asinh}$
+units, averaged over the scored entries:
+\begin{equation}
+\mathcal{L}=\frac{\sum_{k,x} w_{k}(x)\,\big(\hat y_k(x)-\operatorname{asinh}y_k(x)\big)^2}{\sum_{k,x} w_k(x)}.
+\label{eq:loss}
+\end{equation}
+The weight $w_k(x)=a_k\cdot\mathbf{1}\big[|F_x|\ge5\big]$ keeps only positions covered by at least 5 reads, where
+the average of the bag is not dominated by a single read, and only the assays that the cell type has in ENCODE
+($a_k\in\{0,1\}$).
+
+\textbf{Training data.} Each training example is one window of one development cell type: its reads (up to 100)
+and its 8 tracks. Windows are 5\,kb on the training chromosome, chr20. Half are centred on ENCODE candidate
+cis-regulatory elements (cCREs), with a random shift of up to 200\,bp, and half are placed uniformly at random, so
+that the model sees both regulatory elements and the background. Validation uses a fixed set of 200 windows on
+chr22. The test chromosome, chr21, is used neither for training nor for model selection.
+
+\textbf{Optimization.} We train with AdamW (learning rate $10^{-4}$, batch size 8) for 15 epochs of 5,000 examples,
+and reduce the learning rate when the validation loss has not improved for 2 epochs. We use mixed precision and
+gradient checkpointing; one training run takes about 2.2 hours on a 20\,GB slice of an NVIDIA H100 GPU. We use the
+model after the last epoch. To measure the variability between trainings, every model in this paper is trained
+twice, with different random seeds (Section~\ref{sec:res-seeds}).
+
+\textbf{Input variants.} We also train models that differ from SMIF only in their input channels; everything else,
+including the data, the architecture and the training budget, is the same. One of them sees only CpG methylation,
+so it cannot see accessibility on a molecule; it serves as a null in the single-molecule tests
+(Section~\ref{sec:eval-biology}). The others, and what they show about which molecular features carry each assay,
+are in Appendix~\ref{app:ablations}.
+
+\section{Evaluation framework}
+\label{sec:evaluation}
+
+Our hypothesis $H$ is that the per-molecule outputs carry information specific to each molecule; the null
+$H_0$ (Eq.~\ref{eq:null}) predicts the bulk of the read's cell type on every read. We test $H$ against $H_0$ at
+three levels. Bulk recovery (Sections~\ref{sec:eval-bulk}--\ref{sec:eval-ceiling}) is necessary but cannot
+separate the two. Mixture-only supervision (Section~\ref{sec:eval-mixture}) separates two populations of molecules
+without ever showing the model either population's own label. Tests from known biology
+(Section~\ref{sec:eval-biology}) check variation \emph{within} one population, between molecules that share a
+cell type and a bulk track. Every readout has a known value under $H_0$.
+
+\subsection{Bulk recovery against a cross-cell baseline}
+\label{sec:eval-bulk}
+
+We score bulk predictions on the test chromosome, chr21: all 6,843 tiles of 5\,kb, at the positions covered by at
+least 5 reads. For each cell type and assay, the predicted track $p$ (the bag prediction $\hat y_k$ of
+Eq.~\ref{eq:agg}) is compared with the ENCODE track $t=\operatorname{asinh}y_k$, pooling all scored positions. We
+report the mean squared error, the Pearson correlation $r_{pt}$, and the \emph{cell-type correlation} described
+below.
+
+Much of every track is shared across cell types, so a strong baseline needs no information about the evaluated
+cell type: the \emph{cross-cell average} $b$, at each position the fold-change mean of the development cell types'
+tracks, excluding the evaluated cell type's own line, mapped to $\operatorname{asinh}$ units
+\citep{Schreiber20Pitfall}. To isolate what is specific to the cell type, we use the partial correlation of $p$ and
+$t$ given $b$:
+\begin{equation}
+r(p,t\mid b)=\frac{r_{pt}-r_{bt}\,r_{pb}}{\sqrt{(1-r_{bt}^2)(1-r_{pb}^2)}},
+\label{eq:ctr}
+\end{equation}
+the correlation of $p$ and $t$ after both are regressed on $b$. It is 1 when the model predicts exactly where and
+how the cell type departs from the average, 0 for the baseline itself or any rescaling of it, and negative when the
+predicted departures point the wrong way.
+
+We group the cell types into the four \emph{development} lines used in training and three \emph{held-out} lines
+never used in training (Section~\ref{sec:data}).
+
+\subsection{Replicate ceiling}
+\label{sec:eval-ceiling}
+
+ENCODE tracks are themselves noisy, so no prediction can reach $r=1$. To put all assays on one scale, we estimate
+how high any prediction could score. For each of the 54 cell type $\times$ assay targets, we take two biological
+replicates of the same ENCODE experiment and score one against the other with the same metrics, at the same
+positions. With replicate agreement $\rho$, the pooled target averages $k$ replicates ($k=2$ for 42 targets, 3 for
+12) and has Spearman--Brown reliability $k\rho/(1+(k-1)\rho)$. The best correlation any prediction can reach against
+it, the \emph{ceiling}, is the square root of this reliability. The same construction on the residuals after the
+baseline gives a ceiling for the cell-type correlation. We report each model's \emph{fraction of the ceiling}, model
+$r$ divided by ceiling $r$ per target, averaged over targets.
+
+\subsection{Mixture-only supervision}
+\label{sec:eval-mixture}
+
+The main test of $H$ trains a model only on bags that mix the reads of two development cell types $A$ and $B$.
+The fraction of $A$ is drawn uniformly from $[0.2,0.8]$ per bag, and the label is the fold-change mixture of the two
+tracks, $\operatorname{asinh}(q_A\sinh t_A+q_B\sinh t_B)$, exact under (A2) (Section~\ref{sec:aggregation}). Neither
+cell type's own track is ever used. We then run each cell type's reads alone. Under $H_0$ the model has only learned
+the mixture, so $p_A\approx p_B$; under $H$ each read keeps its cell type's signal. On \emph{differential bins},
+1\,kb bins of chr21 where $|t_A-t_B|\ge0.5$, we measure:
+\begin{itemize}
+  \item \emph{fiber-origin AUC}: in each bin, each read is scored by its mean output over the bin, and the AUC is
+    the probability that a random read of the cell type with the higher track scores above a random read of the
+    other, averaged over bins (0.5 under $H_0$). It asks whether a \emph{single molecule's} output reveals where
+    it came from; even a perfect model stays below 1, because not every molecule of a cell type carries its mark;
+  \item \emph{sign accuracy}: the fraction of bins in which the predicted difference $p_A-p_B$ has the sign of
+    $t_A-t_B$ (0.5 under $H_0$);
+  \item \emph{differential correlation}: the per-position correlation of $p_A-p_B$ with $t_A-t_B$ (0 under $H_0$).
+\end{itemize}
+The reference for each pair is the same architecture trained on the two cell types' own tracks. As a control for
+library effects, we score two Fiber-seq libraries of the same cell line at the same bins; they share one true
+track, so any separation between them comes from the libraries, not biology.
+
+\subsection{Single-molecule tests from known biology}
+\label{sec:eval-biology}
+
+Mixture supervision separates populations. To test variation \emph{within} a population, we use two properties
+known to differ between the molecules of one cell type. Each test follows three rules: the property is never a
+label in training; the expected direction of every readout was written down before the run; and the test contains
+its own null, a set of molecules or loci where the expected difference is zero. Both tests run SMIF on every read
+over a set of target loci and summarize each read's output and measured inputs over the target.
+
+\textbf{CTCF footprints.} CTCF is a protein that binds a specific 15\,bp DNA motif. On a single Fiber-seq read, a
+bound CTCF protects its motif from the methyltransferase, leaving a gap in the m6A pattern inside an accessible
+patch: a \emph{footprint} \citep{Stergachis20}. The model sees only bulk CTCF ChIP-seq, so it was never told which
+molecules are bound.
+\begin{itemize}
+  \item \emph{Sites.} CTCF motif hits on chr21 (JASPAR MA0139.2, $p\le10^{-5}$). \emph{Bound} sites are the best hit
+    inside each ENCODE CTCF peak of a development line (330 sites); in a given cell line, a site counts as bound if
+    that line has a peak there. \emph{Unbound} sites are hits more than 500\,bp from every development line's peak,
+    sampled to match the bound sites' motif scores in 1-bit bins. We drop unbound sites where the bulk CTCF or ATAC
+    track has no reads at all over $\pm1$\,kb in some development line (74 of 272): there, ``no peak'' means
+    ``not measured'', not ``unbound''.
+  \item \emph{Fiber states}, from the measured input only: \emph{nucleosome} if at least half of the motif is
+    covered by a nucleosome call; \emph{footprint} if at least half of it lies in an MSP and its m6A rate is at most
+    half that of the 100\,bp flanks; \emph{open} if it lies in an MSP without that protection.
+  \item \emph{Hypotheses.} (H1) At bound sites, footprint reads get more predicted CTCF than open reads at the same
+    site (per-site difference of means, Wilcoxon signed-rank test over sites with at least 3 reads in each state).
+    (H2) The difference is larger for CTCF than for ATAC, since both states are accessible. (H3) Nucleosome-covered
+    reads get the least CTCF. (H4, data only) Footprints are more frequent among accessible reads at bound than at
+    unbound sites. (H5) Unbound sites get less CTCF than bound sites of the same motif score.
+  \item \emph{Null.} The CpG-only variant (Section~\ref{sec:training}; no m6A, MSP or nucleosome channel) cannot see the
+    footprint; it must give zero for every per-read difference.
+\end{itemize}
+
+\textbf{X inactivation.} In female cells, one of the two X chromosomes is silenced early in development. At a
+silenced gene, the inactive copy (Xi) has its CpG-island promoter methylated, its chromatin closed, the active marks
+(ATAC, H3K4me3, H3K27ac) missing, and the repressive marks H3K27me3 and H3K9me3 enriched. Escape genes and genes in
+the pseudoautosomal regions (PAR) are active on both copies, and XIST is active only on the Xi. GM12878 is female
+and trio-phased, so each read is assigned to one parental haplotype. The model was trained on bulk tracks, in which
+the two copies are averaged, on chr20 only, and never sees the haplotype.
+\begin{itemize}
+  \item \emph{Which copy is the Xi.} The haplotype on which the XIST promoter is unmethylated in the reads
+    (measured, not predicted): CpG methylation 0.09 against 0.36.
+  \item \emph{Score.} Per gene, $d=$ mean output over Xa reads $-$ mean over Xi reads, over the promoter
+    (TSS $\pm500$\,bp), for genes with at least 5 reads on each haplotype.
+  \item \emph{Gene groups.} \emph{Silenced} genes (chrX genes outside the PAR and not on a list of known escape
+    genes) with a CpG-island promoter, 425 genes: the test group. X inactivation silences a promoter by methylating
+    its CpG island; silenced genes without one show no measured difference between the copies, so they test
+    nothing. \emph{Escape and PAR} genes (33) and chr21 genes (211, where the two haplotypes are an arbitrary pair)
+    are nulls. XIST is the reversed case.
+  \item \emph{Hypotheses.} (H1) At silenced promoters, $d>0$ for ATAC, H3K4me3 and H3K27ac and $d<0$ for H3K27me3
+    and H3K9me3. (H2) Escape and PAR genes have smaller $|d|$. (H3) chr21 genes have $d\approx0$. (H4) XIST is the
+    reverse of H1.
+  \item \emph{Assays not tested.} H3K4me1 (depleted at the TSS itself and enriched on the flanks, so its direction
+    in a promoter window is unclear), H3K36me3 (a gene-body mark, low at promoters) and CTCF (bound at specific
+    motifs, not at promoters in general) have no expected direction in a promoter window.
+\end{itemize}
+The reads' methylation and accessibility already differ between the copies at silenced promoters, so this test
+does not show the model \emph{discovering} the Xi. It shows whether the model turns those differences into the
+right direction for each mark, on a chromosome and haplotypes it never saw.
+
+\section{Results}
+\label{sec:results}
+
+% Preliminary results (Nov 2026 runs). Unless stated otherwise, numbers are the mean of the two training seeds.
+
+\subsection{Data}
+\label{sec:data}
+
+We use Fiber-seq data from seven cell lines with ENCODE fold-change tracks for the eight assays (H1 and H9 have no
+ATAC track, so 54 targets in total). The four development lines are GM12878 (B lymphoblastoid), K562 (leukemia),
+HepG2 (liver) and H1 (embryonic stem cells). The three held-out lines are H9 (embryonic stem cells), HCT116 (colon)
+and MCF-7 (breast), ordered from near to far from the development set. Training uses chr20, validation chr22, and
+every result below is on chr21.
+% TODO: library details (enzyme dose, coverage per line), ENCODE accessions -> Appendix B.
+
+\subsection{Bulk recovery}
+\label{sec:res-bulk}
+
+\begin{table*}[t]
+\caption{Bulk recovery on chr21, mean over assays and cell types of each group (SMIF: mean of two training seeds).
+``Ceiling'' columns divide each correlation by its replicate ceiling (Section~\ref{sec:eval-ceiling}); the ceiling
+on $r$ is 0.74 in both groups. The baseline is the cross-cell average, whose cell-type correlation is 0 by
+construction.}
+\label{tab:bulk}
+\small
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+& \multicolumn{2}{c}{Pearson $r$} & \multicolumn{2}{c}{$r$ / ceiling} & Cell-type $r$ & Cell-type $r$ / ceiling &
+\multicolumn{1}{c}{MSE} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Cell types & SMIF & baseline & SMIF & baseline & SMIF & SMIF & SMIF / baseline \\
+\midrule
+Development (4) & \textbf{0.50} & 0.44 & \textbf{0.66} & 0.59 & 0.37 & 0.54 & \textbf{0.22} / 0.29 \\
+Held out (3) & 0.44 & \textbf{0.48} & 0.59 & \textbf{0.65} & 0.28 & 0.42 & \textbf{0.18} / 0.20 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:bulk} summarizes bulk recovery. ENCODE replicates of the same experiment agree only at $r\approx0.40$
+on chr21, so the reachable correlation is about 0.74. In the development lines, SMIF reaches two thirds of that,
+ahead of the cross-cell baseline on every metric, and its cell-type correlation (0.37) shows that it predicts where
+each cell type departs from the average. In held-out cell types it is behind the baseline on Pearson $r$ but ahead
+on MSE, and its cell-type correlation stays positive (0.28, 42\% of its ceiling). The held-out ceilings are as high
+as the development ones, so the drop is the model's, not noisier targets. It is concentrated in three assays: the
+held-out cell-type correlation is 0.35--0.56 for ATAC, H3K4me3, H3K27ac and H3K4me1, but 0.20 for H3K27me3, 0.14 for
+CTCF and 0.06 for H3K36me3.
+% TODO: per-assay table or figure (fraction of ceiling per assay and group) in the main text or the appendix.
+
+\subsection{Mixture-only supervision}
+\label{sec:res-mixture}
+
+\begin{table}[t]
+\caption{Mixture-only supervision on two pairs of development cell types: fiber-origin AUC / sign accuracy /
+differential correlation, mean over the pair's assays (K562--H1 has no ATAC). Values under $H_0$: 0.5 / 0.5 / 0.
+These models use all five input channels.}
+\label{tab:mixture}
+\footnotesize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Trained on & GM12878--HepG2 & K562--H1 \\
+\midrule
+GM12878 + HepG2 mixtures & \textbf{0.637} / 0.761 / 0.329 & 0.599 / 0.590 / 0.238 \\
+GM12878, HepG2 own tracks & 0.635 / 0.771 / 0.351 & 0.600 / 0.598 / 0.224 \\
+K562 + H1 mixtures & 0.621 / 0.706 / 0.263 & \textbf{0.666} / 0.802 / 0.291 \\
+K562, H1 own tracks & 0.617 / 0.719 / 0.270 & 0.665 / 0.828 / 0.335 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A model trained only on mixtures separates the two cell types' molecules as well as a model trained on their own
+tracks, on both pairs (Table~\ref{tab:mixture}). On GM12878 and HepG2 the fiber-origin AUC is 0.637 against 0.635,
+and on K562 and H1 it is 0.666 against 0.665. Sign accuracy and differential correlation are slightly lower (by 0.01--0.04), and
+each cell type's own track is recovered as well, within 0.015 in $r$. Under $H_0$ the mixture model would give both
+cell types the mixture, and all three readouts would sit at their null values. Two libraries of the same cell line
+separate far less than the real pairs: their mean $|\mathrm{AUC}-0.5|$ is 0.04--0.09, against 0.17--0.25. The
+separation is therefore not a library effect. On the pair it did not see, a model does equally well with either kind of supervision; what matters
+is having seen the cell types.
+% TODO: rerun the mixture test with SMIF's inputs (no FIRE); these models use all five channels.
+
+\subsection{CTCF footprints on single molecules}
+\label{sec:res-ctcf}
+
+\begin{table}[t]
+\caption{CTCF footprints on chr21: per-site median of (mean predicted CTCF on footprint reads $-$ mean on open
+reads), GM12878 / K562, for two training runs of SMIF and for the null model, which sees only CpG methylation
+(run 1). ``CTCF $-$ ATAC'' subtracts the same difference for predicted ATAC (specificity: both states are
+accessible). Value under $H_0$: 0.}
+\label{tab:ctcf}
+\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& \multicolumn{2}{c}{SMIF} & CpG only \\
+\cmidrule(lr){2-3}
+Readout & run 1 & run 2 & (null) \\
+\midrule
+Bound, footprint $-$ open & \textbf{+1.14 / +0.84} & \textbf{+0.95 / +0.68} & 0.00 / 0.00 \\
+Bound, CTCF $-$ ATAC & \textbf{+0.67 / +0.54} & \textbf{+0.85 / +0.63} & 0.00 / 0.00 \\
+Unbound, footprint $-$ open & $-0.07$ / $-0.06$ & $-0.03$ / $-0.05$ & $-0.01$ / 0.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The data first: among accessible reads, 41--43\% carry a footprint at bound sites, against 10\% at unbound sites,
+the background rate of our simple call (H4). Table~\ref{tab:ctcf} gives the model results.
+\begin{itemize}
+  \item \emph{SMIF reads the footprint (H1).} At bound sites, footprint reads get more predicted CTCF than open reads
+    at the same site: +1.14 in GM12878 and +0.84 in K562 (94\% and 83\% of sites; Wilcoxon $p<10^{-22}$), and
+    +0.95 / +0.68 in the second training. Nucleosome-covered reads get the least (H3).
+  \item \emph{The response is specific to CTCF (H2).} Predicted ATAC rises less on footprint reads, so the CTCF
+    difference exceeds the ATAC one by +0.54 to +0.85.
+  \item \emph{The nulls hold.} At unbound motifs the footprint difference is zero or slightly negative. The CpG-only
+    model, which cannot see the footprint, gives 0.00. At the site level, bound sites get more predicted CTCF than
+    unbound ones of the same motif score in every score bin (H5; 1.63 against 0.49 in GM12878).
+  \item \emph{Bulk accuracy does not predict this read.} A model trained identically but with FIRE as an extra input
+    has the same bulk accuracy (development $r$ 0.49 against 0.50), yet its footprint response is ten times weaker
+    in one of its two trainings (+0.11 / +0.04) and much less specific in both (Appendix~\ref{app:ablations}). Only a
+    single-molecule test can tell the two models apart.
+\end{itemize}
+
+On individual reads (Figure~\ref{fig:loci}), SMIF gives footprint reads a block of high CTCF about 200\,bp wide,
+centred on the motif and bounded by the accessible patch. Its height on footprint reads comes closer to the bulk
+CTCF track at the motif (73--89\% of the bulk level at two of three example sites) than on open reads (37--48\%).
+The bulk ChIP peak itself is about twice as wide, because ChIP-seq spreads each binding event over its fragment
+length.
+% TODO: Figure fig:loci (locus figures, plots/26_nov_20/loci/: one bound CTCF site with the bulk track overlaid,
+% the unbound control, and the X-inactivation promoters PIGA and XIST); the figure files must be copied next to
+% the .tex (plots/ is gitignored).
+
+\subsection{X inactivation per haplotype}
+\label{sec:res-xi}
+
+\begin{table}[t]
+\caption{X inactivation in GM12878: fraction of the 425 silenced CpG-island promoters where Xa $-$ Xi has the
+expected sign, SMIF training run 1 / run 2 (0.5 under $H_0$).}
+\label{tab:xi}
+\small
+\begin{tabular}{@{}llc@{}}
+\toprule
+Assay & Expected & SMIF \\
+\midrule
+ATAC & Xa higher & 0.90 / 0.90 \\
+H3K4me3 & Xa higher & 0.87 / 0.86 \\
+H3K27ac & Xa higher & 0.90 / 0.86 \\
+H3K9me3 & Xa lower & 0.71 / 0.65 \\
+H3K27me3 & Xa lower & 0.46 / 0.17 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The reads confirm the biology first: at silenced CpG-island promoters, the Xi copy is more methylated (median Xa
+$-$ Xi in CpG methylation $-0.23$) and less accessible (MSP fraction $+0.08$), while escape, PAR and chr21 genes
+show no difference. Table~\ref{tab:xi} gives the model results.
+\begin{itemize}
+  \item \emph{Active marks (H1): pass.} SMIF puts ATAC, H3K4me3 and H3K27ac higher on the active copy at 86--90\%
+    of silenced promoters in both trainings (median $d=+0.3$ to $+0.6$, $p<10^{-55}$).
+  \item \emph{Nulls (H2, H3): pass.} Escape and PAR genes, and chr21 genes, show no difference ($|$median $d|\le0.03$,
+    43--64\% in the ``expected'' direction); silenced genes differ 2--6 times more than escape and PAR genes, for
+    every mark.
+  \item \emph{XIST (H4): pass.} The active marks are reversed in both trainings (H3K4me3: $d=-1.31$ and $-0.87$),
+    and H3K9me3 is higher on the Xa, the silent copy of XIST.
+  \item \emph{H3K9me3: weak.} SMIF gets the direction right in both trainings (71\% and 65\%), but the differences
+    are small (median $d=-0.02$).
+  \item \emph{H3K27me3: fails.} SMIF predicts \emph{more} H3K27me3 on the active copy (46\% and 17\% in the expected
+    direction), and so does every input variant (Appendix~\ref{app:ablations}). The predicted H3K27me3 follows
+    whichever copy's promoter is open and unmethylated: the Xa at silenced genes, but the Xi at XIST.
+\end{itemize}
+On autosomes, promoter H3K27me3 marks Polycomb targets, which are unmethylated, nucleosome-depleted CpG islands:
+the same features that mark the active copy here. On the Xi, H3K27me3 covers methylated, closed islands, a
+combination absent from the training chromosome. Part of the failure may also be the test's: at a silenced gene
+that is not expressed in GM12878 at all, an unmethylated island on the Xa can be a genuine Polycomb target. The
+clearest failure in our locus figures, PTCHD1, is a neuronal gene with almost no active marks on either copy.
+Restricting the test to genes expressed in GM12878, and scoring broad Xi domains rather than promoters, will
+separate the two.
+
+\subsection{Variability between trainings}
+\label{sec:res-seeds}
+
+We trained every model twice. Bulk results barely move: one training changes a cell type $\times$ assay correlation
+by a median of 0.010, and a group mean by 0.003--0.013, so every bulk conclusion above holds in both trainings.
+Single-molecule readouts keep their direction in both trainings, but their size varies more: SMIF's CTCF footprint
+response by 1.2--1.3$\times$, and that of the input variants by up to 10$\times$ (Appendix~\ref{app:ablations}).
+Molecule-level claims therefore need several trainings, and we report both throughout.
+
+\section{Discussion}
+\label{sec:discussion}
+% TODO: what the model reads from a molecule; limitations (bulk ChIP as the only label, seed dependence, H3K27me3
+% on the Xi, promoter windows, provisional escape list, chr20-only training); next tests.
+
+\section{Conclusion}
+\label{sec:conclusion}
+% TODO
+
+\section*{Disclosure of AI use}
+% TODO: adjust the scope to what the final version actually used AI for.
+We used Claude (Claude Opus 5.5, Anthropic), through the Claude Code tool, as an assistant throughout this project.
+It helped write and debug code for the data pipeline, model training and analyses; ran and summarized analyses on
+our compute cluster under our direction; and helped draft and edit text, including this manuscript. All
+experimental designs, hypotheses and conclusions were decided by the authors, who checked the results and the text
+and take full responsibility for the content of this paper.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{proposal}
+
+\appendix
+\section{Biology background}
+\label{app:bio}
+% TODO: from proposal.tex appendix A.
+
+\section{Data and training details}
+\label{app:data}
+% TODO: sample list, ENCODE accessions, configs (data24, model16, train04), compute.
+
+\section{Input ablations}
+\label{app:ablations}
+% TODO: to be written. Draft content moved here from the main text (results section and CTCF / X-inactivation
+% comparisons across models); rewrite as a self-contained appendix.
+
+\begin{table}[t]
+\caption{Input ablations: Pearson $r$ in the development cell types on chr21, mean of two training runs. Each model
+differs from SMIF only in its input channels. One training moves these values by about 0.003--0.013.}
+\label{tab:ablations}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Assay & SMIF & All inputs & m6A + CpG & CpG only & No CpG \\
+\midrule
+ATAC & 0.77 & 0.76 & 0.77 & 0.62 & 0.76 \\
+H3K4me3 & 0.52 & 0.53 & 0.53 & 0.48 & 0.49 \\
+H3K27ac & 0.51 & 0.49 & 0.51 & 0.40 & 0.46 \\
+H3K4me1 & 0.56 & 0.53 & 0.57 & 0.40 & 0.52 \\
+CTCF & 0.40 & 0.39 & 0.39 & 0.31 & 0.39 \\
+H3K36me3 & 0.48 & 0.48 & 0.49 & 0.47 & 0.24 \\
+H3K27me3 & 0.45 & 0.44 & 0.45 & 0.41 & 0.36 \\
+H3K9me3 & 0.39 & 0.39 & 0.39 & 0.30 & 0.39 \\
+\midrule
+Mean & 0.50 & 0.49 & 0.50 & 0.42 & 0.44 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We trained four models that differ from SMIF only in their inputs (Table~\ref{tab:ablations}): \emph{all inputs}
+(SMIF plus FIRE), \emph{m6A + CpG} (no fibertools calls: no MSP, nucleosome or FIRE), \emph{CpG only} (no
+accessibility information at all; the null of the CTCF test) and \emph{no CpG} (all inputs except CpG
+methylation).
+\begin{itemize}
+  \item \emph{The fibertools calls add nothing in bulk.} SMIF and m6A + CpG are level, and adding FIRE costs
+    0.02--0.03 on H3K27ac and H3K4me1 in both runs. The model gets what it needs from the raw m6A and CpG calls.
+  \item \emph{m6A carries the accessibility-type assays.} Without it, ATAC, H3K4me1, H3K27ac, CTCF and H3K9me3 drop
+    by 0.09--0.16 in development lines, and more in held-out lines (ATAC $-0.21$, H3K4me1 $-0.22$, CTCF $-0.15$).
+  \item \emph{CpG methylation carries H3K36me3 and H3K27me3.} Without it H3K36me3 halves ($-0.24$), consistent with
+    gene-body methylation following H3K36me3, and H3K27me3 drops by 0.09. H3K4me3 uses both inputs.
+\end{itemize}
+
+\begin{table*}[t]
+\caption{CTCF footprints at bound sites for every input variant: per-site median of (mean predicted CTCF on
+footprint reads $-$ mean on open reads), GM12878 / K562, for both training runs.}
+\label{tab:ctcf-ablations}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& \multicolumn{2}{c}{Footprint $-$ open, CTCF} & \multicolumn{2}{c}{CTCF $-$ ATAC} & Unbound sites,
+footprint $-$ open \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Model & run 1 & run 2 & run 1 & run 2 & run 1 \,\textbar\, run 2 \\
+\midrule
+SMIF & \textbf{+1.14 / +0.84} & \textbf{+0.95 / +0.68} & \textbf{+0.67 / +0.54} & \textbf{+0.85 / +0.63} &
+$-0.07$ / $-0.06$ \,\textbar\, $-0.03$ / $-0.05$ \\
+All inputs & +0.11 / +0.04 & +0.73 / +0.44 & +0.02 / +0.05 & +0.23 / +0.21 & $-0.02$ / $-0.01$ \,\textbar\, $-0.06$ /
+$-0.08$ \\
+m6A + CpG & +0.26 / +0.20 & +0.56 / +0.58 & +0.20 / +0.14 & +0.55 / +0.50 & $-0.05$ / $-0.03$ \,\textbar\, $-0.01$ /
+$+0.02$ \\
+No CpG & +0.18 / +0.10 & +0.75 / +0.46 & $-0.12$ / $-0.02$ & +0.33 / +0.31 & $-0.08$ / $-0.08$ \,\textbar\,
+$-0.09$ / $-0.10$ \\
+CpG only (null) & 0.00 / 0.00 & 0.00 / 0.01 & 0.00 / 0.00 & 0.00 / 0.00 & $-0.01$ / 0.00 \,\textbar\, $-0.01$ /
+$-0.01$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\textbf{CTCF footprints across inputs} (Table~\ref{tab:ctcf-ablations}). Every model that sees m6A reads the
+footprint, but the size varies 2--10$\times$ between trainings for the three variants other than SMIF, and their
+specificity is low in at least one training. A likely reason for the difference between SMIF and the all-inputs
+model: with FIRE in the input, a channel derived from CTCF ChIP peaks, the model can take ``this is a CTCF site''
+from that channel instead of reading the molecule. Without it, it has to read the m6A pattern, and it learns, from
+bulk supervision alone, that a protected motif on an accessible molecule means CTCF.
+
+\textbf{X inactivation across inputs.} Every variant puts the active marks higher on the active copy (82--91\% of
+silenced promoters in both trainings), including the CpG-only model, so either input alone suffices. H3K9me3 is
+stable only without CpG input (86\% in both trainings) and varies between trainings with it (21--76\%). H3K27me3
+fails in every variant (17--35\%).
+
+\end{document}
+
+\endinput
