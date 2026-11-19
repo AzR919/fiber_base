@@ -1,7 +1,8 @@
 # Research plan: extended TODO
 
-The full plan and every floating idea: the hypothesis, the test catalogue (T1–T10), the comparison ladder, the
-implementation list, the engineering backlog, model ideas, and the registry of reference models. The **current**
+The full plan and every floating idea: the hypothesis, the main plan (§2), the test catalogue (T1–T11), the
+comparison ladder, the implementation list, the engineering backlog, model ideas, and the registry of reference
+models. The **current**
 plan (what we run now, max two pages) is `TODO.md`; ideas move from here to there when they become current.
 Metric definitions: `metrics/README.md` / `metrics/APPENDIX.md`. Background and motivation: the directed-reading
 report, Chapter 4 (Fiber Imputation: Setup and Future Directions).
@@ -17,6 +18,10 @@ sequence, carry enough information to predict the histone modifications and othe
 fibers (weak, multiple-instance supervision), learns a mapping from a molecule's own accessibility to its own
 histone state, rather than predicting the locus-level bulk on every molecule. The mapping needs no knowledge of
 the cell type beyond its fibers, so it works out of the box for new cell types.
+
+*Update (18 Nov):* the mixture test showed that what transfers is having seen the cell types, not the type of
+supervision. The main claim is now that a model trained on a sample's own (mixture) bulk resolves that sample's
+molecules (§2). "Out of the box for new cell types" stays a secondary question.
 
 **Null (H0).** The per-fiber outputs are effectively a function of the locus (DNA, position) and the cell's
 population-level signal; individual molecules at a locus get (nearly) the same prediction. Under H0 the bulk can
@@ -63,49 +68,126 @@ Rule for every level-4 test:
 2. The expected direction comes from the literature and is written down before running.
 3. It has a null control.
 
-The current plan is in `TODO.md` §2.
+The open biological tests are in `TODO.md` §3; the main plan is §2 here and `TODO.md` §1.
 
 ---
 
-## 2. Status snapshot (1 Nov 2026)
+## 2. Main plan (18 Nov): the mixture-trained model and a sealed test
 
-Frozen when the current plan moved to `TODO.md` (which now keeps the up-to-date status). Detailed numbers go in the
-dated reports (`reports/`).
+### 2a. The claim and why
 
-**Done**
-- Pipeline: reproducible data setup (ENCODE fold-change tracks, 8 assays × 8 cell lines; region files), cell-type
-  split (5 dev, 3 held out), train/val/test regions (chr20 / chr22 / chr21 tiles), fiber masks trimmed to the
-  nucleosome span, scoring at positions with ≥ 5 fibers, cross-cell-average baseline and cell-specific r.
-- **V1 output aggregation is the default:** per-fiber outputs stay in asinh units, the bulk averages them in fold
-  change (asinh(mean sinh)); mixture targets and the baseline also average in FC. Bulk within noise of V0. The
-  bulk results in `Oct_23.md` are V0, with the old baseline (mean of asinh tracks).
-- **Cell-specific loci** (dev: 5 dev lines, leave-one-out; test: all 8) built on the chr21 tiles by data setup.
-- **T1 (bulk recovery):** works. With enough training the dev-split model is close to the cross-cell average on
-  Pearson (ahead in some dev cells, behind in Panc1 and the held-out cells) and better on MSE in most cells.
-- **T2 (held-out cell types):** the cell-specific r is positive in every cell type, held-out ones included, so the
-  model carries cell-specific information from the fibers that generalizes to new cell types (supports H over
-  H0 at the population level). Wrong-cell control and the cell-specific-loci breakdown still to do.
-- **T3 (mixture-only supervision), first run (GM12878 + HepG2):** supports H at the single-molecule level. Trained
-  only on mixtures, the model separates the two cell types' molecules (fiber-origin AUC 0.64, sign accuracy 0.78)
-  as well as the single-cell-trained upper bound, locus-specifically, with no separation of two HepG2 libraries
-  (`Oct_23_T3.md`).
+- **The use case.** A tissue is a mixture of cell types. You can run Fiber-seq and ChIP on the same mixed sample,
+  but you can't separate it into pure cell types to get each one's own tracks. The selling point: train on the
+  mixture's own bulk, and still impute each molecule correctly.
+- **What we know (`Nov_13_extended.md` §3, one seed):**
+  - on its own pair, the mixture-only model matches the pure-track pair model (fiber-origin AUC 0.637 vs 0.635 on
+    GM12878–HepG2, 0.666 vs 0.665 on K562–H1; own-track recovery within 0.015);
+  - on a pair it never saw, the type of supervision makes no difference: what matters is having seen the cell
+    types. Transfer is lopsided (poor toward K562–H1).
+- **So the main model to sell is one trained on the sample itself,** compared with DEV4NF as "a model pretrained on
+  other cells". The unseen-pair result predicts the mixture model wins on new cell types.
+- **This shifts the main hypothesis (§1)** from "works out of the box for new cell types" to "trained on a
+  sample's own bulk, it resolves that sample's molecules". The out-of-the-box version stays a secondary question
+  (DEV4NF on held-out cells).
 
-**Known weak points**
-- Broad marks, H3K36me3 above all (far below the baseline in several cell types); likely needs longer context.
-- Training plateaus after ~60 × 1000 samples with the current LR schedule.
+### 2b. Realism gaps in the current mixtures
 
-**Next** (priority: single-molecule correctness)
-- Rerun the baseline numbers with the FC mean.
-- T3 follow-ups: a second seed for both models, the random-split noise floor, a second pair from the same
-  Fiber-seq series (e.g. K562 + HepG2).
-- T3b (mixture test on unseen cell types): rules out the "cell-type classifier" shortcut that T3 cannot.
-- Reference values for r (what counts as a good Pearson / cell-type r): neither can reach 1, because the ENCODE
-  target is itself noisy (worst at bp resolution, on broad marks and H3K9me3), and the cell-specific residual is
-  mostly noise. Measure per assay (1) the replicate ceiling, replicate 1 vs replicate 2, with both plain r and
-  cell-type r given the baseline (I11), and (2) a related-cell reference, a sibling cell type's real track used as
-  the prediction, e.g. H1 for H9 (I12). Then report our numbers as a fraction of the ceiling, and note that r
-  rises with coarser bins, so bp-level values are not comparable with 25 bp imputation papers.
-- Later: per-assay scale (V2), T4 V3, single-molecule references for the ladder (4a).
+Current mixtures (`mix_range`, `data27` / `data35`) are easier than a real sample in two ways:
+1. **The cell fraction is redrawn for every training window** (uniform in [0.2, 0.8]). A real sample has one
+   fraction. T3's design note says this variation is what makes each population's signal identifiable ("with one
+   fixed ratio, many splits of the signal fit equally well"), so the realistic case may be much harder.
+2. **The target is weighted by the fibers actually sampled** at each position (q_c(x) = cell c's share of the
+   fibers covering x). Real ChIP reflects the cell population, not the particular molecules Fiber-seq happened to
+   read.
+
+Variants to compare (2 cells first):
+
+| Variant | Cell fraction | Target | Realistic? |
+|---|---|---|---|
+| **R0** (current) | redrawn per window, [0.2, 0.8] | weighted by the fibers sampled | no |
+| **R1** | one fixed fraction q per mixture (e.g. 0.3 and 0.5 as two separate runs) | population: asinh(q sinh t_A + (1 − q) sinh t_B), independent of the fibers sampled | yes: one sample |
+| **R2** | 3–4 samples, each with its own fixed fraction (e.g. 0.25 / 0.5 / 0.75); each window comes from one sample | population target of that sample | yes: a few donors, tissues or time points |
+
+- If R1 ≈ R0: the realistic claim holds as is.
+- If R1 fails but R2 works: the claim becomes "a few samples with different proportions are enough".
+- If both fail: mixture training only works with information a real experiment doesn't have; report that and
+  sell the pure-track model plus the biology tests instead.
+- Fiber sampling within a window stays random (Fiber-seq depth noise is real). Optional later: lower fiber
+  coverage, closer to a real experiment's depth.
+
+### 2c. Test hygiene
+
+- **What has been touched:** the held-out cells (H9, HCT116, MCF-7) entered the ceiling fractions, the ablation
+  tables, the seed analysis and the DEV4NF choice; Panc1 moved to held out because of its own results; chr21 is
+  the evaluation chromosome of every bulk and molecule test so far; chrX was used for the X-inactivation test.
+- **From now on:**
+  - **development:** the 4 dev cell types; train chr20, validation chr22, development evaluation chr21 (plus chrX
+    for X inactivation);
+  - **sealed test:** the held-out cell types on a fresh chromosome, never evaluated before. Pick it now by
+    criteria fixed in advance (size and gene density similar to chr21, ENCODE coverage in every held-out cell,
+    enough CTCF sites and CGI promoters), e.g. chr18 or chr19;
+  - the test is run once with the locked recipe and reported whatever it shows. The earlier use of the held-out
+    cells on chr21 is stated in the paper.
+- **Held-out mixtures:** HCT116 + MCF-7 (the cleanest pair: different tissues, same Fiber-seq series); a 3-cell
+  mixture with H9. H9 and H1 are both embryonic stem cells, so H9 is less of a new cell type.
+- **Panc1** stays out (its sample identity is in doubt).
+
+### 2d. Comparisons
+
+| Comparison | Question | Where |
+|---|---|---|
+| Mixture model vs **pair model** (same cells, own tracks, same channels) | Does mixture supervision lose anything? (identifiability ceiling) | dev pairs |
+| Mixture model vs **DEV4NF** applied without retraining | Train on your sample, or use a pretrained model? | dev pairs (DEV4NF saw the cells) and the sealed test (it didn't) |
+| Mixture model vs **simple per-fiber models** under the same supervision (T11) | Is the network needed? | dev pairs, then test |
+| Floors: **bulk on every molecule**, library control, random split of one library | What does chance / H0 score? | everywhere |
+
+All mixture and pair models use DEV4NF's architecture and channels (`model16`, no FIRE), so supervision is the
+only difference.
+
+### 2e. Readouts
+
+- **T3 readouts:** fiber-origin AUC, sign accuracy and differential r at the pair's differential bins; each cell's
+  recovery of its own track, against the mixture track's recovery of it ("bulk on every molecule").
+- **More than 2 cells:** one-vs-rest fiber-origin AUC per cell, and each cell's own-track recovery.
+- **Biology tests on mixture-trained models:** CTCF footprints on each cell's fibers (without the hole sites), and
+  X inactivation when GM12878 is in the mixture. "Trained on a mixture, the molecules still show the right
+  biology" is a stronger claim than separating cell types.
+- **Bulk guard:** mixture bulk r on the evaluation chromosome.
+
+### 2f. Seeds and success criteria
+
+- **3 seeds for every claim;** report mean ± sd and the seed-to-seed spread. Measure seed noise first (stage 2).
+- **Draft success criteria** (finalize after stage 2, before stage 3):
+  1. on the dev pairs, the realistic mixture model is within 2 seed SDs of the pair model on fiber-origin AUC and
+     own-track recovery;
+  2. it is clearly above the floors (bulk on every molecule, library control);
+  3. the CTCF footprint and X-inactivation active-mark tests pass with mixture-only supervision, in all 3 seeds;
+  4. on the sealed test, the model trained on the held-out mixture beats DEV4NF applied without retraining on
+     fiber-origin AUC and differential r.
+
+### 2g. Stages and cost
+
+Training runs take ~2.2 h each on a 2g.20gb slice (under the 3 h limit), plus evals.
+
+| Stage | What | Runs |
+|---|---|---|
+| 1 | Protocol, success criteria and test chromosome written down; data / eval configs | — |
+| 2 | Seed noise: Mix A, Mix B, Pair A, Pair B with `model16`, 3 seeds each | 12 (~27 GPU-h) |
+| 3 | Realism: R1 and R2 on both dev pairs × 3 seeds (R0 from stage 2) | 12 (+ 6 if R1 runs at two fractions) |
+| 4 | Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
+| 5 | Sealed test: locked recipe on HCT116 + MCF-7 and a 3-cell held-out mixture, 3 seeds; DEV4NF without retraining | ~6 |
+
+Implementation: I26–I31 (§5).
+
+### 2h. Done so far (details in the dated reports)
+
+- Pipeline: ENCODE fold-change tracks (8 assays × 8 lines), region files, cell-specific and pairwise loci, V1
+  fiber averaging in fold change (default since 20 Oct), split v2 (4 Nov).
+- T1 / T2 bulk and cell-specific r: `Oct_23.md`, `Nov_13.md`. Replicate ceiling (I11): `Nov_13_extended.md` §9.
+- T3 / T3b mixture test on two pairs: `Oct_23_T3.md`, `Nov_13_extended.md` §3.
+- T10 input ablations, 2 seeds: `Nov_13_extended.md` §6, §10. DEV4NF became the main model (18 Nov).
+- T5e CTCF footprints and T5b X inactivation: `Nov_20.md`, with locus figures in `Nov_20_figs.md`. CTCF rerun
+  without the 75 motif sites lacking bulk short-read data (`ctcf_holes.py`).
 
 ## 3. Tests
 
@@ -122,9 +204,8 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Prediction.** Clearly positive recovery, but not necessarily above bulk methods: imputing one molecule at a
   time is a constraint, and the cross-cell average is hard to beat genome-wide (as in the ENCODE imputation
   challenge). Matching T6's bulk model would show the per-molecule constraint costs little.
-- **Status.** Done with the old averaging (V0): DEV5 short and long (`Oct_23.md`, `Oct_30.md`). Rerun with a V1
-  DEV5 and the fold-change baseline (`TODO.md`). TODO: report the loci breakdown (I3, implemented) and the T6
-  reference.
+- **Status.** Done (V1, DEV5 / DEV4 / DEV4NF; `Nov_13.md`), including the replicate ceiling. Open: the loci
+  breakdown by gain / loss (I3) and the T6 reference.
 
 ### T2. Held-out cell types and the cell-specific part of the signal
 
@@ -140,7 +221,9 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
   of what is achievable rather than as r² of the total.
 - **Prediction (H).** Cell-specific r clearly > 0 on held-out cells and close to the dev cells; the wrong-cell
   control near 0. **(H0)** cell-specific r ≈ 0, or the wrong-cell control as high as the right one.
-- **Status.** Cell-specific r done for DEV5 (supports H); wrong-cell control and cell-specific-loci breakdown TODO.
+- **Status.** Cell-specific r done (supports H), with the replicate ceiling of it (`Nov_13_extended.md` §9).
+  Open: wrong-cell control (I5), related-cell reference (I12). Held-out cells are sealed from 18 Nov (§2c): new
+  T2 numbers only on the sealed test chromosome at the end.
 
 ### T3. Mixture-only supervision (main test of H)
 
@@ -178,45 +261,22 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Caveat.** The model may separate populations by library-level features (global m6A density, fiber length,
   global CpG methylation) and output a cell-typical pattern, without reading local accessibility. The
   two-library control quantifies this; pairs of cell types with similar library statistics reduce it.
-- **Status.** Implemented (I1, I3): `data27` (mixtures, share [0.2, 0.8]), `data28` (single-cell reference), paired eval
-  `eval24` (GM12878 vs HepG2_200U) and library control `eval25` (HepG2_100U vs 200U), mixture eval `eval26`,
-  report `t3_report.py`. Differential bins from `loci/pairs/GM12878__HepG2`. The fiber-origin AUC is computed
-  during eval (per fiber, the mean prediction over the bin), so I2 is not needed for it. First run done
-  (`Oct_23_T3.md`): supports H, mixture model on par with the single-cell reference. Random-split noise floor not
-  implemented yet.
+- **Status.** Done on two pairs, one seed (`Oct_23_T3.md`, `Nov_13_extended.md` §3): the mixture model matches
+  the pair model on its own pair. Configs: `data27` / `data35` (mixtures), `data28` / `data34` (pairs), paired
+  evals with library controls, `t3_report.py`, `plots_code/26_nov_13/mix_two_pairs.py`. **Now the base of the
+  main plan (§2):** 3 seeds, realistic mixtures (R1 / R2), more than 2 cells, sealed test. Random-split noise floor
+  still to implement (I31).
 
 ### T3b. Mixture test on unseen cell types
 
-> Done on two pairs (GM12878–HepG2, K562–H1) with pair-model and DEV4 references; results in `Nov_13.md`
-> ("Mixture test on two pairs"). The channel ablations that were planned with it are now hypothesis-driven (T10).
-> The text below is the original motivation.
-
-- **Hypothesis.** A model trained on mixtures of two cell types separates the molecules of two *other* cell types
-  it never saw, at the loci where those two differ.
-- **Why it adds to T3.** T3 cannot rule out a shortcut: the model infers each molecule's cell type from global
-  features (overall CpG methylation, m6A pattern) and predicts that cell type's typical chromatin at the locus from
-  DNA. With two training cell types this separates molecules locus by locus, passes the direction-split check and
-  generalizes to new loci. For unseen cell types there is no profile to recall: at best the shortcut pushes each
-  new cell type towards the training cell type it resembles. Fibers are processed independently, so testing on a
-  mixture of unseen cell types is the paired eval of the two cell types (no composite needed).
-- **Design.**
-  - Pairs: K562 vs Panc1 (dev cell types the T3 models never saw; both from the same Fiber-seq series, so no
-    cross-experiment library concern); H1 vs K562. Held-out pair (HCT116 vs MCF-7) at milestones only.
-  - Models: the T3 mixture model, the T3 single-cell reference (GM12878 + HepG2, also unseen), and DEV5 (trained
-    on K562 / Panc1 / H1's own tracks) as the reference that has seen the pair.
-  - Readouts: as T3 (differential r, sign accuracy, fiber-origin AUC at the pair's differential bins).
-  - **Shortcut check:** correlate the predicted difference with the unseen pair's true difference (reading) and
-    with the training pair's difference at the same windows (shortcut). Reading predicts the first.
-- **Prediction (H).** Clearly positive readouts, close to DEV5's, following the unseen pair's difference, not the
-  training pair's. **(Shortcut)** readouts near chance, or tracking the GM12878 - HepG2 axis.
-- **Caveat.** A failure is ambiguous: no molecule reading, or reading learned from two cell types does not transfer
-  (compare with DEV5 and with mixture training on more cell types, M2). A success is clear. Does not replace T5
-  (within one cell type no identity shortcut exists at all).
-- **Status.** Done (Nov 2026, `Nov_13.md`):
-  - Mixture-only training reaches the own-track ceiling on both pairs.
-  - On an unseen pair, mixture and own-track models do the same.
-  - Transfer is lopsided: poor toward K562–H1.
-  - Routed specialists (the third reference) deferred.
+- **Question.** Does a model trained on mixtures of two cell types separate the molecules of two *other* cell
+  types it never saw? (Rules out the shortcut "infer the cell type, recall its typical profile".)
+- **Result** (`Nov_13_extended.md` §3, one seed):
+  - on an unseen pair, mixture and own-track models do the same: what matters is having seen the cell types;
+  - transfer is lopsided: fine toward GM12878–HepG2, poor toward K562–H1 (H3K36me3, H3K9me3, H3K27ac);
+  - routed specialists (I16) deferred.
+- **Consequence:** the main model is trained on the sample itself (§2); DEV4NF applied to new cells is the
+  "pretrained" comparison.
 
 ### T4. Output parameterization and assay model (methodology comparison)
 
@@ -249,7 +309,7 @@ Each test: hypothesis, design, readouts, controls, predictions (what supports H,
 - **Status.** V1 implemented and default (V0 = `fiber_aggregation: asinh`, also how old checkpoints load).
   V2 (per-assay scale) and V3 after T3. Needs I4 (V2) and I14 (V3).
 
-### T5. Within-population structure and biological validation (current plan, `TODO.md` §2)
+### T5. Within-population structure and biological validation (open tests: `TODO.md` §3)
 
 Only these probe correctness *within* a cell type. Each uses a group of molecules defined independently of the
 model, with a known expected difference written down before running, and a null.
@@ -273,16 +333,17 @@ model, with a known expected difference written down before running, and a null.
      methylation across molecules at the same locus. The baseline and any "bulk on every molecule" model score 0.
   2. **In-silico flips:** on the full model, methylate or unmethylate a molecule's CGI CpGs and check the
      direction of change per assay (cf. SMFNet's in-silico motif insertions). No retraining (I21).
-  3. **Ablation loss per assay:** see T10.
-- **T5b. X inactivation**, phased instead of only bimodality:
-  - Cell line: GM12878, where the Xi is maternal (99% of XIST transcripts, FIRE paper). Assign HP blocks to Xa / Xi
-    by trio phasing, or by XIST-promoter state measured away from the test genes.
-  - Expected: Xi molecules gain H3K27me3 / H3K9me3 and lose H3K4me3 / H3K27ac at TSSs active only on the Xa.
-    Escape genes (UBA1, KDM5C, KDM6A, ...) are active on both. CTCF sits on both copies at most sites, and is
-    Xi-specific at DXZ4 / FIRRE / ICCE.
-  - Nulls: autosomes; male lines (HepG2, H1).
-  - The unphased bimodality version still applies to the other female lines (MCF-7, H9; XCI often eroded in hESC).
-  - Needs a chrX window set (I7).
+  3. **Ablation loss per assay:** done (T10). Open: readouts 1 (the no-CpG model now exists) and 2 (I21).
+- **T5b. X inactivation:** done at promoters (`Nov_20.md` §2; GM12878, Xi = HP2 from the measured XIST promoter
+  methylation). At silenced CGI promoters the active marks pass in every model and seed, H3K9me3 weakly, H3K27me3
+  fails (more on the Xa). Open:
+  - restrict to genes expressed in GM12878 (RNA-seq). PTCHD1 (`Nov_20_figs.md`) suggests part of the H3K27me3
+    "failure" is non-expressed genes, where Polycomb on the Xa copy may be correct;
+  - check the escape list against Tukiainen 2017;
+  - H3K27me3 and H3K36me3 over gene bodies and Xi domains;
+  - CTCF per haplotype at chrX motifs (footprint frequency on Xa vs Xi; DXZ4 / FIRRE as Xi-specific controls);
+  - the unphased bimodality version for the other female lines (MCF-7, H9; XCI often eroded in hESC). Held-out
+    lines are sealed (§2c), so only at the end.
 - **T5c. Imprinted control regions** (H19/IGF2, KvDMR1, SNRPN, PEG3, MEG3, GNAS; MAGEL2, ZDBF2 from FIRE):
   - Unmethylated allele: H3K4me3 + accessibility (CTCF at the H19 ICR). Methylated allele: H3K9me3.
   - Showcase figures across the phased lines.
@@ -292,20 +353,17 @@ model, with a known expected difference written down before running, and a null.
   - GM12878 AlleleDB / ADASTRA calls for CTCF, H3K27ac, H3K4me3 (I20).
   - The predicted per-haplotype difference should have the sign of the ChIP allelic imbalance, and be ~0 at
     balanced SNPs.
-- **T5e. CTCF footprints:**
-  - Per-fiber CTCF predictions at CTCF motifs, against footprint calls on the same fiber (I22).
-  - Expected ranking: bound > accessible-unbound > closed. Stergachis 2020: about 30% of accessible fibers at K562
-    CTCF sites are bound.
-  - Footprints are a measured single-molecule readout of CTCF occupancy.
+- **T5e. CTCF footprints:** done (`Nov_20.md` §1, chr21, GM12878 and K562; our own m6A footprint call). Footprint
+  fibers get more predicted CTCF than open fibers at bound sites, in every model that sees m6A; DEV4NF strongest
+  and most specific in both seeds; unbound sites ≈ 0 after removing the motif sites without bulk data. Open: run
+  it on the mixture-trained models (§2e) and the simple baselines (T11).
 - **T5f. Same-molecule co-occurrence where accessibility and marks disagree:**
   - Bivalent promoters in H1: H3K4me3 + H3K27me3 on the same molecules, but not in differentiated lines.
   - H3K36me3 and H3K27me3 mutually exclusive (PRC2 is inhibited by H3K36me3).
   - Repressive marks not simply inverted accessibility.
   - Co-actuation of neighbouring elements on the same molecule, with distance decay (Stergachis 2020).
-- **Status.**
-  - Planned (`TODO.md` §2); HP tags checked (I8).
-  - Phase 1 (no retraining): T5b–T5e, plus the T5a in-silico flips.
-  - T5a held-out needs the no-CpG model (T10).
+- **Status.** T5b and T5e done (`Nov_20.md`). Open: T5a (in-silico flips, held-out methylation), T5c, T5d, T5f,
+  and the T5b follow-ups above (`TODO.md` §3).
 
 ### T6. Bulk reference model with the same information
 
@@ -321,7 +379,8 @@ model, with a known expected difference written down before running, and a null.
 - Shuffle each fiber's inputs across loci: per-fiber predictions should break down while the bulk changes less.
 - Permute which input belongs to which molecule within a window: predictions should follow the inputs.
 - These do not prove correctness, but a model ignoring each molecule's data would fail them.
-- **Status.** Not started; cheap once predictions can be saved (I2).
+- **Status.** Not started; cheap now that `molecule_predict.py` exists (inference only). Planned with T11
+  (`TODO.md` §2).
 
 ### T8. External single-molecule data (opportunistic)
 
@@ -332,7 +391,7 @@ model, with a known expected difference written down before running, and a null.
   - Yue et al. 2022 (nanopore profiling of histone marks + methylation).
 - Single-cell CUT&Tag (e.g. K562) gives per-locus distributions to compare against the spread of per-molecule
   predictions.
-- **TODO (first step of `TODO.md` §2):** check which cell lines and marks have public data.
+- **TODO (`TODO.md` §3):** check which cell lines and marks have public data.
 
 ### T9. A pretrained sequence-to-activity model as the DNA encoder
 
@@ -386,7 +445,9 @@ Not current (later, if the above call for them):
 **Cost.** About 2.2 h per variant on a 2g.20gb slice, plus evals. Differences of a few hundredths need a second
 seed.
 
-**Status.** Planned (`TODO.md` §2, step 2).
+**Status.** Done for no CpG, no FIRE, no accessibility and m6A + CpG (no fibertools calls), 2 seeds each
+(`Nov_13_extended.md` §6, §10; molecule tests in `Nov_20.md`). No FIRE (DEV4NF) became the main model. Open:
+T5a held-out methylation with the no-CpG model.
 
 ### T11. Simple per-fiber baselines: does the network learn more than an obvious reading of the input?
 
@@ -432,7 +493,7 @@ seed.
   held-out-cell differences (T2, T3).
 - **Readouts:** every existing test, unchanged: bulk r and fraction of the replicate ceiling (I11), mixture
   fiber-origin AUC and differential readouts (T3), CTCF footprints (T5e), X inactivation (T5b), later T5a–d.
-  Molecule tests over ≥ 2 seeds for the learned baseline too (`Nov_13_extended.md` §10).
+  Molecule tests over 3 seeds for the learned baseline too (`Nov_13_extended.md` §10).
 - **Expected** (write the final version down before running):
   - ATAC: simple model close; not where the claim lives.
   - CTCF: learned summary model without a motif-protection feature has little footprint response; the hand rule
@@ -445,6 +506,8 @@ seed.
 - **Update (18 Nov), after `Nov_20.md`:**
   - **Compare against DEV4NF** (the main model since 18 Nov), in both seeds. Give the baselines the same channels:
     m6A, CpG, MSP, nucleosome, no FIRE.
+  - **Once the mixture recipe is settled (§2, stage 3), train the learned baseline the same way** (same mixtures,
+    same target), so it answers the same question as the main model. 3 seeds, like everything we claim.
   - **Run the tightened tests:** CTCF footprints without the 75 sites lacking bulk data (`ctcf_holes.py`), with
     height and shape against the bulk track (`Nov_20_figs.md`); X inactivation scored on silenced CGI promoters.
   - **H3K27me3 on the Xi is the clearest "both fail?" case.** If the simple model also puts more H3K27me3 on the
@@ -483,7 +546,8 @@ Scored with the molecule-level tests (T3 mixtures, T5 within-population), not bu
 | Reference | What it represents | Expected on T3 / T5 |
 |---|---|---|
 | Model trained with each cell type's own track (not only the mixture) | Upper bound for T3 | Best separation |
-| **fiberCANDI (us)** | | Should beat the two below |
+| **Mixture-trained model on the sample itself (main, §2)** | Realistic use: trained on the mixture's own bulk | Close to the own-track model; should beat the rows below |
+| **DEV4NF applied without retraining** | A model pretrained on other (pure) cell types | Good on cells it saw; worse on new cell types (T3b) |
 | **Simple learned per-fiber model** (T11): summary features per fiber → linear map, same fiber averaging, same bulk training | Same information and supervision, no deep network: is the network needed? | Close on ATAC (and maybe H3K36me3); weaker on the T5e footprint response and H3K27ac / H3K4me1 |
 | **Rule-based single-molecule imputer** (T11), e.g. "molecules accessible at an element carry the active mark", scaled to match the bulk | The obvious objection: did the model learn more than accessible = active? | Some separation for active marks, little for repressive ones. Circular on T5e (the footprint rule is the test's label): a ceiling there, not a competitor |
 | **Bulk on every molecule** (the mixture / cross-cell bulk assigned to each molecule) | H0 | No separation, by construction |
@@ -496,7 +560,7 @@ empirical result, not a fixed position.
 
 | Rung | Sees from the target cell | Output | Notes |
 |---|---|---|---|
-| Replicate of the target assay | the assay itself | bulk | **Noise ceiling; priority.** ENCODE per-replicate FC tracks exist for most experiments; compare replicate vs replicate (not vs pooled, which contains it) |
+| Replicate of the target assay | the assay itself | bulk | **Noise ceiling. Done** (I11, `Nov_13_extended.md` §9): replicate r ≈ 0.4, reachable r ≈ 0.74 |
 | CANDI, all of the target cell's assays (minus the target) | other assays | bulk | Richer input than ours. **Check CANDI's training split**: if it saw the target (cell, assay), it is partly an oracle |
 | Model trained on the target cell type | fibers + target track in training | molecule | Cost of generalizing to a new cell; exists for dev cells, missing for the held-out 3 |
 | **CANDI, ATAC only** and **CANDI on aggregated Fiber-seq accessibility** | bulk accessibility | bulk | **The head-to-head peer.** The Fiber-seq version is the like-for-like one; H1/H9 have no ATAC |
@@ -512,40 +576,52 @@ Fair comparison: same chr21 tiles, same scored positions (target cell's fiber co
 method), same metrics and transform (asinh FC); external predictions at coarser resolution (CANDI bins) need a
 common binning for the ladder.
 
-Priority within 4b: replicate ceiling → DNA-only model → similar-cell average → CANDI (after the leakage check)
-→ target-cell-trained model for held-out cells → CANDI all-assays and fiberCANDI + cluster.
+Priority within 4b: DNA-only model → similar-cell average → CANDI (after the leakage check) → target-cell-trained
+model for held-out cells → CANDI all-assays and fiberCANDI + cluster.
 
 ---
 
 ## 5. Implementation TODO
 
+Open items only. **Done** (details in the reports and the code): I1 mixture training and paired eval (`mix_range`,
+`t3_report.py`); I3 cell-type-specific loci; I4 V1 fiber averaging; I6 / I23 ablation models (no CpG, no FIRE,
+no accessibility, m6A + CpG); I8 haplotype tags; I11 replicate ceiling; I15 unseen-pair test; I22 per-fiber CTCF
+footprint call (`ctcf_footprints.py`); per-fiber predictions at target BEDs (I2, molecule part,
+`molecule_predict.py`); Xa / Xi split for GM12878 (I19, partly).
+
+**For the main plan (§2):**
+
 | ID | Change | For | Notes |
 |---|---|---|---|
-| I1 | ~~Mixture training with variable proportions; paired eval with the T3 readouts~~ (done 2026-10-21: `mix_range`, target weighted by the fibers present, `paired` eval configs, `t3_report.py`); random-split noise floor still to do | T3 | |
-| I2 | Per-fiber predictions saved for analysis. **Molecule part done 7 Nov:** `molecule_predict.py` (+ `slurm_batch_command_molecules.sh`) writes per (target, fiber) the read name, HP / PS, mean prediction per assay over the target and input summaries over target and flanks; full arrays optional. Still open: bulk prediction / mask saving in `eval.py` for the pairwise readouts | T3, T5, T7 | Full per-fiber tracks are too large to save genome-wide; the tool works on target BEDs |
-| I3 | Cell-type-specific-loci breakdown in eval: report MSE, sign accuracy and cell-specific r on each cell's loci tiles (gain / loss) | T1, T2, T3 | Done: loci files (`data_prep/build_loci.py`) and eval config key `loci` (region types `loci:...`); gain / loss split not reported separately yet. Plain r is depressed there (range restricted on the target), so don't compare it with genome-wide r |
-| I4 | Output scale: ~~average fibers in FC (V1), mix targets and baseline in FC~~ (done); per-assay scale (V2); optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | V2 changes training: rerun references after |
+| I26 | **Population mixture target:** option `mix_target: population` = asinh(Σ_c q_c sinh t_c) with the nominal fractions q_c, independent of the fibers sampled (now: weighted by the realized fiber share per position) | §2b R1 / R2 | `data_utils.py` mixed dataset; the current behaviour stays the default for old configs. Fixed fraction already possible with `mix_range: [q, q]` |
+| I27 | **Several samples with fixed fractions:** option `mix_samples: [0.25, 0.5, 0.75]`; each window draws one sample, and fibers and target follow that sample's fraction | §2b R2 | Same place as I26 |
+| I28 | **Mixtures of more than 2 cell types:** fractions per cell (fixed or per sample), target over all cells; mixed eval and paired readouts generalized (one-vs-rest fiber-origin AUC, per-cell own-track recovery) | §2b, §2e | `mix_range` now needs exactly 2 cell types. Differential bins for n cells: per cell vs the rest |
+| I29 | **Sealed test chromosome:** pick it by fixed criteria, add its tiles / mini set to `regions_spec.yaml`, loci for the held-out pairs (and a held-out 3-cell set) on it, eval configs. Build, never evaluate until stage 5 | §2c | `build_regions.py`, `build_loci.py`, `loci_spec.yaml`. Also the CTCF-site and TSS target BEDs on it for the biology tests (held-out cells only at the end) |
+| I30 | **3-seed runs and aggregation:** mixture / pair data configs with `model16`, `SEED` per run (exists in `slurm_batch_command.sh`), one script that collects the T3 readouts per pair × model × seed (mean ± sd) | §2f | Extend `mix_two_pairs.py` |
+| I31 | **Random-split noise floor:** one library's fibers split at random into two halves, scored like a pair | §2d floors, T3 | Left over from I1 |
+
+**Other open items:**
+
+| ID | Change | For | Notes |
+|---|---|---|---|
+| I2 | Bulk prediction / mask saving in `eval.py` for the pairwise readouts | T3, T7 | Molecule part done (`molecule_predict.py`) |
+| I3 | Report the loci breakdown by gain / loss separately | T1, T2 | Plain r is depressed at loci (range restricted on the target); don't compare it with genome-wide r |
+| I4 | Per-assay scale (V2); optional sigmoid outputs + per-assay calibration; optional per-track target normalization in data setup | T4 | V2 changes training: rerun references after |
 | I5 | Wrong-cell control for the cell-specific r | T2 | Score cell A's target with cell B's prediction |
-| I6 | No-CpG model run (`input_flags` [1, 0, 1, 1, 1], new model config) + molecule-level correlation with held-out methylation | T5a, T10 | |
-| I7 | chrX window set (regions spec) + bimodality analysis | T5b | Spec entry only for the windows; regions currently exclude chrX |
-| I8 | ~~Check CRAMs for haplotype (HP) tags~~ (done 7 Nov: HiPhase HP/PS in all CRAMs; tagged share in a chr21 sample GM12878 93%, K562 100%, HepG2 100%, H1 98%, H9 55%, MCF-7 18%) | T5b–d | Tags are consistent within a phase block (PS) only; parental assignment needs trio phasing (GM12878) or a per-block label |
+| I7 | chrX window set (regions spec) for bulk evaluation on chrX | T5b | The X-inactivation test used target BEDs instead |
 | I9 | Aggregated-input bulk model | T6 | New model variant |
-| I10 | Rule-based single-molecule imputer + "bulk on every molecule" reference, scored with T3/T5 | 4a | Analysis only, on saved predictions (I2) |
-| I11 | Replicate-level ENCODE tracks in data setup (noise ceiling) | 4b, T2 | Extend the spec/lock to per-replicate FC files. Score replicate vs replicate per assay and cell type with plain r, MSE and cell-specific r (given the baseline), on the same scored positions |
-| I12 | DNA-only model run; similar-cell average baseline; related-cell reference | 4b, T2 | Allow all-zero `input_flags`; baseline with a chosen cell subset; related-cell reference = one sibling cell's real track as the prediction (H1 → H9), scored with cell-specific r |
+| I10 | "Bulk on every molecule" and random references, scored with T3 / T5 | 4a, §2d | Analysis only, on saved predictions |
+| I12 | DNA-only model run; similar-cell average baseline; related-cell reference | 4b, T2 | Allow all-zero `input_flags`; related-cell reference = one sibling cell's real track as the prediction (H1 → H9) |
 | I13 | Pretrained seq2act DNA encoder (frozen, cached embeddings) | T9 | Leakage check first |
 | I14 | Nucleosome-level outputs + per-assay smoothing kernel (output variant V3) | T4, §7 | Model + loss change |
-| I15 | *(Done, Nov 2026: pairs GM12878–HepG2 and K562–H1, `Nov_13.md`)* Unseen-pair test: `pairs` in `loci_spec.yaml` (K562–Panc1, K562–H1, Panc1–H1, GM12878–H1, HepG2–H1), paired eval configs + library controls (K562, Panc1, H1), single-cell and pair data configs, ablation model configs, routing for specialists, pair × assay summary (`t3_report.py`); optional shortcut check (correlate the predicted difference with the training pair's difference at the same windows) | T3b | |
-| I16 | *(Deferred; specialists trained, routing not built)* Oracle-identity reference for T3: one model per cell type (trained on its own track), each fiber routed through its own cell type's model. Quantifies how much separation knowing the cell type alone buys; not a ceiling for molecule reading (origin is given, so it scores high even without reading fibers) | T3 | Two extra training runs + routing in the paired eval |
-| I17 | Multi-resolution r: Pearson / MSE also on 200 bp and 1 kb bin means of prediction and target (same scored positions) | assay tiers (`TODO.md` §3) | Evaluator only |
-| I18 | Assay-specific r: partial correlation of predicted and true mark given the true ATAC track, per assay | assay tiers (`TODO.md` §3) | Evaluator only; cells without ATAC (H1, H9) skipped |
-| I19 | Haplotype-split analysis: per-fiber predictions at chosen loci split by HP within each phase block (PS); Xa / Xi block labels for GM12878 (trio phasing or XIST-promoter state); exclusion of CpG-creating / destroying SNPs | T5b–d | Builds on I2. **Partly done 7 Nov:** HP / PS come with every row of `molecule_predict.py`. GM12878 tags are chromosome-wide (one PS per chromosome, trio-phased as in the FIRE paper), so no VCF is needed there; **HP2 is the Xi** (XIST promoter open, unmethylated and predicted H3K4me3 / CTCF-high on HP2 only). Still open: SNP exclusion (needs a variant list), block labels for the other lines |
-| I20 | Allele-specific ChIP truth set: heterozygous SNPs with allelic-imbalance calls (AlleleDB / ADASTRA) for GM12878 CTCF, H3K27ac, H3K4me3, matched to the fibers' haplotypes (GIAB / Platinum NA12878 phased VCF) | T5d | Data download + matching only |
-| I21 | In-silico CpG flips: set a molecule's CpG calls in a region (e.g. a CGI) to methylated / unmethylated and rerun the model on the same fibers | T5a | Inference-only tool |
-| I22 | CTCF footprint calls per fiber at CTCF motifs (fibertools `ft footprint` or an m6A-gap caller), joined to per-fiber CTCF predictions | T5e | |
-| I23 | Ablation model configs: no CpG [1, 0, 1, 1, 1], no accessibility [0, 1, 0, 0, 0]; no FIRE = `model16` | T10 | Next free model numbers |
-| I24 | Learned summary-feature baseline: a new model in `models.py` (per-fiber window summaries at a few scales + reference annotations → linear / 1×1 layer → Softplus → coverage-normalized average), trained with the usual `main.py` pipeline and data / train configs | T11 | No motif-protection feature. `molecule_predict.py` and the evals should then work unchanged; 2 seeds. DEV4NF's channels (no FIRE). Two window arms (smallest ≈ 50 bp, and ≈ 25 bp); see T11 update |
-| I25 | Hand-written per-assay rules, fixed before running, as a scorer over `molecule_predict.py` outputs (input summaries) plus a per-assay linear scale fit on chr20 for bulk | T11 | Rules in the T11 table; needs CGI / TSS / gene-body / motif annotations per target. First step: molecule tests only, from the existing per-fiber TSVs (CTCF without holes, X inactivation at CGI promoters) |
+| I16 | *(Deferred)* Routed specialists: each fiber through its own cell type's model | T3 | Specialists trained, routing not built |
+| I17 | Multi-resolution r: Pearson / MSE on 200 bp and 1 kb bin means | assay tiers | Evaluator only |
+| I18 | Assay-specific r: partial correlation of predicted and true mark given the true ATAC track | assay tiers | Evaluator only; cells without ATAC (H1, H9) skipped |
+| I19 | Haplotype split for the other phased lines (per-block labels), and exclusion of CpG-creating / destroying SNPs | T5c, T5d | GM12878 done (one phase block per chromosome; HP2 = Xi) |
+| I20 | Allele-specific ChIP truth set: AlleleDB / ADASTRA calls for GM12878 CTCF, H3K27ac, H3K4me3, matched to the fibers' haplotypes (phased NA12878 VCF) | T5d | Data download + matching only |
+| I21 | In-silico CpG flips: set a molecule's CpG calls in a region (e.g. a CGI) to methylated / unmethylated and rerun the model on the same fibers | T5a | Inference-only tool on top of `molecule_predict.py` |
+| I24 | Learned summary-feature baseline: a new model in `models.py` (per-fiber window summaries at a few scales + reference annotations → linear / 1×1 layer → Softplus → coverage-normalized average), trained with the usual `main.py` pipeline | T11 | No motif-protection feature; DEV4NF's channels; two window arms (smallest ≈ 50 bp, and ≈ 25 bp); 3 seeds; trained like the main model once §2 stage 3 settles it |
+| I25 | Hand-written per-assay rules, fixed before running, as a scorer over `molecule_predict.py` outputs, plus a per-assay linear scale fit on chr20 for bulk | T11 | Rules in the T11 table. First: molecule tests only, from the existing per-fiber TSVs (CTCF without holes, X inactivation at CGI promoters) |
 
 ## 6. Engineering backlog (performance and quality)
 
@@ -590,9 +666,7 @@ Time a training step on synthetic batches (GPU) and the loader alone (CPU) befor
   change per run so gains are attributable.
 **Other**
 - **Eval summary keyed by cell type:** two eval configs for the same cell type in one run overwrite each other.
-- **Mixed-mode evaluation:** composite target currently mixes asinh tracks (see T4).
-- **Housekeeping:** October logs exist only on nibi (the fir sync's initial pull replaced local `logs/`); nibi
-  test job 24330075 may still be queued there.
+- **Housekeeping:** October logs exist only on nibi (the fir sync's initial pull replaced local `logs/`).
 
 ## 7. Model improvements for single-molecule imputation
 
@@ -627,12 +701,15 @@ under `results/`. All V1 unless noted. Same setup unless noted: chr20, half cCRE
 | T3 mixture | `data27` | GM12878 + HepG2 mixtures | fir | `2026-10-21_01_t3_mix` | `26-10-21_T00-55-17_T3_mix_..._train02/Model_epoch_25.pt` | mixture-only supervision |
 | GM12878 + HepG2 | `data28` | GM12878, HepG2 (own tracks) | fir | `2026-10-21_02_t3_upper` | `*_T3_upper_data28_*_train02/Model_epoch_25.pt` | T3 single-cell-supervised reference; main model A of T3b |
 | DEV5 (V1, train04) | `data20` | 5 dev cell types | nibi | `2026-11-01_04_dev5_v1_train04` | `26-11-02_T02-37-45_train_DEV5_V1_data20_dev5_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | 15 × 5000 samples, 2 h 20 min; val r 0.501, HepG2 mini r 0.588; split v1 (with Panc1); superseded by DEV4 |
-| **DEV4 (V1, train04)** | `data24` | 4 dev cell types (split v2: GM12878, K562, HepG2, H1) | nibi | `2026-11-03_01_train_loo_panc1_v1` | `*_train_LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | **main dev model from 4 Nov** (trained as the leave-Panc1-out fold); 2 h 19 min; full evals 3 Nov (`Nov_13.md`) |
+| **DEV4 (V1, train04)** | `data24` | 4 dev cell types (split v2: GM12878, K562, HepG2, H1) | nibi | `2026-11-03_01_train_loo_panc1_v1` | `*_train_LOO_Panc1_V1_data24_dev_loo_Panc1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | main dev model 4–18 Nov (trained as the leave-Panc1-out fold), replaced by DEV4NF; 2 h 19 min; full evals 3 Nov (`Nov_13.md`) |
 | Specialists × 5 | `data29`–`data33` | one cell type each | nibi | `2026-11-03_05`–`09_train_spec_*` | `*_train_SPEC_V1_<data>_model15_uct_mid_8A_train04/Model_epoch_15.pt` | done 3 Nov, ~2 h 12 min each; full own-cell evals without baseline; Panc1's is a held-out-cell oracle under split v2 |
 | Pair model A | `data28` | GM12878 + HepG2 (own tracks) | nibi | `2026-11-04_01_train_pair_a_gm12878_hepg2` | `*_train_PAIR_V1_data28_GM12878_HepG2_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | T3b ceiling A (train04 rerun of the T3 upper bound); done 4 Nov, val r .566; paired evals on both pairs + controls (`Nov_13.md`) |
 | Pair model B | `data34` | K562 + H1 (own tracks) | nibi | `2026-11-04_02_train_pair_b_k562_h1` | `*_train_PAIR_V1_data34_K562_H1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | T3b ceiling B; done 4 Nov, val r .530; paired evals on both pairs + controls (`Nov_13.md`) |
 | Mixture model A | `data27` | GM12878 + HepG2 mixtures only | nibi | `2026-11-04_06_train_mix_a_gm12878_hepg2` | `*_train_MIX_V1_data27_mix_GM12878_HepG2_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | train04 rerun of the T3 mixture model; done 4 Nov, val r .612; paired evals on both pairs + controls (`Nov_13.md`) |
 | Mixture model B | `data35` | K562 + H1 mixtures only | nibi | `2026-11-04_07_train_mix_b_k562_h1` | `*_train_MIX_V1_data35_mix_K562_H1_200U_model15_uct_mid_8A_train04/Model_epoch_15.pt` | no ATAC; done 4 Nov, val r .559; paired evals on both pairs + controls (`Nov_13.md`) |
+| **DEV4NF** (no FIRE) | `data24` | 4 dev cell types | nibi | `2026-11-07_03_train_abl_nofire` | `*_train_ABL_V1_data24_dev_loo_Panc1_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | **main model from 18 Nov**; `model16`, `input_flags` [1, 1, 1, 1, 0]; molecule tests `Nov_20.md` |
+| Ablations | `data24` | 4 dev cell types | nibi | `2026-11-07_02_train_abl_nocpg`, `2026-11-07_04_train_abl_noacc`, `2026-11-08_15_train_abl_m6acpg` | `*_train_ABL_V1_data24_dev_loo_Panc1_200U_model{19_..._no_cpg, 20_..._cpg_only, 21_..._m6a_cpg}_train04/` | no CpG, no accessibility (CpG only), m6A + CpG; `Nov_13_extended.md` §6 |
+| Seed 2 of DEV4, DEV4NF and the ablations | `data24` | 4 dev cell types | nibi | `2026-11-11_{04,10,16,22,28}_train_*_seed2` | run names with `_seed2` after the prefix (`*_train_LOO_Panc1_V1_seed2_...`, `*_train_ABL_V1_seed2_...`) | `slurm_batch_command.sh` with `SEED=2`; `Nov_13_extended.md` §10 |
 
 ## 9. Ideas from the 30 Oct presentation review
 
