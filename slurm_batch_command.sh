@@ -40,6 +40,9 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # If a job stops at the time limit it keeps last.pt: continue with --export=ALL,CELL=...,RESUME=latest.
 # DEV4 itself: CELL=dev4 (model15 on data24, run prefix LOO_Panc1_V1). Another training seed of any of these: add
 # SEED=<n> (default 919); the run prefix gets _seed<n>, so evals and analyses never pick it up as the seed-919 run.
+# Mixture realism test (reports/TODO_extended.md §2b), GM12878 + HepG2 with DEV4NF's channels (model16):
+# CELL=r0_nf (data27, share redrawn per window), CELL=r1a_nf (data36, one fixed share, balanced stacks),
+# CELL=pair_nf (data28, own tracks; the ceiling).
 PREFIX=SPEC_V1
 MODEL=model15_uct_mid_8A
 case "${CELL:-gm12878}" in
@@ -57,6 +60,9 @@ case "${CELL:-gm12878}" in
   nofire)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   noacc)   DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model20_uct_mid_8A_cpg_only ;;
   m6acpg)  DATA=data24_dev_loo_Panc1_200U; EVAL=eval23_HepG2_200U_mini; PREFIX=ABL_V1; MODEL=model21_uct_mid_8A_m6a_cpg ;;
+  r0_nf)   DATA=data27_mix_GM12878_HepG2_200U;     EVAL=eval26_mix_GM12878_HepG2_200U_mini;     PREFIX=MIXR0_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  r1a_nf)  DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  pair_nf) DATA=data28_GM12878_HepG2_200U;         EVAL=eval24_pair_GM12878_HepG2_200U_mini;    PREFIX=PAIR_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 if [ -n "${SEED:-}" ]; then PREFIX="${PREFIX}_seed${SEED}"; fi

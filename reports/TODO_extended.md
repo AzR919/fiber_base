@@ -169,6 +169,42 @@ unclear. One extra variant separates them:
 
 Gap 3 is not tested by any variant.
 
+#### First run (23 Nov): R1a on one pair, one seed
+
+- **R1a as implemented** (`mix_balance` in `MixedCellFiberDataset._sample`, config `data36`): the share is fixed
+  (`mix_range: [0.5, 0.5]`); the stack size is N = min(100, min_c floor(available_c / share_c)) and each cell type
+  gives round(share_c × N), so the stack always matches the share; windows with N < 10 are retried (train) or
+  skipped (eval), with the count printed per worker. **The target is unchanged** (per-position share of the fibers
+  present), so R0 → R1a changes only the fraction. A target set from q instead would add part of gap 2, because
+  fibers cover different spans of the window. Old configs behave exactly as before.
+- **Smoke test** (40 validation windows): R1a stacks are 50 / 50 at 100 fibers in every window (none below 10),
+  so for this pair R1a is a clean "one fixed fraction" test. R0 unchanged (shares 0.26–0.79).
+- **Runs** (`2026-11-23_00`–`13`, seed 919, `model16`): R0 (`data27`, prefix `MIXR0_NF`), R1a (`data36`,
+  `MIXR1A_NF`), Pair (`data28`, `PAIR_NF`); evals `eval24` (paired: T3 readouts and per-cell bulk), `eval25`
+  (library control), `eval26` (composites, varying share), `eval31` (composites, as R1a trains); the same evals for
+  DEV4NF; molecule predictions at the CTCF sites (GM12878, HepG2 fibers) and chrX / chr21 TSSs (GM12878).
+- **Scored with every test:** T3 readouts; bulk per cell and for the mixture, with replicate-ceiling fractions;
+  CTCF footprints without the hole sites; X inactivation at silenced CGI promoters.
+- **Decision:** R1a passes if it matches R0 within seed noise (judged against the 2-seed spread of DEV4NF until
+  the mixture models have their own seeds) on the T3 readouts and on bulk, and the biology tests keep their
+  direction. Then 3 seeds and R1b. If R1a falls clearly below R0, go to R2.
+- **To settle before R1b** (review of the addendum, 23 Nov):
+  - draw the multinomial counts again when one exceeds what is available, instead of capping (capping always
+    trims the scarce cell, a systematic bias);
+  - the population target should weight each cell by its share of the DNA at the position, π_c × CN_c(x) /
+    Σ π × CN, not by the constant π: ENCODE tracks are fold change over each cell's own input, so a mixed sample's
+    fold change is this weighted mean. Estimate CN_c(x) from local coverage relative to the cell's genome-wide
+    mean (K562 is near-triploid; HepG2 has CNVs too);
+  - realistic depth: a synthetic stack pools two libraries, about twice one real library's depth. Set the budget
+    to one library's typical coverage per window;
+  - **gap 4, one ChIP vs separate ENCODE experiments:** a real sample has one ChIP experiment; synthetic targets
+    mix experiments with different scales (track outliers: H1 CTCF, HepG2 H3K9me3). Exclude flagged tracks from
+    mixture scoring, or normalize track scale (I4);
+  - gap 3 mitigations: a pair from one Fiber-seq series (K562, HepG2, H1) next to a cross-series one; match m6A
+    density between libraries. A real mixing experiment (cells of two lines mixed before Fiber-seq, each read
+    assigned to its line by SNP genotype) would remove gap 3 and give per-fiber ground truth: ask the wet lab, or
+    look for public data.
+
 ### 2c. Test hygiene
 
 - **What has been touched:** the held-out cells (H9, HCT116, MCF-7) entered the ceiling fractions, the ablation
@@ -226,8 +262,9 @@ Training runs take ~2.2 h each on a 2g.20gb slice (under the 3 h limit), plus ev
 | Stage | What | Runs |
 |---|---|---|
 | 1 | Protocol, success criteria and test chromosome written down; data / eval configs | — |
+| 2–3a | **Running (23 Nov):** R0, R1a, Pair on GM12878 + HepG2, seed 919, `model16` (§2b, "First run") | 3 |
 | 2 | Seed noise: Mix A, Mix B, Pair A, Pair B with `model16`, 3 seeds each | 12 (~27 GPU-h) |
-| 3 | Realism: R1 and R2 on both dev pairs × 3 seeds (R0 from stage 2) | 12 (+ 6 if R1 runs at two fractions) |
+| 3 | Realism: R1a, R1b and R2 on both dev pairs × 3 seeds (R0 from stage 2) | 18 |
 | 4 | Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
 | 5 | Sealed test: locked recipe on HCT116 + MCF-7 and a 3-cell held-out mixture, 3 seeds; DEV4NF without retraining | ~6 |
 
@@ -641,13 +678,14 @@ Open items only. **Done** (details in the reports and the code): I1 mixture trai
 `t3_report.py`); I3 cell-type-specific loci; I4 V1 fiber averaging; I6 / I23 ablation models (no CpG, no FIRE,
 no accessibility, m6A + CpG); I8 haplotype tags; I11 replicate ceiling; I15 unseen-pair test; I22 per-fiber CTCF
 footprint call (`ctcf_footprints.py`); per-fiber predictions at target BEDs (I2, molecule part,
-`molecule_predict.py`); Xa / Xi split for GM12878 (I19, partly).
+`molecule_predict.py`); Xa / Xi split for GM12878 (I19, partly); balanced stacks at a fixed share for R1a
+(`mix_balance`, `data36`, `eval31`; 23 Nov).
 
 **For the main plan (§2):**
 
 | ID | Change | For | Notes |
 |---|---|---|---|
-| I26 | **Population mixture target:** option `mix_target: population` = asinh(Σ_c q_c sinh t_c) with the nominal fractions q_c, independent of the fibers sampled (now: weighted by the realized fiber share per position) | §2b R1 / R2 | `data_utils.py` mixed dataset; the current behaviour stays the default for old configs. Fixed fraction already possible with `mix_range: [q, q]` |
+| I26 | **Population mixture target (R1b):** option `mix_target: population`, weights = each cell's expected share of the DNA at the position (π_c × local coverage / genome-wide coverage, renormalized), independent of the fibers sampled; fiber counts multinomial at the fixed share, redrawn (not capped) when one exceeds what is available | §2b R1b / R2 | `data_utils.py` mixed dataset, next to `mix_balance`; the current behaviour stays the default. Needs a per-cell coverage track (CN proxy) |
 | I27 | **Several samples with fixed fractions:** option `mix_samples: [0.25, 0.5, 0.75]`; each window draws one sample, and fibers and target follow that sample's fraction | §2b R2 | Same place as I26 |
 | I28 | **Mixtures of more than 2 cell types:** fractions per cell (fixed or per sample), target over all cells; mixed eval and paired readouts generalized (one-vs-rest fiber-origin AUC, per-cell own-track recovery) | §2b, §2e | `mix_range` now needs exactly 2 cell types. Differential bins for n cells: per cell vs the rest |
 | I29 | **Sealed test chromosome:** pick it by fixed criteria, add its tiles / mini set to `regions_spec.yaml`, loci for the held-out pairs (and a held-out 3-cell set) on it, eval configs. Build, never evaluate until stage 5 | §2c | `build_regions.py`, `build_loci.py`, `loci_spec.yaml`. Also the CTCF-site and TSS target BEDs on it for the biology tests (held-out cells only at the end) |

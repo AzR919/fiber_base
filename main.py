@@ -39,6 +39,8 @@ def main():
     if args.dataset_type == "mixed":
         # Validation mixes too (proportions seeded per region): model selection never sees a cell type's own track
         dataset_kwargs["mix_range"] = args.mix_range
+        dataset_kwargs["mix_balance"] = args.mix_balance
+        dataset_kwargs["mix_min_fibers"] = args.mix_min_fibers
 
     # Training regions are drawn from the pools at runtime; validation iterates a fixed window set
     train_dataset = make_fiber_dataset(args.dataset_type, mode="train", samples_per_epoch=args.samples_per_epoch,

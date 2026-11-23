@@ -322,6 +322,10 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
     Fibers: each cell type contributes a random subset of its fibers at the window, round(share × fibers_per_entry),
     or all it has if fewer (the sample is then smaller, not skipped). Windows where a cell type has no fiber are
     retried (train) or skipped (eval).
+    Balanced stacks (mix_balance, R1a in reports/TODO_extended.md §2b): the stack always matches the shares. Its size
+    is N = min(fibers_per_entry, min_c floor(available_c / share_c)), and each cell type gives round(share_c × N)
+    (the last one the rest), so a cell type that runs short shrinks the stack instead of tilting it. Windows with
+    N < mix_min_fibers are retried (train) or skipped (eval); each worker prints how many at the end of a pass.
     Target: per position x, the fold-change mixture of the cell types' tracks weighted by the fibers actually
     present there, asinh(sum_c q_c(x) sinh(t_c(x))) with q_c(x) = cell c's fibers covering x / all fibers covering
     x. This is exactly what the model's fiber average (fiber_aggregation fc) can match if every fiber carried its
@@ -333,7 +337,8 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
     def __init__(self, metadata, fibers_per_entry, context_length,
                  input_flags, mode='eval', seed=919,
                  dna_type="none", output_assays=None,
-                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None, mix_range=None):
+                 samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None, mix_range=None,
+                 mix_balance=False, mix_min_fibers=10):
 
         super().__init__(
             metadata=metadata,
@@ -360,6 +365,9 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
             self.mix_range = None
             ratios = [(metadata["cell_types"][ct] or {}).get("ratio", 1.0) for ct in self.cell_type_names]
             self.fixed_shares = [r / sum(ratios) for r in ratios]
+        self.mix_balance = bool(mix_balance)
+        self.mix_min_fibers = int(mix_min_fibers)
+        self._balance_counts = [0, 0]   # windows drawn, windows below mix_min_fibers (per worker)
 
     @property
     def expected_samples(self):
@@ -376,14 +384,25 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
         """One composite at a window, or None if some cell type has no fiber there."""
         N = self.fibers_per_entry
         shares = self._draw_shares(rng)
-        wanted = [int(round(s * N)) for s in shares[:-1]]
-        wanted.append(N - sum(wanted))
-
-        picked = []
-        for cell_idx, n_want in enumerate(wanted):
+        collected = []
+        for cell_idx in range(self.num_cell_types):
             fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
             if fibers["n_fibers"] == 0:
                 return None
+            collected.append(fibers)
+        stack = N
+        if self.mix_balance:
+            # the stack matches the shares: shrink it until every cell type can supply its share
+            self._balance_counts[0] += 1
+            stack = min([N] + [int(f["n_fibers"] // s) for f, s in zip(collected, shares) if s > 0])
+            if stack < self.mix_min_fibers:
+                self._balance_counts[1] += 1
+                return None
+        wanted = [int(round(s * stack)) for s in shares[:-1]]
+        wanted.append(stack - sum(wanted))
+
+        picked = []
+        for cell_idx, (n_want, fibers) in enumerate(zip(wanted, collected)):
             take = min(n_want, fibers["n_fibers"])
             idx = sorted(rng.sample(range(fibers["n_fibers"]), take))   # random subset, not the first by start
             picked.append((cell_idx, fibers, torch.tensor(idx, dtype=torch.long)))
@@ -449,6 +468,15 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
                     continue
                 sample["strata"] = self.strata_for(locus)
                 yield sample
+        self._report_balance()
+
+    def _report_balance(self):
+        """With mix_balance: how many windows were below mix_min_fibers in this pass (per worker), then reset."""
+        drawn, short = self._balance_counts
+        if self.mix_balance and drawn:
+            print(f"[mix_balance] {self.mode}: {short} of {drawn} windows ({100 * short / drawn:.1f}%) had a balanced "
+                  f"stack below {self.mix_min_fibers} fibers (retried in train, skipped in eval)", flush=True)
+        self._balance_counts = [0, 0]
 
 
 #--------------------------------------------------------------------------------------------------

@@ -586,6 +586,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
         )
         if dataset_type == "mixed":
             ds_kwargs["mix_range"] = eval_cfg.get("mix_range")
+            ds_kwargs["mix_balance"] = eval_cfg.get("mix_balance", False)
+            ds_kwargs["mix_min_fibers"] = eval_cfg.get("mix_min_fibers", 10)
         else:
             ds_kwargs.update(baseline_cells=baseline_meta, baseline_include_own=baseline_include_own)
         test_set = make_fiber_dataset(dataset_type, mode="eval", **ds_kwargs)

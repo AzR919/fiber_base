@@ -56,6 +56,11 @@ def get_args():
     data_group.add_argument("--mix_range", type=float, nargs=2, default=None,
                             help="Mixed datasets with 2 cell types: the first cell type's share of the fibers is drawn "
                                  "uniformly from [lo, hi] per sample (default: fixed ratios from the data config)")
+    data_group.add_argument("--mix_balance", action="store_true",
+                            help="Mixed datasets: shrink the stack so its composition always matches the shares, "
+                                 "instead of letting a cell type that runs short tilt it (R1a, TODO_extended §2b)")
+    data_group.add_argument("--mix_min_fibers", type=int, default=10,
+                            help="With --mix_balance: windows whose balanced stack is smaller are retried / skipped")
 
     # Model
     model_group = parser.add_argument_group("Model Architecture")

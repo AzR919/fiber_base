@@ -41,10 +41,22 @@ it has seen the sample's cell types.
 - The test is run once, with the locked recipe, and reported whatever it shows. The earlier use of the held-out
   cells on chr21 is stated in the paper.
 
+**Running now (23 Nov): first realism test, one pair, one seed** (`TODO_extended.md` §2b, "First run").
+- GM12878 + HepG2, seed 919, all with DEV4NF's channels (`model16`), jobs `2026-11-23_00`–`13`:
+  - **R0:** current mixtures, share redrawn per window (`data27`);
+  - **R1a:** share fixed at 0.5, stack balanced to match it, target unchanged (`data36`, new `mix_balance` option);
+  - **Pair:** each cell's own track, the ceiling (`data28`);
+  - **DEV4NF** as the reference that saw all 4 cells.
+- **Every test:** T3 readouts (fiber-origin AUC, sign accuracy, differential r, library control); bulk per cell and
+  for the mixture, with replicate-ceiling fractions; CTCF footprints (GM12878 and HepG2 fibers, hole sites
+  excluded); X inactivation (GM12878).
+- **Decision rule:** R1a passes if it matches R0 within seed noise on the T3 readouts and on bulk, and the biology
+  tests keep their direction. Then more seeds (3) and R1b; if R1a falls clearly below R0, go to R2.
+
 **Stages:**
 1. **Write the protocol and success criteria down before running** (draft in `TODO_extended.md` §2).
 2. **Seed noise:** mixture and pair models on both dev pairs, DEV4NF's channels, 3 seeds each (12 runs, ~27
-   GPU-hours).
+   GPU-hours). Starts after the first run, depending on its result.
 3. **Realism test (the decision point).** Current mixtures are easier than a real sample:
    - the cell fraction is redrawn per training window;
    - the target follows the fibers actually sampled.
@@ -52,7 +64,8 @@ it has seen the sample's cell types.
    A real sample has one fraction, and its ChIP reflects the whole population. Compare, on 2 dev pairs × 3
    seeds:
    - **R0:** current;
-   - **R1:** one fixed fraction, population target;
+   - **R1a:** one fixed fraction, stack balanced to it, target unchanged (running, one pair, one seed);
+   - **R1b:** one fixed fraction, population target, multinomial fiber counts;
    - **R2:** 3–4 samples, each with its own fixed fraction.
    
    If R1 fails and R2 works, the claim becomes "a few samples with different proportions".

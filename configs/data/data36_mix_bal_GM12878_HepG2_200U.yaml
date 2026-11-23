@@ -1,0 +1,22 @@
+# Mixture-only supervision with ONE fixed cell fraction (R1a, reports/TODO_extended.md §2b): every training sample
+# pools GM12878 and HepG2_200U fibers at the same window, GM12878's share fixed at 0.5 (a real sample has one
+# fraction; data27 redraws it per window from [0.2, 0.8]). Balanced stacks: the stack always matches 50 / 50, so a cell
+# type that runs short shrinks it (windows below 10 fibers are retried). The target is unchanged from data27: the
+# fold-change mixture weighted by each cell type's fibers present at each position (consistent with the fibers).
+# Neither cell type's own track is used in training or validation. Compare with data27 (R0) and data28 (pair).
+# Evals: eval24 (paired), eval25 (library control), eval26 (composites, varying share), eval31 (composites, as trained).
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: mixed
+mix_range: [0.5, 0.5]
+mix_balance: true
+mix_min_fibers: 10
+
+# Regions (configs/README.md, Regions). Same as the dev configs. Validation mixes too (seeded per region).
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  GM12878:
+  HepG2_200U:
