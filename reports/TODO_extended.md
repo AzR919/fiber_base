@@ -115,6 +115,60 @@ Variants to compare (2 cells first):
 - Fiber sampling within a window stays random (Fiber-seq depth noise is real). Optional later: lower fiber
   coverage, closer to a real experiment's depth.
 
+#### Addendum (23 Nov): separating the gaps, and how R1 / R2 sample fibers
+
+The text above is unchanged; this refines it.
+
+**Setting q first or drawing fibers first is equivalent when the target follows the fibers.** In both cases the
+target is *consistent*: exactly what the fiber average can produce if every fiber carried its cell type's value.
+The original design (fix q, trim the larger cell type's fibers until the stack matches q, target from q) and R0
+(draw q, take the fibers, target from the fibers' realized share per position) are both consistent. Two details of
+R0 as coded (`MixedCellFiberDataset._sample`): it does not rebalance when a cell type runs short (GM12878 70,
+K562 20, p = 0.5 → 50 + 20 fibers, realized share 0.71, and the target uses 0.71), and the share is per position,
+because fibers cover different spans of the window.
+
+**So there are three gaps, not one:**
+1. **Fixed vs varying q** (gap 1 above): identifiability. The original fixed-q design has this gap too.
+2. **Consistent vs population target** (gap 2 above): in a real sample the ChIP reflects the population at
+   fraction π, while the fibers at a locus are a separate random sample whose share scatters around π (binomial
+   noise), so target and fibers never match exactly. R0 and the original design both lack this noise; it matters
+   most at low coverage.
+3. **One library vs two (new).** A real mixture goes through one Fiber-seq prep. Synthetic mixtures combine
+   separately prepared libraries that differ in digestion level and MSP fraction (GM12878–HepG2 even crosses
+   Fiber-seq experiments), so the model can partly separate cell types by library. The library control puts this
+   at |AUC − 0.5| ≈ 0.04–0.09 against 0.17–0.25 for real pairs (`Nov_13_extended.md` §3): small, but it flatters
+   every synthetic-mixture result. Only a real mixed-sample library removes it; until then it is a stated
+   limitation.
+
+**Fiber counts must follow q in R1 / R2.** With a population target at fixed q, a stack that doesn't match q
+(e.g. 70 GM12878 + 20 K562 fibers against a 50/50 target) is a systematic mismatch a real library never has. The
+output is the fiber average, so the model would have to distort per-fiber values (e.g. inflate the K562 fibers)
+to hit the target, corrupting exactly the per-fiber predictions we care about. Sampling rule:
+- **Stack size:** N = min(budget, min_c floor(available_c / q_c)). GM12878 70, K562 20, q = 0.5 → N = 40 (20 + 20,
+  as in the original design); q_GM = 0.3 → N = 28 (≈ 8 + 20). A smaller stack is just lower local depth, which is
+  realistic.
+- **Per-cell counts:** n ~ Multinomial(N, q), capped at what is available, rather than exact rounding. This adds
+  the binomial scatter of a real library (gap 2).
+- **Target:** the population target at fixed q, the same at every position (R1 / R2 rows above); per-position
+  differences in fiber share become realistic noise rather than part of the target.
+- **Minimum:** skip a window if N < ~10 and log how often; skipping is fine if rare but biases training toward
+  well-covered loci.
+- **Eval** uses the same rule.
+- *Optional later:* scale each cell type's expected share by its local coverage relative to its genome-wide mean,
+  to mimic copy number (K562 is near-triploid), since fiber share ≠ cell share where copy number differs.
+
+**Split R1 so the two gaps can be told apart.** R1 changes gaps 1 and 2 at once; if it fails, the cause is
+unclear. One extra variant separates them:
+
+| Variant | Cell fraction | Target | Measures |
+|---|---|---|---|
+| R0 (current) | redrawn per window | consistent (fibers sampled) | reference |
+| **R1a** (original design) | fixed | consistent (fibers forced to q) | R0 → R1a: cost of a fixed fraction (identifiability) |
+| **R1b** | fixed | population, multinomial fiber counts (rule above) | R1a → R1b: cost of target–fiber noise |
+| R2 | 3–4 fixed fractions | population, same rule | whether several fractions restore identifiability |
+
+Gap 3 is not tested by any variant.
+
 ### 2c. Test hygiene
 
 - **What has been touched:** the held-out cells (H9, HCT116, MCF-7) entered the ceiling fractions, the ablation
