@@ -162,6 +162,8 @@ cell_types:
 ```
 
 An eval config may list several cell types; each gets its own metrics (keyed `<config>/<cell type>` in the JSON).
+Mixed configs are keyed `<config>/mixed`, so several mixture configs in one run don't overwrite each other; a
+single-cell config keeps the bare cell-type key unless an earlier config of the run already used it.
 
 > `input_flags`, `dna_type` and `output_assays` are **not** read from eval configs — they always come from the checkpoint (`model.init_args`).
 

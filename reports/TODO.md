@@ -3,7 +3,7 @@
 Current plan only. Details, the test catalogue (T1–T11), the comparison ladder, the implementation list, the
 backlog, ideas and the registry of trained models are in `TODO_extended.md`. Results go in the dated reports.
 
-## Where we stand (18 Nov)
+## Where we stand (23 Nov)
 
 - **Pipeline:** ENCODE fold-change tracks, region files, cell-specific and pairwise loci, per-fiber predictions at
   target BEDs (`molecule_predict.py`). Split v2: 4 dev cell types (GM12878, K562, HepG2, H1), 3 held out (H9,
@@ -17,7 +17,9 @@ backlog, ideas and the registry of trained models are in `TODO_extended.md`. Res
   - CTCF footprints (rerun without the motif sites that have no bulk data);
   - X inactivation per haplotype at silenced CGI promoters;
   - locus figures for both (`Nov_20_figs.md`);
-  - the mixture test on two pairs, one seed.
+  - the mixture test on two pairs, one seed;
+  - the first realism run (23 Nov): mixtures at one fixed share (R1a) lose nothing against the current ones (R0).
+    R1a is now the mixture recipe.
 - **What the mixture test showed:** trained only on a pair's mixtures, the model separates that pair's molecules as
   well as a model trained on their own tracks. On a pair it never saw, the type of supervision doesn't matter;
   having seen the cell types does.
@@ -41,39 +43,30 @@ it has seen the sample's cell types.
 - The test is run once, with the locked recipe, and reported whatever it shows. The earlier use of the held-out
   cells on chr21 is stated in the paper.
 
-**Running now (23 Nov): first realism test, one pair, one seed** (`TODO_extended.md` §2b, "First run").
-- GM12878 + HepG2, seed 919, all with DEV4NF's channels (`model16`), jobs `2026-11-23_00`–`13`:
-  - **R0:** current mixtures, share redrawn per window (`data27`);
-  - **R1a:** share fixed at 0.5, stack balanced to match it, target unchanged (`data36`, new `mix_balance` option);
-  - **Pair:** each cell's own track, the ceiling (`data28`);
-  - **DEV4NF** as the reference that saw all 4 cells.
-- **Every test:** T3 readouts (fiber-origin AUC, sign accuracy, differential r, library control); bulk per cell and
-  for the mixture, with replicate-ceiling fractions; CTCF footprints (GM12878 and HepG2 fibers, hole sites
-  excluded); X inactivation (GM12878).
-- **Decision rule:** R1a passes if it matches R0 within seed noise on the T3 readouts and on bulk, and the biology
-  tests keep their direction. Then more seeds (3) and R1b; if R1a falls clearly below R0, go to R2.
+**The mixture recipe: R1a (decided 23 Nov,** `TODO_extended.md` §2b, "Result and decision").
+- **What it is:** one fixed share for the whole sample (0.5 for a pair), each window's fiber stack balanced to
+  exactly that share (up to 100 fibers; stacks under 10 are redrawn), the target unchanged
+  (`mix_range: [0.5, 0.5]`, `mix_balance: true`; `data36`, `eval31`). It mirrors one real sample with one composition.
+- **First run** (GM12878 + HepG2, seed 919, `model16`):
+  - R1a matches R0 on the T3 readouts (AUC 0.653 vs 0.654, differential r 0.352 vs 0.330) and is equal or better
+    on bulk, level with the pair model;
+  - the CTCF and X-inactivation tests keep their direction in every model;
+  - R1a's CTCF footprint effect is the smallest of the four (about 30–40% below DEV4NF): watch it across seeds.
+- **R2 dropped** (one fixed share is enough). **R1b later, optional:** population target with multinomial counts,
+  as a robustness check if a reviewer asks.
+- **Limitations, not runs:** synthetic mixtures combine two Fiber-seq libraries and two separate ChIP experiments;
+  a real sample has one of each.
 
 **Stages:**
 1. **Write the protocol and success criteria down before running** (draft in `TODO_extended.md` §2).
-2. **Seed noise:** mixture and pair models on both dev pairs, DEV4NF's channels, 3 seeds each (12 runs, ~27
-   GPU-hours). Starts after the first run, depending on its result.
-3. **Realism test (the decision point).** Current mixtures are easier than a real sample:
-   - the cell fraction is redrawn per training window;
-   - the target follows the fibers actually sampled.
-   
-   A real sample has one fraction, and its ChIP reflects the whole population. Compare, on 2 dev pairs × 3
-   seeds:
-   - **R0:** current;
-   - **R1a:** one fixed fraction, stack balanced to it, target unchanged (running, one pair, one seed);
-   - **R1b:** one fixed fraction, population target, multinomial fiber counts;
-   - **R2:** 3–4 samples, each with its own fixed fraction.
-   
-   If R1 fails and R2 works, the claim becomes "a few samples with different proportions".
-4. **Lock the recipe on the dev cells:**
+2. **Seed noise, next:** R1a and pair models on both dev pairs (GM12878 + HepG2, K562 + H1), DEV4NF's channels, 3
+   seeds each. Seed 919 of the GM12878 + HepG2 pair exists, so 10 new runs (~23 GPU-hours). Needs an R1a data and
+   eval config for K562 + H1.
+3. **Lock the recipe on the dev cells:**
    - more of the 6 dev pairs, for the spread across pairs;
    - one 3-cell mixture;
    - the CTCF and X-inactivation tests on mixture-trained models (GM12878 in the mix for X inactivation).
-5. **Final test, once:**
+4. **Final test, once:**
    - train with the locked recipe on held-out mixtures (HCT116 + MCF-7; a 3-cell one), 3 seeds;
    - score against each held-out cell's own track (used for scoring only) on the sealed chromosome;
    - compare with DEV4NF applied without retraining.
@@ -86,7 +79,7 @@ it has seen the sample's cell types.
 ## 2. Comparison against simpler models (T11, details: `TODO_extended.md` T11)
 
 "The model just reads the fiber data" can't be argued away, but it can be measured. Run simple per-fiber models
-through the same tests, with the same supervision as the main model (mixture setup once stage 3 settles it):
+through the same tests, with the same supervision as the main model (R1a mixtures):
 1. Write the expected results down.
 2. Hand-written rules on the molecule tests, from the existing per-fiber tables (no new predictions).
 3. Shuffle controls (T7): shuffled inputs across fibers or loci should break the per-fiber predictions.

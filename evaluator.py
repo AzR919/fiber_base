@@ -522,7 +522,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
     cell-specific (partial) correlation. model=None scores only the baseline (then output_assays is required).
     baseline_include_own: the baseline includes the evaluated cell's own line (mixture reference, T3).
     output_dir: where paired readouts save their per-window arrays (.npz) and figures.
-    Returns a summary dict keyed by cell type (by '<config>/<cell type>' for configs with several cell types,
+    Returns a summary dict keyed by cell type (by '<config>/<cell type>' for configs with several cell types, for
+    mixed configs ('<config>/mixed') and when an earlier config of the run already used the bare cell-type key;
     plus '<config>/paired' for paired readouts).
     """
     has_model = model is not None
@@ -604,10 +605,13 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
                               output_assays=output_assays, loci=eval_cfg.get("loci"),
                               paired=paired, pair_loci=eval_cfg.get("pair_loci"))
         eval_results = evaluator.evaluate(save_path=save_path)
-        multi = len(eval_results["cells"]) > 1 or paired
+        # mixed composites are always keyed by config ('mixed' alone would collide across mixture configs)
+        multi = len(eval_results["cells"]) > 1 or paired or dataset_type == "mixed"
 
         for cell_type, res in eval_results["cells"].items():
             key = f"{config_name}/{cell_type}" if multi else cell_type
+            if key in summary:   # same cell type in an earlier single-cell config of this run
+                key = f"{config_name}/{cell_type}"
             summary[key] = _report_cell(key, res, eval_config_path, windows, output_assays, has_model,
                                         baseline_cells, baseline_include_own, wandb_run, test_set.input_flags)
 

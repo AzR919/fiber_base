@@ -25,7 +25,8 @@ test shows its predictions follow X-inactivation biology on unseen chromosomes; 
 CpG, model20 CpG only, model16 no FIRE) show which input carries it.
 
     python plots_code/26_nov_13/xi_promoters.py [--model DEV4|noFIRE|m6aCpG|noAcc|noCpG] [--seed 919|2] [--dir DIR]
-Writes plots/26_nov_13/molecules/xi_*_<model>.tsv and xi_promoters_<model>.png.
+                                                [--out DIR]
+Writes plots/26_nov_13/molecules/xi_*_<model>.tsv and xi_promoters_<model>.png (or into --out).
 """
 import argparse
 import glob
@@ -55,6 +56,7 @@ def parse_args():
     p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
     p.add_argument("--seed", type=int, default=919, choices=SEEDS, help="training seed (output suffix _seed<n> if not 919)")
     p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_tss_chrX_chr21)")
+    p.add_argument("--out", default=OUT, help="output folder")
     return p.parse_args()
 
 
@@ -62,6 +64,8 @@ def main():
     args = parse_args()
     d = args.dir or molecule_dir(args.model, "tss_chrX_chr21", args.seed)
     tag = out_tag(args.model, args.seed)
+    global OUT
+    OUT = args.out
     os.makedirs(OUT, exist_ok=True)
     df = pd.read_csv(os.path.join(d, f"fibers_{SAMPLE}.tsv.gz"), sep="\t")
     df = df[df.hp.isin([1, 2, 1.0, 2.0])].copy()

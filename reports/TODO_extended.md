@@ -187,8 +187,9 @@ Gap 3 is not tested by any variant.
   CTCF footprints without the hole sites; X inactivation at silenced CGI promoters.
 - **Decision:** R1a passes if it matches R0 within seed noise (judged against the 2-seed spread of DEV4NF until
   the mixture models have their own seeds) on the T3 readouts and on bulk, and the biology tests keep their
-  direction. Then 3 seeds and R1b. If R1a falls clearly below R0, go to R2.
-- **To settle before R1b** (review of the addendum, 23 Nov):
+  direction. Then 3 seeds and R1b. If R1a falls clearly below R0, go to R2. (Outcome: R1a passed and is locked;
+  R1b later, R2 dropped. See "Result and decision" below.)
+- **To settle before R1b, if it is run** (review of the addendum, 23 Nov):
   - draw the multinomial counts again when one exceeds what is available, instead of capping (capping always
     trims the scarce cell, a systematic bias);
   - the population target should weight each cell by its share of the DNA at the position, π_c × CN_c(x) /
@@ -204,6 +205,43 @@ Gap 3 is not tested by any variant.
     density between libraries. A real mixing experiment (cells of two lines mixed before Fiber-seq, each read
     assigned to its line by SNP genotype) would remove gap 3 and give per-fiber ground truth: ask the wet lab, or
     look for public data.
+
+#### Result and decision (23 Nov): R1a is the mixture recipe
+
+Scripts `plots_code/26_nov_27/realism_t3.py` and `realism_bio.py`, outputs in `plots/26_nov_27/realism/`. One pair,
+one seed; all evals use the final checkpoint (epoch 15).
+
+| | Fiber-origin AUC | Sign accuracy | Differential r | Bulk r GM12878 / HepG2 (fraction of ceiling) | Mixture r (`eval26` / `eval31`) | CTCF H1 GM / HepG2 | CTCF H2 GM / HepG2 |
+|---|---|---|---|---|---|---|---|
+| DEV4NF | 0.637 | 0.743 | 0.328 | 0.471 (0.64) / 0.596 (0.71) | 0.593 / 0.604 | 1.14 / 0.97 | 0.67 / 0.79 |
+| R0 | 0.654 | 0.779 | 0.330 | 0.468 (0.63) / 0.616 (0.74) | 0.610 / 0.623 | 0.99 / 0.81 | 0.92 / 0.98 |
+| **R1a** | 0.653 | 0.770 | 0.352 | 0.482 (0.65) / 0.629 (0.75) | 0.622 / 0.633 | 0.81 / 0.58 | 0.69 / 0.70 |
+| Pair | 0.646 | 0.795 | 0.368 | 0.482 (0.65) / 0.620 (0.74) | 0.615 / 0.625 | 1.12 / 0.86 | 0.59 / 0.66 |
+
+- **T3 and bulk:** R1a matches R0 on the T3 readouts and is equal or better on bulk, level with the pair model.
+  The library control stays at chance (|AUC − 0.5| 0.050–0.053) for every model. The pair model's edge on sign
+  accuracy is mostly H3K9me3 (0.63 vs 0.38–0.43).
+- **Biology tests:** every hypothesis keeps its direction in all four models. CTCF H1–H3 and H5 pass, the
+  smallest p is 2e-14 (R1a, HepG2), and bound sites score above unbound ones in all 9 motif-score bins. In X
+  inactivation, the active marks are at 0.87–0.92 for every model, the nulls are flat and XIST is reversed.
+  H3K9me3 / H3K27me3 move as much as DEV4NF does between its seeds.
+- **Watch across seeds:** R1a's CTCF footprint effect is the smallest (about 30–40% below DEV4NF; ~10 points of
+  that is R1a's ~10% lower overall CTCF scale). DEV4NF moved 1.14 → 0.95 on GM12878 between its two seeds.
+- **Unexpected:** the mixture models' pred ATAC barely separates footprint from open fibers, so their CTCF
+  specificity (H2) is level with or above the pair model's.
+- **Decision (user, 23 Nov):** R1a is the mixture recipe for the rest of the plan. The story is "trained on the
+  kind of mixture you meet in practice (one sample, one fixed composition), the model still imputes each molecule
+  well", and R1a covers that.
+  - **R2 is dropped.** It was the fallback in case a single fixed fraction made the cell-specific signal
+    unidentifiable; R1a shows it doesn't.
+  - **R1b moves to later**, as an optional robustness check (population target, multinomial counts,
+    copy-number weights). At 100 fibers and a 0.5 share the counts would swing by about ±5 fibers, so we expect a
+    small effect; it is one run if a reviewer asks.
+  - **Gaps 3 and 4** (one library vs two; one ChIP vs separate ENCODE experiments) are not addressed by any
+    variant. They go in the paper's limitations.
+- **Eval fix found here:** two mixed configs in one eval run were both saved as `mixed` in `eval_summary.json`, so
+  the second overwrote the first. Mixed configs are now keyed `<config>/mixed` (`evaluator.py`); for these runs,
+  `eval26` was read from the eval logs.
 
 ### 2c. Test hygiene
 
@@ -262,9 +300,9 @@ Training runs take ~2.2 h each on a 2g.20gb slice (under the 3 h limit), plus ev
 | Stage | What | Runs |
 |---|---|---|
 | 1 | Protocol, success criteria and test chromosome written down; data / eval configs | — |
-| 2–3a | **Running (23 Nov):** R0, R1a, Pair on GM12878 + HepG2, seed 919, `model16` (§2b, "First run") | 3 |
-| 2 | Seed noise: Mix A, Mix B, Pair A, Pair B with `model16`, 3 seeds each | 12 (~27 GPU-h) |
-| 3 | Realism: R1a, R1b and R2 on both dev pairs × 3 seeds (R0 from stage 2) | 18 |
+| 2–3a | **Done (23 Nov):** R0, R1a, Pair on GM12878 + HepG2, seed 919, `model16`. R1a locked as the recipe (§2b, "Result and decision") | 3 |
+| 2 | **Next:** seed noise with the locked recipe. R1a and Pair on both dev pairs (GM12878 + HepG2, K562 + H1), 3 seeds each (seed 919 of the GM12878 + HepG2 pair exists) | 10 new (~23 GPU-h) |
+| 3 | ~~Realism: R1a, R1b and R2~~ settled by the first run; R2 dropped, R1b optional later (one run per pair if needed) | 0–2 |
 | 4 | Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
 | 5 | Sealed test: locked recipe on HCT116 + MCF-7 and a 3-cell held-out mixture, 3 seeds; DEV4NF without retraining | ~6 |
 
@@ -279,6 +317,8 @@ Implementation: I26–I31 (§5).
 - T10 input ablations, 2 seeds: `Nov_13_extended.md` §6, §10. DEV4NF became the main model (18 Nov).
 - T5e CTCF footprints and T5b X inactivation: `Nov_20.md`, with locus figures in `Nov_20_figs.md`. CTCF rerun
   without the 75 motif sites lacking bulk short-read data (`ctcf_holes.py`).
+- Mixture realism, first run (23 Nov): R0, R1a, Pair on GM12878 + HepG2, one seed, every test; R1a locked as the
+  mixture recipe (§2b).
 
 ## 3. Tests
 
@@ -685,8 +725,8 @@ footprint call (`ctcf_footprints.py`); per-fiber predictions at target BEDs (I2,
 
 | ID | Change | For | Notes |
 |---|---|---|---|
-| I26 | **Population mixture target (R1b):** option `mix_target: population`, weights = each cell's expected share of the DNA at the position (π_c × local coverage / genome-wide coverage, renormalized), independent of the fibers sampled; fiber counts multinomial at the fixed share, redrawn (not capped) when one exceeds what is available | §2b R1b / R2 | `data_utils.py` mixed dataset, next to `mix_balance`; the current behaviour stays the default. Needs a per-cell coverage track (CN proxy) |
-| I27 | **Several samples with fixed fractions:** option `mix_samples: [0.25, 0.5, 0.75]`; each window draws one sample, and fibers and target follow that sample's fraction | §2b R2 | Same place as I26 |
+| I26 | **(Later, optional; R1a locked 23 Nov)** **Population mixture target (R1b):** option `mix_target: population`, weights = each cell's expected share of the DNA at the position (π_c × local coverage / genome-wide coverage, renormalized), independent of the fibers sampled; fiber counts multinomial at the fixed share, redrawn (not capped) when one exceeds what is available | §2b R1b / R2 | `data_utils.py` mixed dataset, next to `mix_balance`; the current behaviour stays the default. Needs a per-cell coverage track (CN proxy) |
+| I27 | **(Dropped 23 Nov: R1a passed, R2 not needed)** **Several samples with fixed fractions:** option `mix_samples: [0.25, 0.5, 0.75]`; each window draws one sample, and fibers and target follow that sample's fraction | §2b R2 | Same place as I26 |
 | I28 | **Mixtures of more than 2 cell types:** fractions per cell (fixed or per sample), target over all cells; mixed eval and paired readouts generalized (one-vs-rest fiber-origin AUC, per-cell own-track recovery) | §2b, §2e | `mix_range` now needs exactly 2 cell types. Differential bins for n cells: per cell vs the rest |
 | I29 | **Sealed test chromosome:** pick it by fixed criteria, add its tiles / mini set to `regions_spec.yaml`, loci for the held-out pairs (and a held-out 3-cell set) on it, eval configs. Build, never evaluate until stage 5 | §2c | `build_regions.py`, `build_loci.py`, `loci_spec.yaml`. Also the CTCF-site and TSS target BEDs on it for the biology tests (held-out cells only at the end) |
 | I30 | **3-seed runs and aggregation:** mixture / pair data configs with `model16`, `SEED` per run (exists in `slurm_batch_command.sh`), one script that collects the T3 readouts per pair × model × seed (mean ± sd) | §2f | Extend `mix_two_pairs.py` |
@@ -802,6 +842,9 @@ under `results/`. All V1 unless noted. Same setup unless noted: chr20, half cCRE
 | **DEV4NF** (no FIRE) | `data24` | 4 dev cell types | nibi | `2026-11-07_03_train_abl_nofire` | `*_train_ABL_V1_data24_dev_loo_Panc1_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | **main model from 18 Nov**; `model16`, `input_flags` [1, 1, 1, 1, 0]; molecule tests `Nov_20.md` |
 | Ablations | `data24` | 4 dev cell types | nibi | `2026-11-07_02_train_abl_nocpg`, `2026-11-07_04_train_abl_noacc`, `2026-11-08_15_train_abl_m6acpg` | `*_train_ABL_V1_data24_dev_loo_Panc1_200U_model{19_..._no_cpg, 20_..._cpg_only, 21_..._m6a_cpg}_train04/` | no CpG, no accessibility (CpG only), m6A + CpG; `Nov_13_extended.md` §6 |
 | Seed 2 of DEV4, DEV4NF and the ablations | `data24` | 4 dev cell types | nibi | `2026-11-11_{04,10,16,22,28}_train_*_seed2` | run names with `_seed2` after the prefix (`*_train_LOO_Panc1_V1_seed2_...`, `*_train_ABL_V1_seed2_...`) | `slurm_batch_command.sh` with `SEED=2`; `Nov_13_extended.md` §10 |
+| R0 (mixture, `model16`) | `data27` | GM12878 + HepG2 mixtures, share redrawn per window | nibi | `2026-11-23_00_train_r0_nf` | `26-11-23_T17-51-43_train_MIXR0_NF_data27_mix_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | 2 h 16 min; realism first run (§2b) |
+| **R1a** (mixture, `model16`) | `data36` | GM12878 + HepG2 mixtures, share fixed at 0.5, balanced stack | nibi | `2026-11-23_01_train_r1a_nf` | `26-11-23_T17-52-13_train_MIXR1A_NF_data36_mix_bal_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | **the mixture recipe from 23 Nov**; 2 h 20 min (§2b) |
+| Pair (`model16`) | `data28` | GM12878 + HepG2 (own tracks) | nibi | `2026-11-23_02_train_pair_nf` | `26-11-23_T17-54-40_train_PAIR_NF_data28_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | ceiling for mixture supervision with DEV4NF's channels; 2 h 18 min (§2b) |
 
 ## 9. Ideas from the 30 Oct presentation review
 
