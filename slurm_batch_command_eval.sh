@@ -8,7 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16G
+#SBATCH --mem=64G
 #SBATCH --time=0-2:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
@@ -51,7 +51,7 @@ python -u eval.py \
   $([ "${BASELINE:-1}" = 1 ] && echo --baseline) \
   $([ "${MIXREF:-0}" = 1 ] && echo --mixture_reference) \
   --eval_configs $CONFIGS \
-  --num_workers 3 \
+  --num_workers $(( ${SLURM_CPUS_PER_TASK:-4} - 1 )) \
   --wandb
 
 # Print job completion time

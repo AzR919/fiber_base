@@ -9,7 +9,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16G
+#SBATCH --mem=64G
 #SBATCH --time=0-2:45:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=ara199@sfu.ca
@@ -72,7 +72,7 @@ python -u main.py \
   --model_config configs/models/$MODEL.yaml \
   --train_config configs/training/train04.yaml \
   --eval_configs configs/evals/$EVAL.yaml \
-  --num_workers 3 \
+  --num_workers $(( ${SLURM_CPUS_PER_TASK:-4} - 1 )) \
   --name_prefix $PREFIX \
   --seed ${SEED:-919} \
   ${RESUME:+--resume "$RESUME"}

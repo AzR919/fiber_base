@@ -9,39 +9,66 @@ I work on both **macOS** and **Windows (via WSL)**. Figure out which one you're 
 |---|---|---|
 | Local repo | `/Users/azr/Documents/SFU/Lab/code/fiber_base` | `C:\Users\azaan\Documents\SFU\Lab\code_base\fiber_base` (`/mnt/c/...` in WSL) |
 | SSH lives in | native macOS ssh | WSL (`wsl ...`) |
-| Sync tool | `misc/sync_fiber.sh` (rsync + watchdog, local → remote on save) | `misc/sync_fiber.bat` (rsync pull from remote, then Mutagen two-way-safe) |
-| Stop sync | `misc/sync_fiber_stop.sh` | `misc/sync_fiber_stop.bat` |
 
-Sync excludes `wandb/`, `results/`, `ignore/`, `__pycache__/`, `.git/` (the Mac watcher also skips `logs/` and `plots/`). So: edit files locally and they reach nibi automatically; results and checkpoints live only on nibi.
-Run the stop script before closing the laptop (avoids fail2ban bans from dangling connections).
+**Sync (from 23 Nov):** the user no longer runs the `misc/sync_fiber*` watchers. They open the SSH socket and
+Claude does every transfer explicitly with `misc/cluster.sh` (Windows: `wsl bash misc/cluster.sh <command>`). The
+local repo is the hub: code goes local → cluster, results / logs / plots come cluster → local, and anything one
+cluster needs from the other goes through the local buffer.
 
-## Remote cluster (nibi; `fir` also configured)
-- SSH uses a ControlMaster socket in `~/.ssh/sockets/` (2FA happens when the socket is opened).
-- **Before any remote command, verify the socket is alive.** If it's missing or the connection fails, tell the user the socket is down and give them the command to reopen it — don't retry.
+## Remote clusters (nibi and fir; work on whichever is up)
+- Both clusters have the same layout: code `/home/azr/projects/def-maxwl/azr/code/fiber_base`, data
+  `/home/azr/projects/def-maxwl/azr/data/...`, venv `/home/azr/projects/def-maxwl/azr/misc/menv` (`~/project/...`
+  is the same place). The filesystems are separate: data, results and the venv exist per cluster.
+- SSH uses a ControlMaster socket per cluster in `~/.ssh/sockets/` (2FA happens when the socket is opened).
+- **Before any remote command, verify the socket is alive** (`wsl bash misc/cluster.sh check`). If it's down, tell
+  the user and give them the command to reopen it; don't retry, never trigger a fresh login.
 
 | | macOS | Windows |
 |---|---|---|
-| Check socket | `ssh -O check nibi` (or `ls ~/.ssh/sockets/`) | `wsl ls ~/.ssh/sockets/` |
-| Reopen (2FA) | `ssh -fN nibi` | `wsl ssh -fN nibi` |
-| Run remote cmd | `ssh nibi 'command'` | `wsl bash -c "ssh nibi 'command'"` |
+| Check sockets | `ssh -O check nibi` / `fir` | `wsl bash misc/cluster.sh check` |
+| Reopen (2FA) | `ssh -fN nibi` / `fir` | `wsl ssh -fN nibi` / `wsl ssh -fN fir` |
+| Run remote cmd | `ssh nibi 'command'` | `wsl bash -c "ssh -o BatchMode=yes nibi 'command'"` (or a script file) |
 | Close socket | `ssh -O exit nibi` | `wsl ssh -O exit nibi` |
 
-- Code on nibi: `~/project/def-maxwl/azr/code/fiber_base` (same as `/home/azr/projects/def-maxwl/azr/code/fiber_base`, which the slurm scripts use)
-- Venv: `source /project/def-maxwl/azr/misc/menv/bin/activate`
-- Modules if needed: `module load gcc arrow/19.0.1 cuda rust/1.95.0`
-- More handy commands (salloc/srun, mutagen) are in `misc/misc.txt`.
+- Modules if needed: `module load gcc arrow/19.0.1 cuda rust/1.95.0` (check versions per cluster).
+- More handy commands (salloc/srun) are in `misc/misc.txt`.
+
+### `misc/cluster.sh` (sync helper)
+| Command | Does |
+|---|---|
+| `check` | which sockets are alive |
+| `push-code <c>` | local code → cluster (no delete; skips results, logs, plots, wandb, ignore, .git) |
+| `pull <c>` | cluster `results/ logs/ plots/` → local (no delete: local is the union of both clusters) |
+| `push-results <c> <dir>...` | checkpoints a job on `<c>` needs, from the local buffer |
+| `ls-data <c>`, `diff-data <a> <b>` | data listings (`ignore/manifests/`) and what `<b>` is missing |
+| `copy-data <a> <b> <path>...` | data via the local buffer, one path at a time; big paths removed locally after arriving |
+| `buffer` | local buffer sizes and free disk |
+
+**Routine:** before submitting on a cluster, `push-code` to it. Each cluster keeps its own `results/`; copy a
+checkpoint across (`push-results`) only when a job there needs it (current main models and what the next days
+need). After jobs finish, `pull` from that cluster: the analysis and reports are put together locally from both.
+Keep the local buffer small: results, logs and plots (a few GB) stay; CRAMs (~30 GB each) and ENCODE bigWigs
+(~1 GB each) only pass through, and `copy-data` refuses anything that would leave less than 20 GB free.
+Both clusters have the same data since 24 Nov (fir's older `regions/` kept as `DATA_FIBER/regions_fir_oct`).
 
 ## Slurm jobs
 - Training: `slurm_batch_command.sh` → `main.py`. Eval of a saved checkpoint: `slurm_batch_command_eval.sh` → `eval.py`.
 - Logs go to `logs/<job-name>.out/.err`; checkpoints to `results/<timestamp>_train_<prefix>_<data>_<model>_<train>/`; eval output to `results/<timestamp>_eval_<training run name>/` (`_eval_BASELINE_<data>` for baseline-only).
 - **Job name scheme:** `YYYY-MM-DD_NN_<train|eval>_description` — dashes in the date, underscores after it, `NN` = two-digit index for that day starting at `00`, then `train` or `eval` so the kind of run shows in the prefix when scrolling `logs/`. Examples: `2026-10-14_00_train_no_fire`, `2026-10-14_01_eval_no_fire`. One-off jobs that are neither (plots, analysis) use the description directly.
 - Every new run gets the next index for the day (count across both training and eval scripts — check `logs/` and the other script). Update `--job-name` in the script before submitting.
+  Indices count across **both clusters**: check the local `logs/` (after `pull`) and `sacct` on every cluster that is up.
+- The same scripts and venv run on both clusters. The scripts' CPU / memory headers fit nibi; on fir, override
+  them on the sbatch command line so the job isn't billed for a larger slice: `--cpus-per-task=3` for a
+  `2g.20gb` (training, eval: 64 GB is within fir's 72 GB), `--cpus-per-task=1 --mem=35G` for a `1g.10gb`
+  (molecules). DataLoader workers follow `SLURM_CPUS_PER_TASK`. `sbatch --test-only` checks a request without
+  submitting.
 - GPUs are H100 MIG slices (`1g.10gb`, `2g.20gb`, `3g.40gb`); pick the smallest that fits.
 - **Time limit ≤ 3 h** (jobs up to 3 h can use the fastest partition, `gpubase_bygpu_b1`), and close to the
   expected run time, not padded far beyond it. Longer training continues in a chained job with `--resume latest`
   (README, "Checkpoints and resuming").
 - **CPUs / memory in proportion to the slice** (billing takes the largest of GPU, CPU, memory): on nibi a `1g.10gb`
-  covers 2 CPUs / 37 GB, a `2g.20gb` 4 CPUs / 74 GB, a `3g.40gb` 6 CPUs / 111 GB.
+  covers 2 CPUs / 37 GB, a `2g.20gb` 4 CPUs / 74 GB, a `3g.40gb` 6 CPUs / 111 GB; on fir (48 cores, 1152 GB per
+  4-GPU node) 1 CPU / 35 GB, 3 CPUs / 72 GB, 5 CPUs / 108 GB.
 - **CPUs with a GPU job:** requesting more CPUs than the slice comes with bills the job for a larger slice. Keep `--cpus-per-task` at or below (and set DataLoader workers to fit):
 
   | GPU slice | Fir | Nibi |
