@@ -42,7 +42,8 @@ source /home/azr/projects/def-maxwl/azr/misc/menv/bin/activate
 # SEED=<n> (default 919); the run prefix gets _seed<n>, so evals and analyses never pick it up as the seed-919 run.
 # Mixture realism test (reports/TODO_extended.md §2b), GM12878 + HepG2 with DEV4NF's channels (model16):
 # CELL=r0_nf (data27, share redrawn per window), CELL=r1a_nf (data36, one fixed share, balanced stacks),
-# CELL=pair_nf (data28, own tracks; the ceiling).
+# CELL=pair_nf (data28, own tracks; the ceiling). Second pair, K562 + H1: CELL=r1a_nf_b (data37), CELL=pair_nf_b
+# (data34). R1a is the mixture recipe from 23 Nov; 3 seeds each (SEED=2, SEED=3 next to the default 919).
 PREFIX=SPEC_V1
 MODEL=model15_uct_mid_8A
 case "${CELL:-gm12878}" in
@@ -63,6 +64,8 @@ case "${CELL:-gm12878}" in
   r0_nf)   DATA=data27_mix_GM12878_HepG2_200U;     EVAL=eval26_mix_GM12878_HepG2_200U_mini;     PREFIX=MIXR0_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   r1a_nf)  DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   pair_nf) DATA=data28_GM12878_HepG2_200U;         EVAL=eval24_pair_GM12878_HepG2_200U_mini;    PREFIX=PAIR_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  r1a_nf_b)  DATA=data37_mix_bal_K562_H1_200U; EVAL=eval32_mix_bal_K562_H1_200U_mini; PREFIX=MIXR1A_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  pair_nf_b) DATA=data34_K562_H1_200U;         EVAL=eval22_K562_200U_mini;            PREFIX=PAIR_NF;   MODEL=model16_uct_mid_8A_no_fire_msp ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 if [ -n "${SEED:-}" ]; then PREFIX="${PREFIX}_seed${SEED}"; fi

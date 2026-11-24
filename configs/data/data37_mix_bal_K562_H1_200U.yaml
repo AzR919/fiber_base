@@ -1,0 +1,21 @@
+# Mixture-only supervision with ONE fixed cell fraction (R1a, the mixture recipe from 23 Nov; reports/TODO_extended.md
+# §2b), second dev pair: every training sample pools K562_200U and H1_200U fibers at the same window, K562's share fixed
+# at 0.5 with balanced stacks (a cell type that runs short shrinks the stack; windows below 10 fibers are retried). The
+# target is the fold-change mixture weighted by each cell type's fibers present at each position, as in data35 / data36.
+# H1 has no ATAC, so the mixture has no ATAC target (as data35). Same as data36 for GM12878 + HepG2.
+# Evals: eval27 (paired), eval28 / eval29 (library controls), eval32 (composites, as trained).
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: mixed
+mix_range: [0.5, 0.5]
+mix_balance: true
+mix_min_fibers: 10
+
+# Regions (configs/README.md, Regions). Same as the dev configs. Validation mixes too (seeded per region).
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  K562_200U:
+  H1_200U:
