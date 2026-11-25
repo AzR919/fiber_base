@@ -2,7 +2,8 @@
 
 The mixture-trained model, from the choice of mixture recipe to its seed noise. Section 1 is the recipe (R1a),
 section 2 its first run on one pair, section 3 three training seeds on both dev pairs, section 4 the two decisions
-on the success criteria that the seed results raise. Plan and open items: `TODO.md` §1, `TODO_extended.md` §2.
+on the success criteria that the seed results raise (deferred 25 Nov), section 5 a new biology test, CTCF × CpG
+methylation. Plan and open items: `TODO.md` §1, `TODO_extended.md` §2.
 
 ## Models
 
@@ -169,6 +170,83 @@ Script `plots_code/26_nov_27/criteria_plots.py`; outputs in `plots/26_nov_27/cri
   depend on.
 - **Recommendation:** pass if the test holds in at least 2 of 3 seeds in every cell, and report every seed's effect and
   p (as in the figure). The seed-mean rule is weaker with 3 seeds, since one bad seed inflates the SE.
+
+## 5. CTCF × CpG methylation on single molecules (T5f, 25 Nov)
+
+> **Question:** CTCF binding is blocked when its motif's CpGs are methylated (the H19/IGF2 imprinting control
+> region is the classic case). Do single fibers show it, and did the model, trained on bulk ChIP only, learn that
+> methylation lowers CTCF on a molecule? In the data the link goes both ways (methylation blocks binding; bound CTCF
+> keeps its site unmethylated), so parts A and B are associations. Part C flips methylation in silico and tests the
+> direction inside the model.
+
+**Setup** (defined before running): the chr21 CTCF sites of the footprint test, hole sites excluded. A fiber's
+methylation is the share of methylated CpGs over the motif ± 100 bp (≥ 3 CpGs covered): methylated > 0.5,
+unmethylated < 0.5. Fiber states (footprint, open, nucleosome) are as in the footprint test; accessible = footprint or
+open. Per-site tests compare the two methylation groups at sites with ≥ 3 fibers in each, Wilcoxon over sites. Models:
+DEV4NF (2 seeds), R1a and Pair (3 seeds, both pairs), each on its own pair's fibers.
+
+Script `plots_code/26_nov_27/ctcf_cpg.py` (job `ctcf_cpg.sh`), outputs in `plots/26_nov_27/ctcf_cpg/`. In-silico flips:
+`molecule_predict.py --perturb meth unmeth meth_distal unmeth_distal` (jobs `2026-11-25_00`–`15`).
+
+### A. The data (no model)
+
+![Footprint fraction, methylated vs unmethylated fibers per site](../plots/26_nov_27/ctcf_cpg/cpg_A.png)
+
+| Cell | Bound sites' median methylation (unbound) | Spearman: site methylation vs footprint frequency | Accessible fibers methylated at bound sites | Per-site test: sites, Mantel-Haenszel odds ratio, p |
+|---|---|---|---|---|
+| GM12878 | 0.09 (0.29) | −0.56 | 2.5% | 64, 1.16, 0.67 |
+| HepG2 | 0.08 (0.38) | −0.28 | 15% | 80, 0.88, 0.82 |
+| K562 | 0.05 (0.10) | −0.16 | 10% | 68, **0.73, 0.004** |
+| H1 | 0.24 (0.62) | −0.50 | 28% | 128, 0.96, 0.16 |
+
+- **Between sites, strong:** bound sites are far less methylated than unbound ones at the same motif score (all 7
+  score bins, every cell, p 2e-4 to 3e-18), and among bound sites the more methylated ones have fewer footprints.
+- **Within a site, on the same molecule, weak:** pooled over sites, methylated accessible fibers carry a footprint about
+  half as often (GM12878 0.15 vs 0.38), but that is mostly which sites they come from. Comparing fibers within the same
+  site, only K562 shows fewer footprints on methylated fibers. Power is limited: methylated accessible fibers are rare
+  at bound sites, so only 17–86 bound sites per cell have both groups.
+- **Reading:** in these cells, methylation and CTCF binding are separated mainly by site (which sites a cell binds),
+  not molecule by molecule at a bound site. At ± 100 bp the window is wider than the motif CpGs that block binding,
+  which may dilute a per-molecule effect.
+
+### B. The model on real fibers
+
+![Pred CTCF, methylated − unmethylated fibers per site](../plots/26_nov_27/ctcf_cpg/cpg_B.png)
+
+- **Accessible fibers:** every model, seed and cell predicts less CTCF on methylated fibers (median per-site
+  difference −0.05 to −0.56; p < 0.01 in 28 of 32 cases, the rest p < 0.2). Pred ATAC drops as much or more, so this is not
+  CTCF-specific.
+- **Footprint fibers only:** the model still lowers CTCF on methylated fibers, by −0.1 to −1.4 on HepG2, K562 and H1
+  (about the size of the footprint effect itself), although part A shows no such drop in footprint frequency there.
+  The model applies a methylation penalty even when the footprint says CTCF is bound.
+- **Control:** the no-CpG ablation shows little or none (accessible fibers: GM12878 −0.07, K562 +0.07 / +0.09;
+  footprint fibers: −0.02 to +0.26, n.s.), so the effect comes mostly from reading CpG, not from m6A differences
+  between the groups. DEV4 (with FIRE) shows it like DEV4NF on GM12878 and more weakly on K562.
+
+### C. In-silico flips: does methylation lower the model's CTCF?
+
+![Change in pred CTCF after in-silico CpG flips](../plots/26_nov_27/ctcf_cpg/cpg_C.png)
+
+- **Yes, and locally.** Methylating the CpGs over the motif ± 100 bp of unmethylated accessible fibers lowers pred CTCF
+  in all 32 model × seed × cell cases (median −0.03 to −0.79, p ≤ 2e-5). Unmethylating methylated fibers raises it
+  (31 of 32 with p < 0.01). The same flips 1.5 kb away change it 20–100× less (|Δ| ≤ 0.02).
+- **Size:** usually 10–35% of the run's footprint effect (footprint − open), up to 60–125% for DEV4NF seed 2. It
+  varies about 2–4× between seeds, like the footprint effect.
+- **Not CTCF-specific:** the same flip lowers pred ATAC more than pred CTCF (DEV4NF GM12878: −0.40 vs −0.26) and
+  lowers H3K4me3 too (`cpg_C_atac.png`). The model learned "methylated → inactive" for every active mark, not a CTCF
+  sensitivity of its own.
+- **Mixture training:** R1a behaves like Pair and DEV4NF here (same direction, similar size).
+
+### Outcome
+
+- **Data:** the expected methylation–binding link holds between sites, but within a bound site, on the same molecule,
+  it is weak (K562 only). That makes a per-molecule CTCF–methylation claim from these cells hard.
+- **Model:** it learned from bulk alone, and causally, that local CpG methylation lowers active marks, CTCF included.
+  The effect is local (motif ± 100 bp, not 1.5 kb away) and holds in every model, mixture-trained included. It is not
+  specific to CTCF, and on footprinted fibers it lowers CTCF beyond what the data support.
+- **Possible follow-ups:** motif CpGs only (the ones that block binding; most motifs have 0–2, so few fibers); scale
+  each assay's change by its spread before comparing CTCF with ATAC; HCT116 in the sealed test, whose genome is
+  hypermethylated, gives many more methylated fibers at bound sites.
 
 ## Infrastructure (23–24 Nov)
 
