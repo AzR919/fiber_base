@@ -1,0 +1,13 @@
+# Calibration-only training for the rule baseline (model24_rules: 16 parameters, two per assay): 3 epochs x 5000
+# samples at a higher learning rate (1e-2); everything else as train04. 16 parameters settle within the first epoch;
+# the full train04 budget would only spend loader time.
+
+epochs: 3
+samples_per_epoch: 5000
+batch_size: 8
+lr: 0.01
+patience: 1
+
+# Output & Miscellaneous
+res_dir: "./results"
+seed: 919

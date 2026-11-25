@@ -1,0 +1,11 @@
+# Baseline ladder rung 2 (reports/TODO_extended.md T11): hand-crafted per-position features from the fiber and the
+# reference DNA only (handcrafted.FiberFeatures: fiber summaries over 51 / 201 / 1001 bp, annotation-free rule parts,
+# sequence GC / CpG), no external annotation -> per-position MLP (2 hidden layers of 64) -> Softplus -> the same
+# fiber averaging as the network. Same inputs as DEV4NF (model16): [m6a, cpg, msp, nuc] + reference DNA.
+
+model: "mlp01"
+input_flags: [1, 1, 1, 1, 0]
+dna_type: "ref"
+hidden: 64
+layers: 2
+output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9me3", "ctcf"]

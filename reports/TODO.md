@@ -1,7 +1,8 @@
 # TODO
 
 Current plan only. Details, the test catalogue (T1–T11), the comparison ladder, the implementation list, the
-backlog, ideas and the registry of trained models are in `TODO_extended.md`. Results go in the dated reports.
+backlog, ideas and the registry of trained models are in `TODO_extended.md`. Results go in the dated reports. What
+has been finished, newest first: `TODONE_26_11.md` (one file per month).
 
 ## Where we stand (24 Nov)
 
@@ -94,6 +95,19 @@ it has seen the sample's cell types.
 
 ## 2. Comparison against simpler models (T11, details: `TODO_extended.md` T11)
 
+**The ladder (25 Nov; rules, features and expected results in `TODO_extended.md` T11):**
+0. floor: bulk on every molecule;
+1. fixed rules per assay, calibrated; these may use annotations (CGIs, TSSs, gene bodies, repeats, CTCF motif);
+2. a small MLP on simple per-position features from the fiber and the DNA only, no external annotations (user:
+   comparable to the network);
+3. the network (R1a);
+4. the network + the rung-2 feature channels.
+
+1 → 2 asks whether learning to combine the rules helps, 2 → 3 whether deep learning is needed, 3 → 4 whether the
+network already captures what the rules know. New CTCF specificity test: at footprints on other factors' motifs a
+motif-free rule fires, but the network's CTCF should not. H3K36me3 with larger windows: proposed not now (25 Nov).
+Its poor pair-A result is likely a data limit; check the differential ceiling first.
+
 "The model just reads the fiber data" can't be argued away, but it can be measured. Run simple per-fiber models
 through the same tests, with the same supervision as the main model (R1a mixtures):
 1. Write the expected results down.
@@ -122,8 +136,12 @@ tags. Check over 19 Fiber-seq lines (`plots_code/26_nov_27/xi_cells_check.py`, `
   block (leave the tested gene out).
 
 **New tests to build on the dev cells, in order (25 Nov; the first three also run on the sealed test):**
-1. **CTCF × CpG methylation** (prof): methylated motif CpGs → fewer footprints in the data; among accessible fibers,
-   lower pred CTCF in the model. The per-fiber CTCF tables already hold motif CpG methylation (`cpg_meth_t`).
+1. **CTCF × CpG methylation** (prof): **done 25 Nov** (`Nov_27.md` §5). **Claim kept (user, 25 Nov): CpG
+   methylation lowers active marks locally.** In-silico methylation of the motif ± 100 bp lowers pred CTCF, ATAC
+   and H3K4me3 in every model and seed, mixture-trained R1a included; the same flips 1.5 kb away do ~nothing. A
+   CTCF-specific effect can't be tested: the data show the methylation–binding link between sites but barely within
+   a site, molecule by molecule (K562 only). Rerun on HCT116 / MCF-7 in the sealed test
+   (`molecule_predict.py --perturb`).
 2. **X inactivation with block phasing:** adapt the XI script to HiPhase blocks (Xi set per block, tested gene
    left out). Check it on GM12878 by pretending its phasing is in blocks, so the sealed run needs no new code.
 3. **Poised vs Polycomb** (prof): genome fractions from bulk H3K4me3 / H3K27me3 (poised = +K4me3 +K27me3,

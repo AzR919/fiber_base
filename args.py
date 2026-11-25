@@ -70,7 +70,7 @@ def get_args():
     model_group.add_argument("--dilation", type=int, default=1)
     model_group.add_argument("--input_flags", type=int, nargs="+", default=[1, 1, 1, 1, 1],
                                 help="Binary indicators list [m6a, cpg, msp, nuc, fire_msp]")
-    model_group.add_argument("--dna_type", type=str, default="none", choices=["none", "ref", "fiber", "both"],
+    model_group.add_argument("--dna_type", type=str, default="none", choices=["none", "ref", "fiber", "both", "ref_annot"],
                             help="dna_type to use as input")
     model_group.add_argument("--output_assays", type=str, nargs="+", default=["atac"],
                             help="List of assay keys the model predicts (keys of 'assays' in data_prep/encode_spec.yaml)")

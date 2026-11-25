@@ -9,6 +9,7 @@ Usage:
                                --samples GM12878 [K562_200U ...] --targets <targets.bed> \
                                [--flank 100] [--max_fibers 1000] [--batch_fibers 200] \
                                [--save_arrays 20 | --array_targets name1 name2 ...] [--out_dir DIR] [--device cuda]
+                               [--perturb meth unmeth meth_distal unmeth_distal] [--perturb_shift 1500]
 
 Targets: BED with chrom, start, end, name (optional: score, strand; extra columns are carried into the output,
 named by a '#chrom start end name score strand <extra ...>' header line if present; data_prep/build_targets.py).
@@ -31,6 +32,16 @@ Output, in DIR (default results/<timestamp>_molecules_<run>_<targets>/):
   arrays_<sample>.npz     with --save_arrays / --array_targets: full per-bp arrays for those targets (per target:
                           pred (n, K, L) float16, inputs (n, 5, L) int8, mask (n, L) bool, reads, hp, ps, window)
   run.json                checkpoint, input flags, assays, arguments
+
+In-silico CpG flips (--perturb, T5f part C): each fiber is predicted again with the CpGs it covers in a region set
+to methylated or unmethylated; everything else stays as measured. Modes:
+  meth / unmeth                  region = target +- --flank
+  meth_distal / unmeth_distal    a region of the same width centred --perturb_shift bp from the target centre (to the
+                                 right, or to the left if it does not fit), as a control at the same fiber
+Methylating sets the CpG's call base (+1) on the strand this fiber's real calls use (majority over the window; C for
++ strand reads, G for - strand); unmethylating sets both bases to covered-unmethylated (-1), as get_cpg encodes
+them. Uncovered CpGs (0) are left alone. Extra columns per mode: nflip_<mode> (CpGs changed) and
+pred_<assay>__<mode> over the target (NaN when nothing changed).
 """
 
 import argparse
@@ -49,12 +60,13 @@ import pyft
 import torch
 
 from fiber_utils import (get_fiber_data, get_locus_onehot, get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp,
-                         suppress_stdout_stderr)
+                         load_annot, suppress_stdout_stderr)
 from models import BaseModel
 from utils import load_metapaths
 
 ALL_FEATURES = [get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp]   # input_flags order
 M6A, CPG, MSP, NUC, FIRE = range(5)
+PERTURB_MODES = {"meth": (1, False), "unmeth": (-1, False), "meth_distal": (1, True), "unmeth_distal": (-1, True)}
 
 
 def parse_args():
@@ -70,6 +82,10 @@ def parse_args():
     p.add_argument("--batch_fibers", type=int, default=200, help="Fibers per forward pass")
     p.add_argument("--save_arrays", type=int, default=0, help="Save full arrays for the first N targets")
     p.add_argument("--array_targets", nargs="+", default=None, help="Save full arrays for these target names")
+    p.add_argument("--perturb", nargs="+", default=[], choices=list(PERTURB_MODES),
+                   help="In-silico CpG flips to predict as well (see the module docstring)")
+    p.add_argument("--perturb_shift", type=int, default=1500,
+                   help="Distance (bp) of the *_distal flip region's centre from the target centre")
     p.add_argument("--metapaths", default="configs/metapaths.yaml")
     p.add_argument("--out_dir", default=None)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -131,6 +147,39 @@ def input_summary(x, aln, cg, lo, hi):
     return [m6_rate, m6_n, cpg_meth, cpg_n, frac(MSP), frac(NUC), frac(FIRE)]
 
 
+def perturb_region(mode, lo, hi, flank, shift, context_length):
+    """Window positions [r0, r1) a perturbation mode changes: the target +- flank, or for *_distal the same width
+    centred shift bp away (right if it fits, else left). None if neither fits."""
+    r0, r1 = max(0, lo - flank), min(context_length, hi + flank)
+    if not PERTURB_MODES[mode][1]:
+        return r0, r1
+    for s in (shift, -shift):
+        if r0 + s >= 0 and r1 + s <= context_length:
+            return r0 + s, r1 + s
+    return None
+
+
+def flip_cpg(x, cg, r0, r1, to, strand):
+    """Copy of one fiber's inputs x (5, L) with its covered CpGs in [r0, r1) set methylated (to=1) or unmethylated
+    (to=-1). Returns (x', number of CpGs changed)."""
+    x = x.copy()
+    cpg = x[CPG]
+    c = cg[(cg >= r0) & (cg < r1 - 1)]
+    covered = (cpg[c] != 0) | (cpg[c + 1] != 0)
+    meth = (cpg[c] == 1) | (cpg[c + 1] == 1)
+    if to == 1:
+        calls = cg[(cpg[cg] == 1) | (cpg[np.minimum(cg + 1, len(cpg) - 1)] == 1)]
+        on_g = int((cpg[np.minimum(calls + 1, len(cpg) - 1)] == 1).sum()) > int((cpg[calls] == 1).sum()) \
+            if len(calls) else strand == "-"
+        sel = c[covered & ~meth]
+        cpg[sel + int(on_g)] = 1
+    else:
+        sel = c[covered & meth]
+        cpg[sel] = -1
+        cpg[sel + 1] = -1
+    return x, len(sel)
+
+
 def tag_lookup(aln_file, chrom, start, end):
     """{(qname, reference_start): (HP, PS)} for the reads overlapping a window (pyft fibers do not expose PS)."""
     out = {}
@@ -141,18 +190,20 @@ def tag_lookup(aln_file, chrom, start, end):
 
 
 @torch.no_grad()
-def predict_fibers(model, x, mask, dna, active, device, batch_fibers):
+def predict_fibers(model, x, mask, dna, active, device, batch_fibers, annot=None):
     """Per-fiber predictions (n, K, L) float32 for fibers x (n, 5, L) with scored-span mask (n, L) and the window's
-    reference one-hot dna (4, L). active: input_flags indices the model uses. Exposed for reuse (e.g. in-silico
-    perturbations, I21): pass modified x."""
+    reference one-hot dna (4, L). active: input_flags indices the model uses. annot: (L,) uint8 annotation bits, for
+    models with dna_type 'ref_annot' (the rule baseline). Exposed for reuse (e.g. in-silico perturbations, I21): pass
+    modified x."""
     n, L = x.shape[0], x.shape[-1]
     ref = torch.from_numpy(dna.T if dna.shape[0] != 4 else dna).float().unsqueeze(0).to(device)   # (1, 4, L)
+    extra = {} if annot is None else {"annot": torch.from_numpy(np.asarray(annot)).unsqueeze(0).to(device)}
     outs = []
     for i in range(0, n, batch_fibers):
         xb = torch.from_numpy(x[i:i + batch_fibers][:, active]).permute(1, 2, 0).unsqueeze(0).to(device)  # 1,C,L,N
         mb = torch.from_numpy(mask[i:i + batch_fibers]).T.unsqueeze(0).to(device)                       # 1,L,N
         with torch.amp.autocast(device.split(":")[0], dtype=torch.float16, enabled=device.startswith("cuda")):
-            _, fib = model(xb, ref_dna=ref, fiber_mask=mb, fiber_coverage=mb.sum(-1).float())
+            _, fib = model(xb, ref_dna=ref, fiber_mask=mb, fiber_coverage=mb.sum(-1).float(), **extra)
         outs.append(fib.float()[0].permute(2, 0, 1).cpu().numpy())                                       # N,K,L
     return np.concatenate(outs, axis=0) if outs else np.zeros((0, 0, L), dtype=np.float32)
 
@@ -162,7 +213,7 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
     aln = pysam.AlignmentFile(m["fiber_paths"][sample], reference_filename=m["fasta_path"])
     fasta = pysam.FastaFile(m["fasta_path"])
     extra = [c for c in targets.columns if c not in ("chrom", "t_start", "t_end", "target", "t_strand")]
-    rows, arrays = [], {}
+    rows, arrays, annot_cache = [], {}, {}
     for k, t in enumerate(targets.to_dict("records")):   # not itertuples: it renames columns like "class"
         chrom, ts, te = t["chrom"], int(t["t_start"]), int(t["t_end"])
         if te - ts + 2 * args.flank > context_length:
@@ -184,10 +235,30 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
             continue
         seq = fasta.fetch(chrom, ws, we)
         dna = get_locus_onehot(fasta, chrom, ws, we)                     # (L, 4)
-        pred = predict_fibers(model, x[keep], mask[keep], dna, active, args.device, args.batch_fibers)
+        annot = (load_annot(annot_cache, os.path.join(os.path.dirname(m["fasta_path"]), "annotation_tracks"),
+                            chrom, ws, we) if model.init_args.get("dna_type") == "ref_annot" else None)
+        pred = predict_fibers(model, x[keep], mask[keep], dna, active, args.device, args.batch_fibers, annot)
         tags = tag_lookup(aln, chrom, ws, we)
         cg = cpg_starts(seq)
         pos = np.arange(context_length) + ws
+        pert = {}   # mode -> (nflip per kept fiber, perturbed target means (n, K) or NaN)
+        for mode in args.perturb:
+            reg = perturb_region(mode, lo, hi, args.flank, args.perturb_shift, context_length)
+            nflip = np.zeros(len(keep), dtype=int)
+            means = np.full((len(keep), len(assays)), np.nan)
+            if reg is not None:
+                xs = []
+                for j, i in enumerate(keep):
+                    xp, nflip[j] = flip_cpg(x[i], cg, reg[0], reg[1], PERTURB_MODES[mode][0], meta[i]["strand"])
+                    xs.append(xp)
+                ch = np.flatnonzero(nflip > 0)
+                if len(ch):
+                    pp = predict_fibers(model, np.stack([xs[j] for j in ch]), mask[keep][ch], dna, active,
+                                        args.device, args.batch_fibers, annot)
+                    for q, j in enumerate(ch):
+                        sm = mask[keep[j], lo:hi]
+                        means[j] = pp[q][:, lo:hi][:, sm].mean(1)
+            pert[mode] = (nflip, means)
         for j, i in enumerate(keep):
             md = meta[i]
             hp, ps = tags.get((md["qname"], md["start"]), (md["hp"], None))
@@ -198,6 +269,9 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
                    **{c: t[c] for c in extra}, "read": md["qname"], "hp": hp, "ps": ps,
                    "f_start": md["start"], "f_end": md["end"], "f_strand": md["strand"], "scored_bp": int(sm.sum())}
             row.update({f"pred_{a_}": float(v) for a_, v in zip(assays, p)})
+            for mode, (nflip, means) in pert.items():
+                row[f"nflip_{mode}"] = int(nflip[j])
+                row.update({f"pred_{a_}__{mode}": float(v) for a_, v in zip(assays, means[j])})
             for tag, (l0, h0) in (("t", (lo, hi)), ("l", (max(0, lo - args.flank), lo)),
                                   ("r", (hi, min(context_length, hi + args.flank)))):
                 s = input_summary(x[i], a, cg, l0, h0)

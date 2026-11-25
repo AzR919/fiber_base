@@ -20,6 +20,7 @@ from fiber_utils import (
     get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp,
     get_fiber_data as _get_fiber_data_np,
     get_locus_onehot,
+    load_annot,
     suppress_stdout_stderr,
 )
 
@@ -99,13 +100,18 @@ class SingleCellFiberDataset(IterableDataset):
         self.epoch = 0
         self.mode = mode
 
-        valid_dna_types = {"none", "ref", "fiber", "both"}
+        valid_dna_types = {"none", "ref", "fiber", "both", "ref_annot"}
         if dna_type not in valid_dna_types:
             raise ValueError(f"Invalid dna_type '{dna_type}'. Expected one of {valid_dna_types}")
 
         self.dna_type = dna_type
-        self.return_ref_genome = self.dna_type in ("ref", "both")
+        self.return_ref_genome = self.dna_type in ("ref", "both", "ref_annot")
         self.return_fiber_dna = self.dna_type in ("fiber", "both")
+        # 'ref_annot': also the per-base annotation bits (data_prep/build_annotation_tracks.py) as sample["annot"]
+        # (L,) uint8; only the rule baseline (rung 1, models.RuleBaseline) uses them
+        self.return_annot = self.dna_type == "ref_annot"
+        self.annot_dir = os.path.join(os.path.dirname(self.fasta_path), "annotation_tracks")
+        self._annot = {}
 
         self.rng = random.Random(seed)
 
@@ -157,6 +163,10 @@ class SingleCellFiberDataset(IterableDataset):
         if start < 0 or end <= start:
             raise ValueError(f"Invalid genomic range: {start}-{end}")
         return torch.from_numpy(get_locus_onehot(self.fasta, chrom, start, end))
+
+    def annot_for_locus(self, locus):
+        """(L,) uint8 annotation bits for a window (memory-mapped per chromosome, opened once per worker)."""
+        return torch.from_numpy(load_annot(self._annot, self.annot_dir, *locus))
 
     @property
     def expected_samples(self):
@@ -269,6 +279,8 @@ class SingleCellFiberDataset(IterableDataset):
             out_dict["baseline_bulk"], out_dict["baseline_mask"] = baseline
         if self.return_ref_genome:
             out_dict["ref_dna"] = self.onehot_for_locus(locus).T
+        if getattr(self, "return_annot", False):   # getattr: datasets pickled by older code
+            out_dict["annot"] = self.annot_for_locus(locus)
         if self.return_fiber_dna:
             out_dict["fiber_dna_tensor"] = fibers["fiber_dna_tensor"]
         return out_dict
@@ -446,6 +458,8 @@ class MixedCellFiberDataset(SingleCellFiberDataset):
         }
         if self.return_ref_genome:
             out["ref_dna"] = self.onehot_for_locus(locus).T
+        if getattr(self, "return_annot", False):
+            out["annot"] = self.annot_for_locus(locus)
         if dna is not None:
             out["fiber_dna_tensor"] = dna
         return out

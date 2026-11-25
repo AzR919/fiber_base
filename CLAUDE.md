@@ -79,6 +79,9 @@ Both clusters have the same data since 24 Nov (fir's older `regions/` kept as `D
   | Full H100 | 12 | 14 |
 
 ## Conventions
+- Finished work goes in `reports/TODONE_YY_MM.md` (one file per month, e.g. `TODONE_26_11.md`), **newest on top**:
+  add each new item at the top under its date (what was done, the result in a line, where the details are). Open
+  work stays in `reports/TODO.md` / `TODO_extended.md`.
 - Configs are numbered (`dataNN_`, `modelNN_`, `evalNN_`); add new ones with the next number instead of editing ones that have already been used in a run. Each config starts with a header comment saying what it is.
 - Retired configs go in `configs/old_configs/`.
 - Weekly result write-ups go in `reports/`. Their figures go in `plots/<name>/` (gitignored; name matches the

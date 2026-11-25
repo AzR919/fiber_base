@@ -724,7 +724,113 @@ T5a held-out methylation with the no-CpG model.
       The annotations make I24 and I25 comparable but need annotation tracks.
     - Linear, or also a one-hidden-layer MLP on the same summaries, to separate "nonlinearity" from "fine spatial
       pattern".
-- **Status.** Idea (17 Nov); plan updated 18 Nov. Implementation I24 (learned), I25 (rules).
+- **Draft (25 Nov, to confirm before running): the ladder, the rules and the expected results.**
+  - **The ladder** (user, 25 Nov). Rungs 2–4 use the same supervision (R1a mixtures), the same channels as DEV4NF
+    (m6A, CpG, MSP, nucleosome; no FIRE), the same Softplus + coverage-normalized fiber averaging, loss and budget, and
+    3 seeds on both dev pairs:
+
+    | Rung | Model | What it answers |
+    |---|---|---|
+    | 0 | Floor: bulk on every molecule (and the library control) | What no per-fiber reading gives |
+    | 1 | **Rules:** one fixed rule per assay → per-position fiber score in [0, 1] → one fitted affine map per assay | Can an obvious reading of the fiber do it? |
+    | 2 | **Feature model, small MLP** (user, 25 Nov), **no external annotations** (user: keep it comparable to the network, which sees only the fiber and the DNA): per-position features from the fiber and the reference sequence only → MLP (2 hidden layers, ~64 units, same output head) | 1 → 2: does learning how to combine simple features help? 2 → 3: is deep learning needed? |
+    | 3 | **The network:** R1a (exists) | — |
+    | 4 | **Network + rules:** the rung-2 features as extra input channels (annotation-free, for the same reason) | 3 → 4: does the network already capture what the simple features carry? |
+
+    **Rung 2 features,** per position, from the fiber and the DNA only:
+    - fiber summaries over ~50, 200 and 1000 bp windows centred on the position: MSP fraction, nucleosome fraction, m6A
+      rate, mean CpG methylation, fraction of CpGs covered;
+    - the annotation-free parts of the rules: inside an MSP; distance to the nearest MSP edge (capped); is a flanking
+      nucleosome (≤ 300 bp / ≤ 1 kb of an MSP); motif-free footprint (a protected 10–40 bp patch inside an MSP);
+    - sequence summaries from the reference over the same windows: GC fraction, CpG density and CpG observed/expected
+      (a CpG-island proxy computed from the DNA, which the network also sees).
+
+    Not in rung 2: CpG-island, TSS, gene-body and repeat annotations, and the JASPAR CTCF motif. So the motif and gene
+    structure, which the network has to learn from the DNA, are not handed to rung 2 either. Control arm: rung 2
+    without the footprint feature, since with it the CTCF footprint test is partly circular.
+  - **Scale:** a rule gives 0 / 1 per position. Calibrate it with an affine map per assay, fitted on the training
+    chromosome by the normal training loop (2 parameters per assay), so it is scored on bulk exactly like the network.
+    Per molecule, an output is best read as a probability (a nucleosome is marked or not); the molecule tests are
+    rank-based (AUC, sign accuracy, per-site differences), so they don't depend on scale.
+  - **Annotations rung 1 may use** (only rung 1; the network and rung 2 get the fiber and DNA only, and that rung 1
+    needs them is an argument in itself): CpG islands (UCSC),
+    TSSs and gene bodies (GENCODE protein-coding), RepeatMasker, the JASPAR CTCF motif (MA0139.2, p ≤ 1e-5, as in the
+    footprint test). Per-position annotation tracks per window, like the DNA one-hot.
+  - **"MSP" in the rules means a large MSP (a run of ≥ 151 bp, a nucleosome-free region)** (found 25 Nov while
+    building rung 2: fibertools MSPs include the short linkers between nucleosomes, so "an MSP within 1 kb" is true
+    almost everywhere). Same for rung 2's rule parts.
+  - **The rules,** per fiber and position. "Flanking" = nucleosome calls within the given distance of an MSP edge;
+    methylation = the fiber's own CpG calls, mean over ± 500 bp; FIRE is not used (its classifier was trained on DNase
+    and CTCF peaks).
+
+    | Assay | Rule: score 1 where | Biology behind it |
+    |---|---|---|
+    | ATAC | the position is inside an MSP | accessibility is what MSPs measure |
+    | CTCF | a CTCF motif hit inside or next to an MSP is protected (motif m6A rate ≤ 0.5 × flanks; same rule as the footprint test), over the motif ± 100 bp | bound CTCF protects its motif from the methyltransferase |
+    | H3K4me3 | nucleosomes flanking an MSP (≤ 300 bp; the ± 1 nucleosomes) at a CpG island, fiber unmethylated (< 0.3) | H3K4me3 sits on the nucleosomes around active CGI promoters, which stay unmethylated |
+    | H3K27ac | nucleosomes flanking an MSP (≤ 1 kb), fiber not methylated (< 0.5), any CpG context | active promoters and enhancers |
+    | H3K4me1 | as H3K27ac, but > 2 kb from any TSS and up to ± 2 kb around the MSP | enhancers and their flanks; depleted at the TSS itself |
+    | H3K36me3 | inside a gene body (TSS + 2 kb to TES), fiber methylated (> 0.7), nucleosome-covered | co-transcriptional mark; gene-body methylation follows it (DNMT3B reads H3K36me3) |
+    | H3K27me3 | CpG island or CpG-rich (± 1 kb), fiber unmethylated (< 0.3), no MSP within ± 500 bp | Polycomb targets: closed, unmethylated CGIs |
+    | H3K9me3 | in an LTR / satellite repeat or a chr19 ZNF cluster, fiber methylated (> 0.7), no MSP within ± 1 kb | constitutive heterochromatin over repeats and ZNF genes |
+
+    Motif-free footprint rule (for the specificity test below): any protected patch (10–40 bp with an m6A rate
+    ≤ 0.5 × its flanks) inside an MSP, whatever the sequence.
+  - **Expected results** (fixed now; the outcome is reported whatever it shows):
+
+    | Assay | Bulk r, rules (1) vs network (3) | MLP on features (2) vs network (3) | Why |
+    |---|---|---|---|
+    | ATAC | close (gap < 0.05) | close | MSPs are accessibility |
+    | CTCF | network clearly better | network clearly better | the rule fires only at strong motif hits with a footprint; the MLP sees footprints but not the motif, so it can't tell CTCF from other factors |
+    | H3K4me3 | network better, modest gap | close | open, unmethylated, CpG-rich: the MLP has all three (CpG density from the DNA) |
+    | H3K27ac, H3K4me1 | largest gap | network better | same fiber signature; rung 1 separates them by TSS distance, the MLP has no TSS at all |
+    | H3K36me3 | moderate gap | network better | rung 1 gets gene bodies from the annotation; the MLP has only gene-body methylation over ≤ 1 kb |
+    | H3K27me3, H3K9me3 | network better, both low | network better | no clean rule; the network can combine closedness, methylation and sequence (repeats) |
+
+    - **Marks with the same fiber signature:** the rule tracks of H3K27ac and H3K4me1 correlate with each other more
+      than the true tracks do; the network's tracks come closer to the true correlation.
+    - **T3 (pair separation):** rules lower on sign accuracy and differential r, except ATAC.
+    - **Biology tests:**
+      - CTCF footprints: the rule is the test's own label, so it is a ceiling there, not a competitor;
+      - X inactivation: the active-mark rules use the fiber's CpG methylation, so they pass almost by construction
+        (no difference from the network expected);
+      - H3K27me3 on the Xi: the rule puts more H3K27me3 on the Xa (unmethylated CGIs), like the network. If both fail,
+        the information is not in the fiber features;
+      - CpG flips: only the rules that use CpG respond, and abruptly (thresholds), while the network responds
+        gradually.
+    - **Rung 4:** within seed noise of the network. If it is better, the network misses something the simple
+      features make explicit (most likely the footprint, on CTCF).
+  - **New specificity test for CTCF** (the strongest argument for the network over rules):
+    - at footprints on other factors' motifs (NRF1, YY1, REST, ...; JASPAR), the motif-free footprint rule fires,
+      but the network's pred CTCF should stay low: it ties the footprint to the CTCF sequence;
+    - at bound CTCF peaks without a strong motif hit, does the network still respond to a footprint? The motif rule
+      can't.
+  - **Implementation:**
+    - rules and annotations as per-position input channels computed per window (`fiber_utils`, like the DNA one-hot),
+      from annotation tracks built once (`data_prep/`);
+    - rung 1 as a model class with no trainable weights besides the per-assay affine map, so the evaluator and
+      `molecule_predict.py` run on it unchanged;
+    - rung 2 as a small MLP on the annotation-free feature channels (computed per window from the fiber and the
+      DNA), with the same output head, fiber averaging and loss;
+    - rung 4 as `model16` with the rung-2 feature channels added (`input_flags` extended).
+- **Status.** Idea (17 Nov); plan updated 18 Nov; ladder, rules and expected results drafted 25 Nov. Confirmed
+  25 Nov: rung 1 as drafted (with annotations); rung 2 a small MLP without external annotations.
+  - **Rungs 2 and 4 built (25 Nov):** `handcrafted.py` (`FiberFeatures`: 31 fixed features from the fiber channels and
+    the reference DNA, computed inside the model, so the evaluator, `molecule_predict.py` and `--perturb` work
+    unchanged; `FeatureMLP`), `models.py` (`mlp01` = `MLPBaseline`; `unet03` with `extra_features: true`), configs
+    `model22_mlp_handcrafted` (6.7 k parameters) and `model23_uct_mid_8A_no_fire_msp_handcrafted`, slurm cases
+    `r1a_mlp`, `r1a_mlp_b`, `r1a_hc`, `r1a_hc_b`.
+  - **Seed 919 submitted on fir (25 Nov),** both dev pairs: jobs `2026-11-25_17`–`36` (training, chained resume,
+    eval with library controls and the balanced mixture, CTCF molecules with CpG flips, TSS molecules). Seeds 2 and 3
+    after the first epochs look sane.
+    `_17` died (code pushed while it ran; see memory) and was resubmitted as `_45`–`49`.
+  - **Rung 1 built and submitted (25 Nov):** `data_prep/build_annotation_tracks.py` (uint8 bits per base in
+    `data/misc/annotation_tracks/`: CGI, TSS ± 2 kb, gene body, soft-masked repeat, ZNF gene, CTCF motif hit; built for
+    chr20, chr21, chr22, chrX), `dna_type: ref_annot` (the loader adds `batch['annot']`; `molecule_predict.py` too),
+    `handcrafted.rule_scores` and `models.RuleBaseline` (`rules01`, 16 parameters: Softplus(a s + b) per assay),
+    config `model24_rules`, `train05` (3 epochs, lr 1e-2), slurm cases `r1a_rules`, `r1a_rules_b` (`TRAIN=train05`;
+    evals with `EPOCH=3`). Seed 919 submitted: `2026-11-25_37`–`44`. Repeats are the soft-mask for now (user,
+    25 Nov: skip the RepeatMasker download, decide after the results). Implementation I24 (learned), I25 (rules).
 
 ---
 

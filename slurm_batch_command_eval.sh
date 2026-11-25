@@ -44,7 +44,7 @@ case "${EVAL_SET:-a}" in
   one) : "${CONFIGS:?EVAL_SET=one needs CONFIGS}" ;;
   *) echo "Unknown EVAL_SET=${EVAL_SET}"; exit 1 ;;
 esac
-CKPT=$(ls -td results/*_train_${RUN}/Model_epoch_15.pt | head -1)
+CKPT=$(ls -td results/*_train_${RUN}/Model_epoch_${EPOCH:-15}.pt | head -1)   # EPOCH: final epoch of the run (default 15; rule baseline: 3)
 echo "Checkpoint: $CKPT | eval set ${EVAL_SET:-a}: $CONFIGS"
 python -u eval.py \
   --checkpoint "$CKPT" \

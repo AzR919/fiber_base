@@ -1,0 +1,10 @@
+# Baseline ladder rung 1 (reports/TODO_extended.md T11): one fixed hand-written rule per assay
+# (handcrafted.rule_scores: large MSPs, flanking nucleosomes, the fiber's own CpG methylation, a protected CTCF motif;
+# may use the annotation bits of data_prep/build_annotation_tracks.py: CGIs, TSS +- 2 kb, gene bodies, soft-masked
+# repeats, ZNF genes, CTCF motif hits) and a per-assay affine calibration Softplus(a s + b), the only trained
+# parameters (16). Same fiber channels as DEV4NF: [m6a, cpg, msp, nuc]; dna_type 'ref_annot' adds the annotation track.
+
+model: "rules01"
+input_flags: [1, 1, 1, 1, 0]
+dna_type: "ref_annot"
+output_assays: ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9me3", "ctcf"]

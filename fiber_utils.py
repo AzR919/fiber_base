@@ -56,6 +56,24 @@ def get_locus_onehot(fasta, chrom, start, end):
     return _dna_to_onehot(seq)
 
 
+def load_annot(cache, annot_dir, chrom, start, end):
+    """(end - start,) uint8 annotation bits (data_prep/build_annotation_tracks.py) for a window; the per-chromosome
+    arrays are memory-mapped once into cache (a dict). Positions past the chromosome end are 0."""
+    start, end = int(start), int(end)
+    if chrom not in cache:
+        path = os.path.join(annot_dir, f"{chrom}.npy")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No annotation track for {chrom} in {annot_dir}; run "
+                                    f"data_prep/build_annotation_tracks.py --chroms {chrom}")
+        cache[chrom] = np.load(path, mmap_mode="r")
+    a = cache[chrom]
+    out = np.zeros(end - start, dtype=np.uint8)
+    s, e = max(0, start), min(len(a), end)
+    if e > s:
+        out[s - start:e - start] = a[s:e]
+    return out
+
+
 #--------------------------------------------------------------------------------------------------
 # Fiber Signal Extraction
 # All functions take (fiber, start, end, ref) with ref a RefWindow for [start, end), and return

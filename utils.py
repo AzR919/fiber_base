@@ -250,6 +250,8 @@ def unpack_batch(batch, device):
         kwargs["fiber_mask"] = batch["fiber_mask"].to(device)
     if "ref_dna" in batch:
         kwargs["ref_dna"] = batch["ref_dna"].to(device)
+    if "annot" in batch:
+        kwargs["annot"] = batch["annot"].to(device)
     if "fiber_dna_tensor" in batch:
         kwargs["fiber_dna_tensor"] = batch["fiber_dna_tensor"].to(device)
 

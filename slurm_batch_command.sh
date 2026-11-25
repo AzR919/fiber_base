@@ -66,6 +66,15 @@ case "${CELL:-gm12878}" in
   pair_nf) DATA=data28_GM12878_HepG2_200U;         EVAL=eval24_pair_GM12878_HepG2_200U_mini;    PREFIX=PAIR_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   r1a_nf_b)  DATA=data37_mix_bal_K562_H1_200U; EVAL=eval32_mix_bal_K562_H1_200U_mini; PREFIX=MIXR1A_NF; MODEL=model16_uct_mid_8A_no_fire_msp ;;
   pair_nf_b) DATA=data34_K562_H1_200U;         EVAL=eval22_K562_200U_mini;            PREFIX=PAIR_NF;   MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  # Baseline ladder (reports/TODO_extended.md T11), R1a supervision: rung 2 = small MLP on hand-crafted features
+  # (model22), rung 4 = DEV4NF's network + those features (model23); _b = K562 + H1
+  r1a_mlp)    DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_MLP; MODEL=model22_mlp_handcrafted ;;
+  r1a_mlp_b)  DATA=data37_mix_bal_K562_H1_200U;       EVAL=eval32_mix_bal_K562_H1_200U_mini;       PREFIX=MIXR1A_MLP; MODEL=model22_mlp_handcrafted ;;
+  r1a_hc)     DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_HC;  MODEL=model23_uct_mid_8A_no_fire_msp_handcrafted ;;
+  r1a_hc_b)   DATA=data37_mix_bal_K562_H1_200U;       EVAL=eval32_mix_bal_K562_H1_200U_mini;       PREFIX=MIXR1A_HC;  MODEL=model23_uct_mid_8A_no_fire_msp_handcrafted ;;
+  # rung 1 = fixed rules, only a per-assay calibration trained (model24, train05: 3 epochs; eval with EPOCH=3)
+  r1a_rules)   DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_RULES; MODEL=model24_rules; TRAIN=train05 ;;
+  r1a_rules_b) DATA=data37_mix_bal_K562_H1_200U;       EVAL=eval32_mix_bal_K562_H1_200U_mini;       PREFIX=MIXR1A_RULES; MODEL=model24_rules; TRAIN=train05 ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 if [ -n "${SEED:-}" ]; then PREFIX="${PREFIX}_seed${SEED}"; fi
@@ -73,7 +82,7 @@ echo "Model: $PREFIX $DATA $MODEL seed ${SEED:-919}"
 python -u main.py \
   --data_config configs/data/$DATA.yaml \
   --model_config configs/models/$MODEL.yaml \
-  --train_config configs/training/train04.yaml \
+  --train_config configs/training/${TRAIN:-train04}.yaml \
   --eval_configs configs/evals/$EVAL.yaml \
   --num_workers $(( ${SLURM_CPUS_PER_TASK:-4} - 1 )) \
   --name_prefix $PREFIX \

@@ -270,7 +270,7 @@ class UNet03ConvTransformerWithDNA(BaseModel):
 
     def __init__(self, input_flags, dna_type="none",
                  kernel_size=15, emb_dims=[8, 32, 64, 128], tf_heads=4,
-                 tf_layers=2, max_len=1000, output_assays=None, fiber_aggregation="fc"):
+                 tf_layers=2, max_len=1000, output_assays=None, fiber_aggregation="fc", extra_features=False):
         super().__init__(input_flags, dna_type, output_assays, fiber_aggregation)
 
         assert dna_type in ("none", "ref"), f"dna_type must be 'none' or 'ref', got '{dna_type}'."
@@ -285,6 +285,17 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         self.num_input_features = sum(input_flags)
         self.dna_type = dna_type
         self.kernel_size = kernel_size
+
+        # Rung 4 of the baseline ladder (T11): the hand-crafted features of handcrafted.py as extra fiber channels
+        self.extra_features = bool(extra_features)
+        self.features = None
+        if self.extra_features:
+            from handcrafted import FiberFeatures, N_FEATURES, REQUIRED_FLAGS
+            assert list(input_flags) == REQUIRED_FLAGS and dna_type == "ref", \
+                "extra_features needs input_flags [1, 1, 1, 1, 0] and dna_type 'ref'"
+            self.init_args["extra_features"] = True
+            self.features = FiberFeatures()
+            self.num_input_features += N_FEATURES
 
         # --- Optional Reference DNA Encoder ---
         if self.dna_type == "ref":
@@ -343,6 +354,8 @@ class UNet03ConvTransformerWithDNA(BaseModel):
             fiber_coverage: Per-position fiber count tensor of shape [B, L] (used only without fiber_mask)
             fiber_mask: [B, L, N] bool, each fiber's scored span; per-fiber outputs outside it are zeroed
         """
+        if self.features is not None:
+            x = torch.cat([x, self.features(x, ref_dna).to(x.dtype)], dim=1)   # [B, C + N_FEATURES, L, N]
         B, C, L, N = x.shape
 
         x = x.permute(0,3,1,2).reshape(B * N, self.num_input_features, L)
@@ -413,6 +426,62 @@ class UNet03ConvTransformerWithDNA(BaseModel):
         processed_fibers = self.fiber_act(raw_fibers)               # [B, K, L, N]
         return average_fibers(processed_fibers, fiber_mask, fiber_coverage, self.fiber_aggregation)
 
+class MLPBaseline(BaseModel):
+    """
+    Rung 2 of the baseline ladder (reports/TODO_extended.md T11): hand-crafted per-position features from the fiber
+    and the reference DNA (handcrafted.FiberFeatures, fixed) -> a small per-position MLP -> Softplus -> the same
+    coverage-normalized fiber averaging as the network. No spatial filters beyond the features' fixed windows and no
+    external annotation.
+    """
+
+    def __init__(self, input_flags, dna_type="ref", hidden=64, layers=2, output_assays=None, fiber_aggregation="fc"):
+        super().__init__(input_flags, dna_type, output_assays, fiber_aggregation)
+        from handcrafted import FiberFeatures, FeatureMLP, REQUIRED_FLAGS
+        assert list(input_flags) == REQUIRED_FLAGS and dna_type == "ref", \
+            "mlp01 needs input_flags [1, 1, 1, 1, 0] and dna_type 'ref'"
+        self.init_args["hidden"] = hidden
+        self.init_args["layers"] = layers
+        self.features = FiberFeatures()
+        self.mlp = FeatureMLP(len(self.init_args["output_assays"]), hidden=hidden, layers=layers)
+        self.fiber_act = nn.Softplus()
+
+    def forward(self, x, ref_dna=None, fiber_coverage=None, fiber_mask=None, *args, **kwargs):
+        if ref_dna is None:
+            raise ValueError("mlp01 needs ref_dna (dna_type 'ref').")
+        B, C, L, N = x.shape
+        feats = self.features(x, ref_dna)                                   # [B, F, L, N] float32
+        f = feats.permute(0, 3, 1, 2).reshape(B * N, -1, L)
+        out = self.mlp(f)                                                  # [B*N, K, L]
+        K = out.shape[1]
+        raw_fibers = out.view(B, N, K, L).permute(0, 2, 3, 1)              # [B, K, L, N]
+        return average_fibers(self.fiber_act(raw_fibers), fiber_mask, fiber_coverage, self.fiber_aggregation)
+
+class RuleBaseline(BaseModel):
+    """
+    Rung 1 of the baseline ladder (reports/TODO_extended.md T11): one fixed rule per assay (handcrafted.rule_scores,
+    0 / 1 per fiber and position, may use the annotation bits) and a per-assay affine calibration, z = Softplus(a s + b),
+    then the same coverage-normalized fiber averaging as the network. Only a and b are trained (2 per assay), by the
+    normal training loop. dna_type 'ref_annot': the loader adds the annotation track (batch['annot']).
+    """
+
+    def __init__(self, input_flags, dna_type="ref_annot", output_assays=None, fiber_aggregation="fc"):
+        super().__init__(input_flags, dna_type, output_assays, fiber_aggregation)
+        from handcrafted import REQUIRED_FLAGS
+        assert list(input_flags) == REQUIRED_FLAGS and dna_type == "ref_annot", \
+            "rules01 needs input_flags [1, 1, 1, 1, 0] and dna_type 'ref_annot'"
+        K = len(self.init_args["output_assays"])
+        self.scale = nn.Parameter(torch.full((K,), 2.0))
+        self.offset = nn.Parameter(torch.full((K,), -1.0))
+        self.fiber_act = nn.Softplus()
+
+    def forward(self, x, ref_dna=None, fiber_coverage=None, fiber_mask=None, annot=None, *args, **kwargs):
+        from handcrafted import rule_scores
+        if annot is None:
+            raise ValueError("rules01 needs the annotation track (dna_type 'ref_annot').")
+        s = rule_scores(x, annot, self.init_args["output_assays"])                  # [B, K, L, N]
+        raw = self.scale.view(1, -1, 1, 1) * s + self.offset.view(1, -1, 1, 1)
+        return average_fibers(self.fiber_act(raw), fiber_mask, fiber_coverage, self.fiber_aggregation)
+
 #--------------------------------------------------------------------------------------------------
 # Model Selection Factory
 
@@ -441,6 +510,25 @@ def model_selector(model_arg, args):
                     emb_dims=args.emb_dims,
                     tf_heads=args.tf_heads,
                     tf_layers=args.tf_layers,
+                    output_assays=args.output_assays,
+                    fiber_aggregation=fiber_aggregation,
+                    extra_features=getattr(args, "extra_features", False),
+                )
+
+    elif model_name == "mlp01":
+        return MLPBaseline(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
+                    hidden=getattr(args, "hidden", 64),
+                    layers=getattr(args, "layers", 2),
+                    output_assays=args.output_assays,
+                    fiber_aggregation=fiber_aggregation,
+                )
+
+    elif model_name == "rules01":
+        return RuleBaseline(
+                    input_flags=args.input_flags,
+                    dna_type=args.dna_type,
                     output_assays=args.output_assays,
                     fiber_aggregation=fiber_aggregation,
                 )
