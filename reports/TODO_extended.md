@@ -243,6 +243,43 @@ one seed; all evals use the final checkpoint (epoch 15).
   the second overwrote the first. Mixed configs are now keyed `<config>/mixed` (`evaluator.py`); for these runs,
   `eval26` was read from the eval logs.
 
+#### Seed noise (24 Nov): R1a and Pair, both dev pairs, 3 seeds
+
+Script `plots_code/26_nov_27/realism_seeds.py` (job `realism_seeds.sh`), outputs in `plots/26_nov_27/seeds/`
+(`seeds_table.tsv`, `seeds_deltas.tsv`, `seeds_t3.png`, `seeds_bulk.png`, `seeds_bio.png`). Seeds 919, 2 and 3 for R1a
+and Pair, 919 and 2 for DEV4NF, seed 919 only for R0. Trained on fir (`2026-11-23_14`–`57`, `2026-11-24_00`–`26`).
+Pair B means are over 7 assays (H1 has no ATAC). "Clear" = |Δ| > 2 SE and every pairing of seeds has the same sign.
+
+| Pair | Model | AUC | Sign accuracy | Differential r | Own-track r (cell 1 / cell 2) | Mixture r | CTCF H1 (cell 1 / cell 2) |
+|---|---|---|---|---|---|---|---|
+| GM12878 + HepG2 | DEV4NF | 0.631 ± .008 | 0.739 ± .006 | 0.333 ± .007 | 0.462 / 0.598 | 0.600 | 1.04 / 0.90 |
+| | R1a | 0.642 ± .010 | 0.754 ± .015 | 0.338 ± .014 | 0.474 / 0.624 | 0.628 | 0.87 / 0.62 |
+| | Pair | 0.648 ± .004 | 0.797 ± .011 | 0.367 ± .001 | 0.481 / 0.625 | 0.628 | 0.77 / 0.58 |
+| K562 + H1 | DEV4NF | 0.653 ± .010 | 0.785 ± .006 | 0.290 ± .012 | 0.483 / 0.419 | 0.512 | 0.76 / 0.66 |
+| | R1a | 0.664 ± .004 | 0.789 ± .023 | 0.272 ± .004 | 0.480 / 0.431 | 0.526 | 0.51 / 0.70 |
+| | Pair | 0.676 ± .006 | 0.843 ± .010 | 0.328 ± .002 | 0.486 / 0.440 | 0.525 | 0.83 / 0.68 |
+
+- **Bulk:** R1a = Pair within noise on every own-track r and on mixture r, on both pairs. R1a is clearly above
+  DEV4NF on HepG2, H1 and the GM12878 + HepG2 mixture. Pair has a slightly lower MSE (GM12878, H1).
+- **T3:** Pair is clearly above R1a on sign accuracy (+0.04 / +0.055) and differential r (+0.03 / +0.056) on both
+  pairs, and on AUC for K562 + H1 (+0.012). R1a sits at DEV4NF's level here, or below it (differential r on
+  K562 + H1, −0.018). The first run's "R1a ≈ Pair" came partly from seed 919 being R1a's best seed (AUC 0.653 vs
+  mean 0.642). The library control is at chance for every model (0.050–0.064).
+- **CTCF:** the footprint effect (H1) varies a lot between trainings. Pair A seed 3 has none (0.01 on GM12878,
+  −0.11 on HepG2), and R1a B seed 919 is at 0.02 on K562 (p 0.06). Otherwise H1 passes everywhere (p < 1e-7).
+  It passes in 11 of 12 seed × cell cases for R1a, 10 of 12 for Pair and 8 of 8 for DEV4NF. The first run's ranking
+  (DEV4NF > Pair > R1a) is within seed noise. H3 passes in every run. H5 is 1.0 in every run, so it can't tell
+  models apart.
+- **XI (GM12878 fibers):** on silenced CGI genes, 0.69–0.79 of genes have the expected direction, and both nulls
+  stay at ~0.5. No model difference is clear. H3K27me3 is near or below 0.5 for every model, so it is unusable as an
+  XI mark.
+- **Caveat:** R1a K562 + H1 has no ATAC target (data37), so its ATAC head is untrained. Its XI ATAC (0.43) and CTCF
+  H2 (which subtracts pred ATAC) mean nothing. Leave both out for that model. A 3-cell mixture needs cells with every
+  assay, or a per-assay mask.
+- **Reading for the story:** trained only on mixtures, R1a matches own-track supervision on bulk accuracy,
+  including on mixtures. The cost is in single-fiber differential signals, where it reaches DEV4NF's level but not
+  the pair model's.
+
 ### 2c. Test hygiene
 
 - **What has been touched:** the held-out cells (H9, HCT116, MCF-7) entered the ceiling fractions, the ablation
@@ -292,18 +329,27 @@ only difference.
   3. the CTCF footprint and X-inactivation active-mark tests pass with mixture-only supervision, in all 3 seeds;
   4. on the sealed test, the model trained on the held-out mixture beats DEV4NF applied without retraining on
      fiber-origin AUC and differential r.
+- **Against stage 2 (24 Nov; to decide before stage 4):**
+  - Criterion 1 holds for own-track recovery. On AUC it holds for GM12878 + HepG2 and is borderline for K562 + H1
+    (Δ 0.012, 2 SD of Pair = 0.012).
+  - Sign accuracy and differential r fail it on both pairs. Decide whether they enter the criteria, or are
+    reported as the cost of mixture supervision.
+  - Criterion 3 fails "all 3 seeds" in one case: R1a K562 + H1 seed 919 (CTCF H1 p 0.06). The pair model fails it
+    too (seed 3). Consider a criterion over seed means, or a majority of seeds.
 
 ### 2g. Stages and cost
 
-Training runs take ~2.2 h each on a 2g.20gb slice (under the 3 h limit), plus evals.
+Training runs take ~2.2 h each on a 2g.20gb slice (under the 3 h limit), plus evals. Exception: R1a loads slowly
+on fir's 3 CPUs (~7 samples/s, 13–14 min per epoch on GM12878 + HepG2), so 15 epochs need about 3.5 h. Plan a
+chained `RESUME=latest` job from the start. The last epoch also needs the final-eval reserve (~15 min).
 
 | Stage | What | Runs |
 |---|---|---|
 | 1 | Protocol, success criteria and test chromosome written down; data / eval configs | — |
 | 2–3a | **Done (23 Nov):** R0, R1a, Pair on GM12878 + HepG2, seed 919, `model16`. R1a locked as the recipe (§2b, "Result and decision") | 3 |
-| 2 | **Next:** seed noise with the locked recipe. R1a and Pair on both dev pairs (GM12878 + HepG2, K562 + H1), 3 seeds each (seed 919 of the GM12878 + HepG2 pair exists) | 10 new (~23 GPU-h) |
+| 2 | **Done (24 Nov):** seed noise. R1a and Pair on both dev pairs, 3 seeds each; R1a = Pair on bulk, below it on sign accuracy and differential r (§2b, "Seed noise") | 10 new |
 | 3 | ~~Realism: R1a, R1b and R2~~ settled by the first run; R2 dropped, R1b optional later (one run per pair if needed) | 0–2 |
-| 4 | Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
+| 4 | **Next.** Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
 | 5 | Sealed test: locked recipe on HCT116 + MCF-7 and a 3-cell held-out mixture, 3 seeds; DEV4NF without retraining | ~6 |
 
 Implementation: I26–I31 (§5).
@@ -319,6 +365,7 @@ Implementation: I26–I31 (§5).
   without the 75 motif sites lacking bulk short-read data (`ctcf_holes.py`).
 - Mixture realism, first run (23 Nov): R0, R1a, Pair on GM12878 + HepG2, one seed, every test; R1a locked as the
   mixture recipe (§2b).
+- Seed noise (24 Nov): R1a and Pair on both dev pairs × 3 seeds, every test (§2b, "Seed noise").
 
 ## 3. Tests
 
@@ -845,6 +892,7 @@ under `results/`. All V1 unless noted. Same setup unless noted: chr20, half cCRE
 | R0 (mixture, `model16`) | `data27` | GM12878 + HepG2 mixtures, share redrawn per window | nibi | `2026-11-23_00_train_r0_nf` | `26-11-23_T17-51-43_train_MIXR0_NF_data27_mix_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | 2 h 16 min; realism first run (§2b) |
 | **R1a** (mixture, `model16`) | `data36` | GM12878 + HepG2 mixtures, share fixed at 0.5, balanced stack | nibi | `2026-11-23_01_train_r1a_nf` | `26-11-23_T17-52-13_train_MIXR1A_NF_data36_mix_bal_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | **the mixture recipe from 23 Nov**; 2 h 20 min (§2b) |
 | Pair (`model16`) | `data28` | GM12878 + HepG2 (own tracks) | nibi | `2026-11-23_02_train_pair_nf` | `26-11-23_T17-54-40_train_PAIR_NF_data28_GM12878_HepG2_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | ceiling for mixture supervision with DEV4NF's channels; 2 h 18 min (§2b) |
+| R1a and Pair seeds, both dev pairs (`model16`) | `data36`, `data28`, `data37`, `data34` | GM12878 + HepG2 / K562 + H1: R1a mixtures and own tracks | fir | `2026-11-23_14`–`23` (R1a resumed in `2026-11-24_00`–`03`, `17`–`18`) | `*_train_{MIXR1A_NF,PAIR_NF}[_seed{2,3}]_{data36_mix_bal_GM12878_HepG2,data28_GM12878_HepG2,data37_mix_bal_K562_H1,data34_K562_H1}_200U_model16_uct_mid_8A_no_fire_msp_train04/Model_epoch_15.pt` | seeds 2, 3 (and 919 for K562 + H1); seed analysis §2b. R1a K562 + H1 has no ATAC target |
 
 ## 9. Ideas from the 30 Oct presentation review
 

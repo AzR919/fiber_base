@@ -3,7 +3,7 @@
 Current plan only. Details, the test catalogue (T1–T11), the comparison ladder, the implementation list, the
 backlog, ideas and the registry of trained models are in `TODO_extended.md`. Results go in the dated reports.
 
-## Where we stand (23 Nov)
+## Where we stand (24 Nov)
 
 - **Pipeline:** ENCODE fold-change tracks, region files, cell-specific and pairwise loci, per-fiber predictions at
   target BEDs (`molecule_predict.py`). Split v2: 4 dev cell types (GM12878, K562, HepG2, H1), 3 held out (H9,
@@ -20,11 +20,13 @@ backlog, ideas and the registry of trained models are in `TODO_extended.md`. Res
   - the mixture test on two pairs, one seed;
   - the first realism run (23 Nov): mixtures at one fixed share (R1a) lose nothing against the current ones (R0).
     R1a is now the mixture recipe.
+  - seed noise (24 Nov): R1a and pair models on both dev pairs × 3 seeds, every test.
 - **What the mixture test showed:** trained only on a pair's mixtures, the model separates that pair's molecules as
   well as a model trained on their own tracks. On a pair it never saw, the type of supervision doesn't matter;
   having seen the cell types does.
 - **Two problems to fix before claiming more:**
-  - Molecule readouts move 2–10× between training seeds. Claims need 3 seeds.
+  - Molecule readouts move 2–10× between training seeds. Claims need 3 seeds. Measured on 24 Nov: T3 and bulk
+    move ±0.005–0.02, but the CTCF footprint effect can vanish in a single seed.
   - The test set is no longer clean. The held-out cells and chr21 both entered decisions (ceiling fractions,
     ablation tables, the DEV4NF choice).
 
@@ -51,7 +53,18 @@ it has seen the sample's cell types.
   - R1a matches R0 on the T3 readouts (AUC 0.653 vs 0.654, differential r 0.352 vs 0.330) and is equal or better
     on bulk, level with the pair model;
   - the CTCF and X-inactivation tests keep their direction in every model;
-  - R1a's CTCF footprint effect is the smallest of the four (about 30–40% below DEV4NF): watch it across seeds.
+  - R1a's CTCF footprint effect is the smallest of the four (about 30–40% below DEV4NF). Across seeds, this ranking
+    is within noise.
+- **Seed noise** (24 Nov; 3 seeds, both dev pairs; `TODO_extended.md` §2b, "Seed noise"):
+  - **bulk:** R1a = Pair on own-track r and on mixture r for both pairs; R1a is above DEV4NF on HepG2, H1 and the
+    GM12878 + HepG2 mixture;
+  - **T3:** Pair is clearly above R1a on sign accuracy (+0.04 / +0.055) and differential r (+0.03 / +0.056).
+    There, R1a is at DEV4NF's level. The first run's "R1a ≈ Pair" was partly a lucky seed;
+  - **biology:** CTCF H1 passes in 11 of 12 R1a seed × cell cases (Pair 10 of 12; one Pair seed has no
+    footprint effect at all). XI holds in every model, with no clear differences;
+  - **story:** mixture supervision costs nothing on bulk accuracy. On the single-fiber differential signals it
+    reaches DEV4NF's level, not the pair model's;
+  - R1a K562 + H1 has no ATAC target (H1 has no ATAC), so leave out its ATAC-based readouts.
 - **R2 dropped** (one fixed share is enough). **R1b later, optional:** population target with multinomial counts,
   as a robustness check if a reviewer asks.
 - **Limitations, not runs:** synthetic mixtures combine two Fiber-seq libraries and two separate ChIP experiments;
@@ -59,10 +72,10 @@ it has seen the sample's cell types.
 
 **Stages:**
 1. **Write the protocol and success criteria down before running** (draft in `TODO_extended.md` §2).
-2. **Seed noise, next:** R1a and pair models on both dev pairs (GM12878 + HepG2, K562 + H1), DEV4NF's channels, 3
-   seeds each. Seed 919 of the GM12878 + HepG2 pair exists, so 10 new runs (~23 GPU-hours). Needs an R1a data and
-   eval config for K562 + H1.
-3. **Lock the recipe on the dev cells:**
+2. **Seed noise: done (24 Nov),** see above. Still to settle: the success criteria against these numbers
+   (`TODO_extended.md` §2f). Do sign accuracy and differential r count, or are they reported as the cost? Is CTCF
+   judged per seed or on the seed mean?
+3. **Lock the recipe on the dev cells (next):**
    - more of the 6 dev pairs, for the spread across pairs;
    - one 3-cell mixture;
    - the CTCF and X-inactivation tests on mixture-trained models (GM12878 in the mix for X inactivation).

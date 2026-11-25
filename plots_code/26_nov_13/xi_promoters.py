@@ -40,7 +40,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
-from abl_common import MODELS, SEEDS, molecule_dir, tag as out_tag
+from abl_common import MODELS, TRAIN_SEEDS, molecule_dir, tag as out_tag
 
 OUT = "plots/26_nov_13/molecules"
 MIN_FIBERS = 5
@@ -54,7 +54,7 @@ GROUPS = ["subject", "subject_cgi", "escape+par", "autosomal"]
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
-    p.add_argument("--seed", type=int, default=919, choices=SEEDS, help="training seed (output suffix _seed<n> if not 919)")
+    p.add_argument("--seed", type=int, default=919, choices=TRAIN_SEEDS, help="training seed (output suffix _seed<n> if not 919)")
     p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_tss_chrX_chr21)")
     p.add_argument("--out", default=OUT, help="output folder")
     return p.parse_args()

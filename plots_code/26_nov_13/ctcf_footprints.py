@@ -44,7 +44,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sm_stats import wilcoxon_p, mannwhitney_greater_p, spearman
-from abl_common import MODELS, SEEDS, molecule_dir, tag as out_tag
+from abl_common import MODELS, TRAIN_SEEDS, molecule_dir, tag as out_tag
 
 OUT = "plots/26_nov_13/molecules"
 MIN_AT, MIN_PER_CLASS = 4, 3
@@ -56,7 +56,7 @@ ASSAYS = ["atac", "h3k4me3", "h3k27ac", "h3k27me3", "h3k4me1", "h3k36me3", "h3k9
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="DEV4", choices=list(MODELS), help="abl_common.MODELS key (output suffix)")
-    p.add_argument("--seed", type=int, default=919, choices=SEEDS, help="training seed (output suffix _seed<n> if not 919)")
+    p.add_argument("--seed", type=int, default=919, choices=TRAIN_SEEDS, help="training seed (output suffix _seed<n> if not 919)")
     p.add_argument("--dir", default=None, help="molecule_predict output dir (default: the model's newest *_ctcf_sites_chr21)")
     p.add_argument("--exclude", default=None, help="file of site names to leave out, one per line (e.g. the sites "
                    "without bulk ChIP data, plots_code/26_nov_20/ctcf_holes.py)")
