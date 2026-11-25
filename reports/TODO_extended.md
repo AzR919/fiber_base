@@ -74,6 +74,10 @@ The open biological tests are in `TODO.md` §3; the main plan is §2 here and `T
 
 ## 2. Main plan (18 Nov): the mixture-trained model and a sealed test
 
+**Scope (user, 25 Nov):** this paper uses two cell types at a 0.5 share only. Real samples have more cell types at
+unequal, unknown shares. That is harder, goes to a follow-up paper, and the paper says so. No 3-cell mixtures (I28),
+no other shares, no more dev pairs.
+
 ### 2a. The claim and why
 
 - **The use case.** A tissue is a mixture of cell types. You can run Fiber-seq and ChIP on the same mixed sample,
@@ -274,8 +278,7 @@ Pair B means are over 7 assays (H1 has no ATAC). "Clear" = |Δ| > 2 SE and every
   stay at ~0.5. No model difference is clear. H3K27me3 is near or below 0.5 for every model, so it is unusable as an
   XI mark.
 - **Caveat:** R1a K562 + H1 has no ATAC target (data37), so its ATAC head is untrained. Its XI ATAC (0.43) and CTCF
-  H2 (which subtracts pred ATAC) mean nothing. Leave both out for that model. A 3-cell mixture needs cells with every
-  assay, or a per-assay mask.
+  H2 (which subtracts pred ATAC) mean nothing. Leave both out for that model.
 - **Reading for the story:** trained only on mixtures, R1a matches own-track supervision on bulk accuracy,
   including on mixtures. The cost is in single-fiber differential signals, where it reaches DEV4NF's level but not
   the pair model's.
@@ -293,9 +296,15 @@ Pair B means are over 7 assays (H1 has no ATAC). "Clear" = |Δ| > 2 SE and every
     enough CTCF sites and CGI promoters), e.g. chr18 or chr19;
   - the test is run once with the locked recipe and reported whatever it shows. The earlier use of the held-out
     cells on chr21 is stated in the paper.
-- **Held-out mixtures:** HCT116 + MCF-7 (the cleanest pair: different tissues, same Fiber-seq series); a 3-cell
-  mixture with H9. H9 and H1 are both embryonic stem cells, so H9 is less of a new cell type.
+- **Held-out mixture:** HCT116 + MCF-7 at a 0.5 share (the cleanest pair: different tissues, same Fiber-seq
+  series). ~~A 3-cell mixture with H9~~: dropped 25 Nov (scope: two cells, 0.5 share; §2, "Scope").
 - **Panc1** stays out (its sample identity is in doubt).
+- **Sealed X-inactivation cells (25 Nov).** Neither held-out cell works for XI: HCT116 has no Xi, and MCF-7's is
+  partial. Three other Fiber-seq lines in `DATA_FIBER/fiber_multi_cell/` have a clear Xi, haplotype tags (HiPhase
+  blocks) and no use so far: HG008_3E4, GM25455 (LCL) and HEK293T (`plots_code/26_nov_27/xi_cells_check.py`,
+  `plots/26_nov_27/xi_cells/`; numbers in `TODO.md` §3). They have no ENCODE tracks, but XI needs only fibers and
+  predictions. Score them once, in stage 5, with the HCT116 + MCF-7 model and DEV4NF. Neither has seen these cells.
+  Look at nothing in them before then beyond this Xi check.
 
 ### 2d. Comparisons
 
@@ -313,10 +322,18 @@ only difference.
 
 - **T3 readouts:** fiber-origin AUC, sign accuracy and differential r at the pair's differential bins; each cell's
   recovery of its own track, against the mixture track's recovery of it ("bulk on every molecule").
-- **More than 2 cells:** one-vs-rest fiber-origin AUC per cell, and each cell's own-track recovery.
+- ~~More than 2 cells~~ (out of scope, 25 Nov).
 - **Biology tests on mixture-trained models:** CTCF footprints on each cell's fibers (without the hole sites), and
-  X inactivation when GM12878 is in the mixture. "Trained on a mixture, the molecules still show the right
-  biology" is a stronger claim than separating cell types.
+  X inactivation. "Trained on a mixture, the molecules still show the right biology" is a stronger claim than
+  separating cell types.
+- **Which biology tests the sealed test can run (25 Nov):**
+  - on HCT116 and MCF-7 fibers (no phasing needed): CTCF footprints, CTCF × CpG methylation, poised vs Polycomb,
+    and nucleosome positioning at CTCF;
+  - X inactivation on the sealed XI cells (HG008_3E4, GM25455, HEK293T; §2c). Their phasing is in blocks, so the
+    Xi haplotype is set per block from the other genes' methylation in the block, leaving out the tested gene
+    (a change to the XI script);
+  - development-only showcases on GM12878: imprinted control regions per haplotype, Xi-specific CTCF
+    (DXZ4, FIRRE).
 - **Bulk guard:** mixture bulk r on the evaluation chromosome.
 
 ### 2f. Seeds and success criteria
@@ -329,7 +346,7 @@ only difference.
   3. the CTCF footprint and X-inactivation active-mark tests pass with mixture-only supervision, in all 3 seeds;
   4. on the sealed test, the model trained on the held-out mixture beats DEV4NF applied without retraining on
      fiber-origin AUC and differential r.
-- **Against stage 2 (24 Nov; to decide before stage 4):**
+- **Against stage 2 (24 Nov; deferred 25 Nov, one problem run per set; figures in `Nov_27.md` §4):**
   - Criterion 1 holds for own-track recovery. On AUC it holds for GM12878 + HepG2 and is borderline for K562 + H1
     (Δ 0.012, 2 SD of Pair = 0.012).
   - Sign accuracy and differential r fail it on both pairs. Decide whether they enter the criteria, or are
@@ -349,8 +366,8 @@ chained `RESUME=latest` job from the start. The last epoch also needs the final-
 | 2–3a | **Done (23 Nov):** R0, R1a, Pair on GM12878 + HepG2, seed 919, `model16`. R1a locked as the recipe (§2b, "Result and decision") | 3 |
 | 2 | **Done (24 Nov):** seed noise. R1a and Pair on both dev pairs, 3 seeds each; R1a = Pair on bulk, below it on sign accuracy and differential r (§2b, "Seed noise") | 10 new |
 | 3 | ~~Realism: R1a, R1b and R2~~ settled by the first run; R2 dropped, R1b optional later (one run per pair if needed) | 0–2 |
-| 4 | **Next.** Lock: more dev pairs (spread across pairs), one 3-cell dev mixture, biology tests on the mixture models | ~10–15 |
-| 5 | Sealed test: locked recipe on HCT116 + MCF-7 and a 3-cell held-out mixture, 3 seeds; DEV4NF without retraining | ~6 |
+| 4 | **Changed 25 Nov:** no more dev pairs or 3-cell mixture (recipe locked; more pairs would not change it). **Next:** hand-crafted baselines (T11) and the biology tests that also run on the held-out cells (§2e), on the dev models | 0 new main-model runs; baselines |
+| 5 | Sealed test: R1a on HCT116 + MCF-7, 3 seeds; DEV4NF without retraining; XI on HG008_3E4, GM25455, HEK293T | 3 |
 
 Implementation: I26–I31 (§5).
 
@@ -774,8 +791,8 @@ footprint call (`ctcf_footprints.py`); per-fiber predictions at target BEDs (I2,
 |---|---|---|---|
 | I26 | **(Later, optional; R1a locked 23 Nov)** **Population mixture target (R1b):** option `mix_target: population`, weights = each cell's expected share of the DNA at the position (π_c × local coverage / genome-wide coverage, renormalized), independent of the fibers sampled; fiber counts multinomial at the fixed share, redrawn (not capped) when one exceeds what is available | §2b R1b / R2 | `data_utils.py` mixed dataset, next to `mix_balance`; the current behaviour stays the default. Needs a per-cell coverage track (CN proxy) |
 | I27 | **(Dropped 23 Nov: R1a passed, R2 not needed)** **Several samples with fixed fractions:** option `mix_samples: [0.25, 0.5, 0.75]`; each window draws one sample, and fibers and target follow that sample's fraction | §2b R2 | Same place as I26 |
-| I28 | **Mixtures of more than 2 cell types:** fractions per cell (fixed or per sample), target over all cells; mixed eval and paired readouts generalized (one-vs-rest fiber-origin AUC, per-cell own-track recovery) | §2b, §2e | `mix_range` now needs exactly 2 cell types. Differential bins for n cells: per cell vs the rest |
-| I29 | **Sealed test chromosome:** pick it by fixed criteria, add its tiles / mini set to `regions_spec.yaml`, loci for the held-out pairs (and a held-out 3-cell set) on it, eval configs. Build, never evaluate until stage 5 | §2c | `build_regions.py`, `build_loci.py`, `loci_spec.yaml`. Also the CTCF-site and TSS target BEDs on it for the biology tests (held-out cells only at the end) |
+| I28 | **(Out of scope 25 Nov: two cells, 0.5 share in this paper; follow-up paper)** **Mixtures of more than 2 cell types:** fractions per cell (fixed or per sample), target over all cells; mixed eval and paired readouts generalized (one-vs-rest fiber-origin AUC, per-cell own-track recovery) | §2b, §2e | `mix_range` now needs exactly 2 cell types. Differential bins for n cells: per cell vs the rest |
+| I29 | **Sealed test chromosome:** pick it by fixed criteria, add its tiles / mini set to `regions_spec.yaml`, loci for the held-out pair (HCT116 + MCF-7) on it, eval configs. Build, never evaluate until stage 5 | §2c | `build_regions.py`, `build_loci.py`, `loci_spec.yaml`. Also the CTCF-site and TSS target BEDs on it for the biology tests (held-out cells only at the end) |
 | I30 | **3-seed runs and aggregation:** mixture / pair data configs with `model16`, `SEED` per run (exists in `slurm_batch_command.sh`), one script that collects the T3 readouts per pair × model × seed (mean ± sd) | §2f | Extend `mix_two_pairs.py` |
 | I31 | **Random-split noise floor:** one library's fibers split at random into two halves, scored like a pair | §2d floors, T3 | Left over from I1 |
 

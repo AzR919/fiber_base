@@ -67,22 +67,25 @@ it has seen the sample's cell types.
   - R1a K562 + H1 has no ATAC target (H1 has no ATAC), so leave out its ATAC-based readouts.
 - **R2 dropped** (one fixed share is enough). **R1b later, optional:** population target with multinomial counts,
   as a robustness check if a reviewer asks.
+- **Scope of this paper (user, 25 Nov): two cell types at a 0.5 share only.** Real samples have more cell types at
+  unequal, unknown shares. That is harder and goes to a follow-up paper; the paper says so. So no 3-cell mixtures
+  (I28) and no other shares here.
 - **Limitations, not runs:** synthetic mixtures combine two Fiber-seq libraries and two separate ChIP experiments;
-  a real sample has one of each.
+  a real sample has one of each. Fixed 0.5 share of two cells (above).
 
 **Stages:**
 1. **Write the protocol and success criteria down before running** (draft in `TODO_extended.md` §2).
-2. **Seed noise: done (24 Nov),** see above. Still to settle: the success criteria against these numbers
-   (`TODO_extended.md` §2f). Do sign accuracy and differential r count, or are they reported as the cost? Is CTCF
-   judged per seed or on the seed mean?
-3. **Lock the recipe on the dev cells (next):**
-   - more of the 6 dev pairs, for the spread across pairs;
-   - one 3-cell mixture;
-   - the CTCF and X-inactivation tests on mixture-trained models (GM12878 in the mix for X inactivation).
+2. **Seed noise: done (24 Nov),** see above. The success-criteria details (sign accuracy / differential r; CTCF
+   per seed) are deferred: one problem run per set (user, 25 Nov).
+3. **Recipe locked on the dev cells (25 Nov):** R1a, two cells, 0.5 share. No more dev pairs (user: they would not
+   change the scheme). Before the final test: the hand-crafted baselines (§2) and the biology tests that also run
+   on the held-out cells (§3).
 4. **Final test, once:**
-   - train with the locked recipe on held-out mixtures (HCT116 + MCF-7; a 3-cell one), 3 seeds;
+   - train with the locked recipe on the held-out mixture (HCT116 + MCF-7), 3 seeds;
    - score against each held-out cell's own track (used for scoring only) on the sealed chromosome;
-   - compare with DEV4NF applied without retraining.
+   - compare with DEV4NF applied without retraining;
+   - biology tests: CTCF footprints, CTCF × CpG and poised vs Polycomb on HCT116 / MCF-7 fibers; X inactivation
+     on HG008_3E4, GM25455 and HEK293T (unseen lines with a clear Xi, §3).
 
 **Comparisons:**
 - mixture vs pair model with the same cells and channels: does mixture supervision lose anything?
@@ -103,6 +106,36 @@ Careful: on the CTCF footprint test a footprint rule is the test's own label, so
 competitor.
 
 ## 3. Biological tests still open (T5)
+
+**Which tests can run on the sealed test (25 Nov).** Without phasing: CTCF footprints, CTCF × CpG methylation,
+poised vs Polycomb, nucleosome positioning at CTCF. X inactivation needs a female line with an Xi and haplotype
+tags. Check over 19 Fiber-seq lines (`plots_code/26_nov_27/xi_cells_check.py`, `plots/26_nov_27/xi_cells/`):
+- **Clear Xi, unseen by every model:** HG008_3E4 (chrX CGI promoters: 0.46 of fibers methylated, 76% of
+  promoters bimodal, XIST unmethylated on one haplotype only, 1.00 vs 0.05), GM25455 LCL (0.34, 67%, 0.83 vs 0.27),
+  HEK293T (0.28, 50%, 0.96 vs 0.28); GM25456 fibroblast weaker (0.25, 40%). These lines have Fiber-seq only
+  (no ENCODE tracks), but XI needs only fibers and predictions, so they can be the sealed XI test.
+- **Held-out pair:** HCT116 has no Xi (male; its chrX and chr21 are both hypermethylated). MCF-7 is partial and
+  messy (0.27, 33% bimodal; XIST unmethylated on one haplotype, but few fibers). H9 has the Xi methylation but has
+  mostly lost the unmethylated XIST (eroded Xi). Dev males / no Xi: K562, HepG2, H1.
+- **Phasing:** the other lines have HiPhase blocks (PS), ~2–3 CGI promoters per block on chrX, not chromosome-wide
+  like GM12878. The Xi haplotype has to be decided per block, e.g. from the other genes' methylation in the same
+  block (leave the tested gene out).
+
+**New tests to build on the dev cells, in order (25 Nov; the first three also run on the sealed test):**
+1. **CTCF × CpG methylation** (prof): methylated motif CpGs → fewer footprints in the data; among accessible fibers,
+   lower pred CTCF in the model. The per-fiber CTCF tables already hold motif CpG methylation (`cpg_meth_t`).
+2. **X inactivation with block phasing:** adapt the XI script to HiPhase blocks (Xi set per block, tested gene
+   left out). Check it on GM12878 by pretending its phasing is in blocks, so the sealed run needs no new code.
+3. **Poised vs Polycomb** (prof): genome fractions from bulk H3K4me3 / H3K27me3 (poised = +K4me3 +K27me3,
+   Polycomb = −K4me3 +K27me3), then per fiber split by CpG and MSP; do pred K4me3 / K27me3 follow? H1 is the
+   strongest dev case.
+4. **Nucleosome positioning at CTCF** (prof): phased flanking nucleosomes on footprinted fibers; does pred CTCF
+   follow? Needs per-position arrays (`--save_arrays`).
+5. GM12878-only showcases: imprinted control regions per haplotype (H19/IGF2: CTCF on the unmethylated allele),
+   Xi-specific CTCF (DXZ4, FIRRE).
+6. Later / if time: m6A ↔ CpG prediction from each other (prof); training for seed-stable per-fiber predictions
+   (prof's "identifiable models"; first, measure the agreement of per-fiber predictions between seeds); an adapter
+   on a pilot chromosome for experiment-specific artifacts.
 
 - **X inactivation follow-ups:**
   - restrict to genes expressed in GM12878 (RNA-seq): PTCHD1 suggests the H3K27me3 "failure" is partly
