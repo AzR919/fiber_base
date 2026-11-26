@@ -104,7 +104,12 @@ it has seen the sample's cell types.
 4. the network + the rung-2 feature channels.
 
 1 → 2 asks whether learning to combine the rules helps, 2 → 3 whether deep learning is needed, 3 → 4 whether the
-network already captures what the rules know. New CTCF specificity test: at footprints on other factors' motifs a
+network already captures what the rules know.
+
+**Status (25 Nov):** all four rungs built and run on fir, seed 919. Mixture r (chr21 mini, balanced mixture), GM12878 +
+HepG2 / K562 + H1: rules 0.32 / 0.23; MLP running / 0.36; R1a 0.62–0.63 / 0.52–0.53; network + features 0.62 / 0.53.
+Deep learning clearly needed; the features add nothing to the network. Seeds 2 and 3 of rungs 2 and 4 running
+(`2026-11-25_50`–`89`). Next: the full side-by-side (T3, bulk, CTCF, CpG flips) once they finish. New CTCF specificity test: at footprints on other factors' motifs a
 motif-free rule fires, but the network's CTCF should not. H3K36me3 with larger windows: proposed not now (25 Nov).
 Its poor pair-A result is likely a data limit; check the differential ceiling first.
 

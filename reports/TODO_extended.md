@@ -831,6 +831,22 @@ T5a held-out methylation with the no-CpG model.
     config `model24_rules`, `train05` (3 epochs, lr 1e-2), slurm cases `r1a_rules`, `r1a_rules_b` (`TRAIN=train05`;
     evals with `EPOCH=3`). Seed 919 submitted: `2026-11-25_37`–`44`. Repeats are the soft-mask for now (user,
     25 Nov: skip the RepeatMasker download, decide after the results). Implementation I24 (learned), I25 (rules).
+  - **First results, seed 919 (25 Nov, end-of-training mixture r on the chr21 mini balanced mixture, eval31 /
+    eval32):**
+
+    | Rung | GM12878 + HepG2 | K562 + H1 |
+    |---|---|---|
+    | 1 rules + calibration | 0.316 | 0.232 |
+    | 2 MLP on features | running (val r 0.465 at epoch 12) | 0.364 |
+    | 3 R1a (seeds 919 / 2 / 3) | 0.633 / 0.633 / 0.617 | 0.515 / 0.534 / 0.531 |
+    | 4 network + features | 0.620 | 0.529 |
+
+    Big steps up to the network, nothing from adding the features to it. Rung 1's calibration barely moves (val r
+    0.310 → 0.311): its score is the rules'. Evals and molecules done for rungs 1 and 4 (both pairs) and rung 2 B;
+    rung 2 A chain (`_46`–`49`) still running.
+  - **Seeds 2 and 3 of rungs 2 and 4 submitted (25 Nov):** both pairs, same chains, jobs `2026-11-25_50`–`89` on fir
+    (run prefixes `MIXR1A_MLP_seed<n>`, `MIXR1A_HC_seed<n>`). Rung 1 stays at one seed (16 parameters). Next: pull,
+    then the ladder side by side in the seed analysis (T3, bulk + ceiling, mixture r, CTCF footprints, CpG flips).
 
 ---
 

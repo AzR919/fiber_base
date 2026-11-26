@@ -5,6 +5,10 @@ what was done, the result in a line, and where the details are. Open work stays 
 
 ## 25 Nov
 
+- **Baseline ladder, first results (seed 919) and seeds 2 / 3 submitted:** mixture r (chr21 mini), GM12878 + HepG2 /
+  K562 + H1: rules 0.32 / 0.23, MLP on features (running) / 0.36, R1a 0.62–0.63 / 0.52–0.53, network + features
+  0.62 / 0.53. Deep learning is needed; the hand-crafted features add nothing to the network. Seeds 2 and 3 of rungs
+  2 and 4 on both pairs: `2026-11-25_50`–`89` on fir. `TODO_extended.md` T11.
 - **Baseline ladder, rung 1 built and submitted:** per-base annotation tracks (CGI, TSS ± 2 kb, gene body,
   soft-masked repeat, ZNF gene, CTCF motif; chr20 / 21 / 22 / X), the rule model `rules01` (fixed rules + 16
   calibration parameters) and the `ref_annot` loader option; seed 919 on both dev pairs (`2026-11-25_37`–`44`).
