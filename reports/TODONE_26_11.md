@@ -5,6 +5,13 @@ what was done, the result in a line, and where the details are. Open work stays 
 
 ## 27 Nov
 
+- **X inactivation with block phasing:** Xi set per HiPhase block from the other promoters' haplotype methylation,
+  tested gene left out. Validated on GM12878 with the block layouts of the sealed XI cells: Xi call right ≥ 0.995,
+  silenced-CGI result within 0.05 of chromosome-wide phasing in all 14 runs, ~200 of 425 genes called; escape + PAR
+  control read without an Xi call (|HP1 − HP2|), passes for 5 of 5 marks in every run. `Dec_04.md`
+  §3, `plots_code/26_dec_04/xi_blocks.py`, `xi_block_maps.py`.
+- **TODO "Where we stand" rewritten** for the current state (R1a as the main model, results so far, next steps).
+
 - **Bulk accuracy of every model compared** (DEV4NF, rules, MLP, R1a, R1a+F, Pair; per assay and cell, own track,
   ceiling fraction, MSE, mixture r): R1a = Pair (Pair lower MSE only), R1a slightly above DEV4NF (−0.01 to −0.03 r),
   R1a+F = R1a, MLP −0.13 to −0.18, rules −0.21 to −0.33. `Dec_04.md` §2, `plots_code/26_dec_04/bulk_models.py`.

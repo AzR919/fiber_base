@@ -4,32 +4,40 @@ Current plan only. Details, the test catalogue (T1–T11), the comparison ladder
 backlog, ideas and the registry of trained models are in `TODO_extended.md`. Results go in the dated reports. What
 has been finished, newest first: `TODONE_26_11.md` (one file per month).
 
-## Where we stand (24 Nov)
+## Where we stand (27 Nov)
 
 - **Pipeline:** ENCODE fold-change tracks, region files, cell-specific and pairwise loci, per-fiber predictions at
-  target BEDs (`molecule_predict.py`). Split v2: 4 dev cell types (GM12878, K562, HepG2, H1), 3 held out (H9,
-  HCT116, MCF-7), Panc1 separately. Train chr20, validation chr22, evaluation chr21.
-- **Main model: DEV4NF** (DEV4 without the FIRE channel, `model16`). Same bulk accuracy as DEV4, no bulk-assay
-  knowledge in the input, and the only model whose CTCF footprint response is strong and specific in both seeds
-  (`Nov_13.md`, `Nov_20.md`).
-- **Done:**
-  - input ablations (no FIRE, m6A + CpG, no accessibility, no CpG), 2 seeds each;
-  - ENCODE replicate ceiling;
-  - CTCF footprints (rerun without the motif sites that have no bulk data);
-  - X inactivation per haplotype at silenced CGI promoters;
-  - locus figures for both (`Nov_20_figs.md`);
-  - the mixture test on two pairs, one seed;
-  - the first realism run (23 Nov): mixtures at one fixed share (R1a) lose nothing against the current ones (R0).
-    R1a is now the mixture recipe.
-  - seed noise (24 Nov): R1a and pair models on both dev pairs × 3 seeds, every test.
-- **What the mixture test showed:** trained only on a pair's mixtures, the model separates that pair's molecules as
-  well as a model trained on their own tracks. On a pair it never saw, the type of supervision doesn't matter;
-  having seen the cell types does.
-- **Two problems to fix before claiming more:**
-  - Molecule readouts move 2–10× between training seeds. Claims need 3 seeds. Measured on 24 Nov: T3 and bulk
-    move ±0.005–0.02, but the CTCF footprint effect can vanish in a single seed.
-  - The test set is no longer clean. The held-out cells and chr21 both entered decisions (ceiling fractions,
-    ablation tables, the DEV4NF choice).
+  target BEDs (`molecule_predict.py`, with in-silico CpG flips). Split v2: 4 dev cell types (GM12878, K562, HepG2,
+  H1), 3 held out (H9, HCT116, MCF-7), Panc1 separately. Train chr20, validation chr22, evaluation chr21. Work runs
+  on fir (nibi down since 24 Nov).
+- **Main model of the paper: R1a,** DEV4NF's network (`model16`, no FIRE) trained only on balanced 0.5 mixtures of
+  two cells (`data36` GM12878 + HepG2, `data37` K562 + H1). Scope: two cells at a 0.5 share (user, 25 Nov). DEV4NF
+  (own tracks of the 4 dev cells) is the pretrained reference, Pair (own tracks of the pair) the ceiling.
+- **Done (details in `TODONE_26_11.md`):**
+  - input ablations, ENCODE replicate ceiling, CTCF footprints and X inactivation at silenced CGI promoters
+    (`Nov_13.md`, `Nov_20.md`);
+  - the mixture recipe R1a and its seed noise, 3 seeds on both dev pairs (`Nov_27.md` §1–3);
+  - CTCF × CpG methylation with in-silico flips (`Nov_27.md` §5);
+  - the baseline ladder: rules, MLP on hand-crafted features, network, network + features (`Nov_27.md` §6);
+  - poised vs Polycomb (`Dec_04.md` §1) and the bulk accuracy of every model (`Dec_04.md` §2);
+  - sealed X-inactivation cells chosen (HG008_3E4, GM25455, HEK293T; §3).
+- **What the results say so far:**
+  - **Mixture supervision costs nothing on bulk:** R1a = Pair on own-track and mixture r, slightly above DEV4NF.
+    On single-fiber differential signals (sign accuracy, differential r) Pair stays ahead; R1a is at DEV4NF's level.
+  - **The network is needed:** +0.16 mixture r over an MLP on hand-crafted features, and the only model with CTCF
+    footprints; adding the features to it changes nothing.
+  - **The biology holds with mixture-only supervision:** CTCF footprints, X inactivation of the active marks, CpG
+    methylation lowering active marks locally, and the split of poised regions into open (H3K4me3) and closed
+    (H3K27me3) molecules. Some of these (the CpG effects) a simple MLP learns too.
+  - **Known failures:** H3K27me3 on the Xi (predicted higher on the Xa) and H3K27me3 at H1's methylated Polycomb
+    domains: every model has learned "methylated → little H3K27me3".
+- **Still to keep in mind:**
+  - Molecule readouts move 2–10× between training seeds (the CTCF footprint effect can vanish in one seed), so every
+    claim uses 3 seeds.
+  - The dev test set is not clean: the held-out cells and chr21 entered decisions. Hence the sealed test (§1,
+    stage 4) on a fresh chromosome, run once.
+- **Next:** nucleosome positioning at CTCF (§3 #4), the CTCF specificity test and shuffle controls (§2); then pick
+  the sealed chromosome and run the sealed test. Block-phased XI is ready (§3 #2).
 
 ## 1. Main direction: the mixture-trained model (details: `TODO_extended.md` §2)
 
@@ -146,6 +154,10 @@ tags. Check over 19 Fiber-seq lines (`plots_code/26_nov_27/xi_cells_check.py`, `
    (`molecule_predict.py --perturb`).
 2. **X inactivation with block phasing:** adapt the XI script to HiPhase blocks (Xi set per block, tested gene
    left out). Check it on GM12878 by pretending its phasing is in blocks, so the sealed run needs no new code.
+   **Done 27 Nov** (`Dec_04.md` §3, `plots_code/26_dec_04/xi_blocks.py`): on GM12878 with the sealed cells' block
+   layouts, the Xi call is right ≥ 0.995, the silenced-CGI result within 0.05 of chromosome-wide (+0.02 on average),
+   coverage about half the genes (~200). The escape + PAR control (whose genes mostly get no call) is read without an
+   Xi call, as |HP1 − HP2| silenced vs escape: passes for 5 of 5 marks in every run. Ready for the sealed cells.
 3. **Poised vs Polycomb** (prof): genome fractions from bulk H3K4me3 / H3K27me3 (poised = +K4me3 +K27me3,
    Polycomb = −K4me3 +K27me3), then per fiber split by CpG and MSP; do pred K4me3 / K27me3 follow? H1 is the
    strongest dev case. **Defined 27 Nov** (`TODO_extended.md` T5g): 1 kb tiles, FC ≥ 2 marked / < 1 unmarked,

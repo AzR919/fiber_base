@@ -2,7 +2,8 @@
 
 Section 1 is a new biology test, poised vs Polycomb chromatin on single molecules (the professor's test, T5g).
 Section 2 compares the bulk accuracy of every model so far: DEV4NF, the R1a mixture model, the Pair model and the
-baseline ladder. Models and fiber terms (MSP, large MSP, protected, fiber methylation) are as in `Nov_27.md`
+baseline ladder. Section 3 adapts the X-inactivation test to block phasing for the sealed cells and validates it on
+GM12878. Models and fiber terms (MSP, large MSP, protected, fiber methylation) are as in `Nov_27.md`
 ("Models", "Fiber terms"). Everything is scored on chr21, the test chromosome. Plan and open items: `TODO.md` §3.
 
 ## 1. Poised vs Polycomb on single molecules (T5g, 27 Nov)
@@ -326,9 +327,82 @@ Bulk r per assay (own track), mean over seeds:
 - **Hardest assays for every model:** H3K9me3 (except in HepG2), CTCF in GM12878 / K562, H3K36me3 in H1 and H3K27me3
   in GM12878 (R1a r ≤ 0.35, ≤ 0.6 of the ceiling).
 
+## 3. X inactivation with block phasing (27 Nov)
+
+> **Question:** the sealed X-inactivation cells (HG008_3E4, GM25455, HEK293T) are phased in short HiPhase blocks,
+> not across the whole chromosome like GM12878. Can the XI test decide the inactive X block by block, from the fibers
+> alone, without biasing the result? Validated on GM12878 before the sealed cells are touched.
+
+**Rule** (fixed before looking; `plots_code/26_dec_04/xi_blocks.py`):
+- **Signal per promoter:** the mean fiber CpG methylation on HP2 minus on HP1. It uses promoters with ≥ 5 fibers
+  with a methylation call (≥ 3 covered CpGs) on each haplotype. Silenced CGI promoters count as they are (methylated
+  on the Xi); XIST counts negated (unmethylated on the Xi).
+- **Per tested gene:** average the signal over the other informative promoters in its block, leaving the tested gene
+  out so its own methylation never sets its Xi.
+  - average ≥ 0.2: Xi = HP2;
+  - average ≤ −0.2: Xi = HP1;
+  - otherwise no call, and the gene is dropped.
+- **Then the usual test:** per gene, Xa − Xi of each prediction; per group, the fraction of genes with the expected
+  sign (`Nov_20.md` §2).
+
+**Validation on GM12878:**
+- **Simulated blocks:** each GM12878 promoter is given the phase block it has in a sealed cell. Only the block layout
+  is read from the sealed cells, from their reads' HP / PS tags; not their methylation or predictions.
+- **Random swaps:** each block's HP labels are swapped at random, so the rule can't use GM12878's chromosome-wide
+  phase.
+- **Truth:** the chromosome-wide answer (Xi = HP2, from XIST).
+- **Runs:** all 14 model × seed runs of the XI test (DEV4NF, R1a and Pair on both pairs).
+- **Block layouts** (`xi_block_maps.py`): 177–241 blocks on chrX, median 2 promoters per block. 81–87% of the silenced
+  CGI promoters share a block with another one.
+
+![Block phasing vs chromosome-wide phasing on GM12878](../plots/26_dec_04/xi_blocks/xi_blocks.png)
+
+| Readout | Expected (fixed in advance) | Result (HG008_3E4 / GM25455 / HEK293T layouts) |
+|---|---|---|
+| Accuracy of the Xi call | ≥ 0.95 | 0.995 / 1.000 / 0.995 (every run) |
+| Same calls whatever the random swaps | yes | yes (no change over 5 draws) |
+| Coverage: silenced CGI genes called / scored chromosome-wide (425) | ≥ 0.5 | **0.45** / 0.52 / **0.49** (193 / 221 / 210 genes) |
+| Silenced CGI, fraction with the expected sign: block − chromosome-wide | within ± 0.05 | +0.006 to +0.046, every run inside |
+| chr21 null, random orientation per block | ≈ 0.5 | 0.46–0.56 |
+| chr21 by the rule | no calls (no allele-specific methylation) | 0 genes called |
+| Escape control without an Xi call: silenced > escape + PAR on \|HP1 − HP2\| (added after the first run) | as chromosome-wide (5 of 5 marks) | 5 of 5 marks, p < 0.05, in every run and layout |
+
+- **The Xi call is right** whenever the rule makes one (≥ 0.995), and it doesn't depend on how the labels were
+  swapped.
+- **The test result carries over.** The silenced-CGI readout is within 0.05 of the chromosome-wide one for every model
+  and seed (left panel); per mark the differences are ≤ 0.05 too.
+- **But it reads slightly higher (+0.02 on average, never lower).** The called genes sit in blocks whose neighbours
+  are clearly methylated on one haplotype, i.e. in well-silenced regions, so the selection favours cleaner genes. Read
+  the sealed-cell numbers with this in mind; the comparison between models on the same genes is unaffected.
+- **Coverage is about half, just under the 0.5 expected for two of three layouts:**
+  - 55–74 genes are alone in their block, so they have no neighbour to call from;
+  - 130–159 genes are in blocks whose other silenced promoters show no methylation difference between haplotypes
+    (average signal mostly within ±0.1). Those can't be called by any margin; a looser margin would only add
+    errors.
+
+  That still leaves about 200 silenced CGI genes per cell for the sealed test.
+- **The escape + PAR control needs a version without an Xi call.** By the rule, only 1–8 escape + PAR genes get a call
+  (33 chromosome-wide): they cluster in blocks without silenced neighbours.
+  - Its question (do escape genes differ less between the two copies?) doesn't need to know which copy is the Xi.
+  - Added (27 Nov, after the first run): per gene |HP1 − HP2| of each prediction, silenced CGI vs escape + PAR, one-sided
+    Mann-Whitney per mark, on every phased gene (H2 of the original test).
+  - **Result:** it keeps 412–419 silenced and 32–33 escape + PAR genes, and passes for all 5 marks (p < 0.05) in all
+    14 runs and all three layouts, as chromosome-wide. Median |HP1 − HP2| is larger for silenced genes by 1.5–9×,
+    least for H3K9me3 (e.g. H3K4me3 0.44–1.06 vs 0.09–0.17).
+
+  `xi_blocks_escape.tsv`.
+
+**Ready for the sealed cells:**
+- **Inputs:** `xi_blocks.py` needs only those cells' molecule outputs at `tss_chrX_chr21` (`molecule_predict.py`, no
+  new code) and their block maps (already made).
+- **Readouts there:**
+  - silenced CGI genes with the block rule;
+  - escape + PAR vs silenced by |HP1 − HP2|;
+  - chr21 with a random orientation per block as the null.
+
 ## Next steps
 
 - When `2026-11-25_82` / `_87` finish: rerun `ladder.py --step summary` and `bulk_models.py` (R1a+F at 3 seeds).
 - Poised vs Polycomb on the sealed test (HCT116 + MCF-7) with the same script.
-- Remaining biology tests on the dev models (`TODO.md` §3): block-phased XI, nucleosome positioning at CTCF, the CTCF
-  specificity test.
+- Remaining biology tests on the dev models (`TODO.md` §3): nucleosome positioning at CTCF, the CTCF specificity
+  test.
