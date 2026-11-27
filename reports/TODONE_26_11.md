@@ -5,6 +5,13 @@ what was done, the result in a line, and where the details are. Open work stays 
 
 ## 27 Nov
 
+- **Bulk accuracy of every model compared** (DEV4NF, rules, MLP, R1a, R1a+F, Pair; per assay and cell, own track,
+  ceiling fraction, MSE, mixture r): R1a = Pair (Pair lower MSE only), R1a slightly above DEV4NF (−0.01 to −0.03 r),
+  R1a+F = R1a, MLP −0.13 to −0.18, rules −0.21 to −0.33. `Dec_04.md` §2, `plots_code/26_dec_04/bulk_models.py`.
+- **Poised vs Polycomb (T5g) results:** poised tiles are unmethylated CGIs with about half their fibers open; the
+  networks give the open fibers H3K4me3 and the closed ones H3K27me3 and lower H3K27me3 on methylated fibers (also
+  in silico); they match the bulk track's class separation except at H1's methylated Polycomb domains; the rules
+  miss Polycomb-only domains. `Dec_04.md` §1, `plots/26_dec_04/poised/`.
 - **Poised vs Polycomb (T5g) defined and started:** 1 kb tiles classed from bulk H3K4me3 / H3K27me3 (FC ≥ 2 marked,
   < 1 unmarked), tests D1–D2, M1–M3, C. Genome fractions: poised 0.77% of autosomal tiles in H1 vs 0.05–0.14% in
   the other dev lines; Polycomb the other way round (1.9% vs 3.8–4.2%). New `build_targets.py --sets poised`,

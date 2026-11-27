@@ -593,6 +593,17 @@ model, with a known expected difference written down before running, and a null.
   - **Models:** DEV4NF (2 seeds), R1a and Pair (3 seeds, both pairs); the ladder's rules and MLP as references (the
     rules model contains "closed, unmethylated CGI → H3K27me3"). H1 (pair B) is the strongest case.
   - **Sealed test:** the same script on HCT116 + MCF-7; their bulk tracks only define the classes.
+  - **Result (27 Nov, `Dec_04.md` §1):**
+    - D1: H1 poised 0.77% of autosomal tiles vs 0.05–0.14% in the other lines.
+    - D2: poised tiles are unmethylated CGIs, about half their fibers open at every tile.
+    - M1: the networks match the bulk track's class separation except H3K27me3 at H1's methylated Polycomb domains
+      (AUC 0.45–0.61); the rules miss Polycomb-only domains entirely.
+    - M2: at poised tiles, open fibers get more H3K4me3 and less H3K27me3; methylated fibers get less H3K27me3.
+    - M3: negative per-tile correlation at poised tiles, i.e. the model predicts the two marks on different
+      molecules.
+    - C: methylating lowers H3K27me3, also from 1.5 kb away; the MLP shows it too.
+    - The planned main readout (H3K4me3 poised > Polycomb) doesn't separate models: every model is at 0.87–0.99.
+    - Limit: outside H1, only 17–34 poised tiles.
 - **Status.** T5b and T5e done (`Nov_20.md`). Open: T5a (in-silico flips, held-out methylation), T5c, T5d, T5f,
   and the T5b follow-ups above (`TODO.md` §3).
 

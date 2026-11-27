@@ -112,7 +112,8 @@ network already captures what the rules know.
 - **3 → 4:** the features add nothing; CTCF footprint effect slightly weaker with them.
 - Rules help only where the annotation is the signal (H3K36me3 / gene bodies, H3K4me3 / CGIs), still below the
   network. The MLP shows the CpG-flip effect too, so section 5's claim doesn't separate the network from simple models.
-- Open: rerun `ladder.py --step summary` when the rung-4 seed-3 evals finish (`2026-11-25_82`, `_87`); the CTCF
+- Open: rerun `ladder.py --step summary` and `plots_code/26_dec_04/bulk_models.py` (`Dec_04.md` §2) when the rung-4
+  seed-3 evals finish (`2026-11-25_82`, `_87`); the CTCF
   specificity test (at footprints on other factors' motifs a motif-free rule fires, but the network's CTCF should
   not); shuffle controls (T7: shuffled inputs across fibers or loci should break the per-fiber predictions);
   RepeatMasker for the H3K9me3 rule (user: decide after the results).
@@ -148,8 +149,10 @@ tags. Check over 19 Fiber-seq lines (`plots_code/26_nov_27/xi_cells_check.py`, `
 3. **Poised vs Polycomb** (prof): genome fractions from bulk H3K4me3 / H3K27me3 (poised = +K4me3 +K27me3,
    Polycomb = −K4me3 +K27me3), then per fiber split by CpG and MSP; do pred K4me3 / K27me3 follow? H1 is the
    strongest dev case. **Defined 27 Nov** (`TODO_extended.md` T5g): 1 kb tiles, FC ≥ 2 marked / < 1 unmarked,
-   tests D1–D2 (data), M1–M3 (model), C (CpG flips); DEV4NF, R1a, Pair, rules, MLP. Targets built (2,755 chr21 tiles; poised genome fraction H1 0.77% vs
-   0.05–0.14% in the other lines); molecule runs `2026-11-27_02`–`25` on fir; then `plots_code/26_dec_04/poised.py`.
+   tests D1–D2 (data), M1–M3 (model), C (CpG flips); DEV4NF, R1a, Pair, rules, MLP. **Done 27 Nov**
+   (`Dec_04.md` §1): poised tiles are unmethylated CGIs with about half their fibers open; the networks give the open
+   fibers H3K4me3 and the closed ones H3K27me3, and lower H3K27me3 on methylated fibers. Weak spot: H1's methylated
+   Polycomb domains. Rerun on HCT116 / MCF-7 in the sealed test.
 4. **Nucleosome positioning at CTCF** (prof): phased flanking nucleosomes on footprinted fibers; does pred CTCF
    follow? Needs per-position arrays (`--save_arrays`).
 5. GM12878-only showcases: imprinted control regions per haplotype (H19/IGF2: CTCF on the unmethylated allele),

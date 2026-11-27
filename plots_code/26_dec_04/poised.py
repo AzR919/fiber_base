@@ -15,7 +15,8 @@ D1  genome fractions per cell and class (all autosomes, bulk only), and the shar
 D2  fiber states per class (data; the fibers are the same for every model): fraction methylated, open, per group;
     per-tile open fraction (tiles with >= 10 fibers): median and the share of tiles in [0.2, 0.8] (a mix of molecules)
 M1  tile-mean predictions (tiles with >= 5 fibers): AUC between classes, main readout poised vs polycomb on pred
-    H3K4me3; Spearman of tile-mean pred vs bulk (asinh FC) over the target tiles
+    H3K4me3; Spearman of tile-mean pred vs bulk (asinh FC) over the target tiles. Reference (model 'Bulk'): the same
+    AUCs and class means from the bulk tracks on the same tiles
 M2  within each class, per tile: pred(open) - pred(closed) among unmethylated fibers, pred(meth) - pred(unmeth) among
     closed fibers; >= 3 fibers per group; median over tiles, Wilcoxon
 M3  per tile (>= 10 fibers), Spearman across fibers of pred H3K4me3 vs pred H3K27me3; median over tiles
@@ -56,7 +57,8 @@ RUNS = [("DEV4NF", "noFIRE", "A", [919, 2]), ("DEV4NF", "noFIRE", "B", [919, 2])
         ("MLP", "mlpA", "A", [919, 2, 3]), ("MLP", "mlpB", "B", [919, 2, 3]),
         ("Rules", "rulesA", "A", [919]), ("Rules", "rulesB", "B", [919])]
 ORDER = ["Rules", "MLP", "R1a", "Pair", "DEV4NF"]
-COL = {"Rules": "#9e9e9e", "MLP": "#4a90d9", "R1a": "#eb6834", "Pair": "#1baf7a", "DEV4NF": "#606060"}
+COL = {"Rules": "#9e9e9e", "MLP": "#4a90d9", "R1a": "#eb6834", "Pair": "#1baf7a", "DEV4NF": "#606060",
+       "Bulk": "#000000"}
 CLS_COL = {"active": "#d62728", "poised": "#9467bd", "polycomb": "#1f77b4", "neither": "#bdbdbd"}
 AUC_PAIRS = [("h3k4me3", "active", "poised"), ("h3k4me3", "poised", "polycomb"), ("h3k4me3", "active", "polycomb"),
              ("h3k27me3", "poised", "active"), ("h3k27me3", "polycomb", "active"), ("h3k27me3", "poised", "polycomb")]
@@ -150,6 +152,23 @@ def part_d2(tables, tag=""):
 
 
 # ---------------------------------------------------------------- M: model on real fibers
+def part_bulk(df, sample):
+    """M1 readouts from the bulk tracks themselves (asinh FC) on the same tiles (>= MIN_TILE fibers): the reference
+    the predictions are read against (model 'Bulk')."""
+    tm = df.groupby("target").agg(cls=("cls", "first"), n=("read", "size"), k4=("bulk_k4", "first"),
+                                  k27=("bulk_k27", "first"))
+    tm = tm[tm.n >= MIN_TILE]
+    base = {"model": "Bulk", "seed": 0, "sample": sample}
+    rows = []
+    for assay, a, b in AUC_PAIRS:
+        col = "k4" if assay == "h3k4me3" else "k27"
+        rows.append({**base, "readout": f"auc_{assay}_{a}>{b}", "value": auc(tm[tm.cls == a][col], tm[tm.cls == b][col])})
+    for cls in CLASSES:
+        for col in ["k4", "k27"]:
+            rows.append({**base, "readout": f"mean_{col}_{cls}", "value": tm[tm.cls == cls][col].mean()})
+    return rows
+
+
 def part_m(df, label, seed, sample):
     m1, m2, m3 = [], [], []
     tm = df.groupby("target").agg(cls=("cls", "first"), n=("read", "size"), k4=("pred_h3k4me3", "mean"),
@@ -256,10 +275,15 @@ def figures(d1, d2, m1, m2, m3, c):
                 v = q[q.readout == r].value
                 ax.scatter(np.full(len(v), i + (j - 2) * 0.13), v, color=COL[lab], s=14,
                            label=lab if i == 0 and len(v) else None)
+        for i, r in enumerate(reads):
+            v = sub[(sub.model == "Bulk") & (sub.readout == r)].value
+            if len(v):
+                ax.hlines(v.iloc[0], i - 0.35, i + 0.35, color=COL["Bulk"], lw=1.5,
+                          label="bulk track (reference)" if i == 0 else None)
         ax.axhline(0.5, color="k", lw=0.6, ls="--")
         ax.set_ylabel(f"{cell_of(s)}\nAUC")
-        ax.set_ylim(0.2, 1.0)
-    axes[0].legend(fontsize=7, ncol=5)
+        ax.set_ylim(0.0, 1.02)
+    axes[0].legend(fontsize=7, ncol=6)
     axes[-1].set_xticks(range(len(reads)), [r.replace("auc_", "").replace("h3k", "K") for r in reads], rotation=20)
     fig.suptitle("M1: tile-mean predictions separate the bulk classes")
     fig.tight_layout()
@@ -326,6 +350,9 @@ def main():
     d2b, _ = part_d2(tables3, "FC>=3")
     d2 = pd.concat([d2, d2b], ignore_index=True)
     m1, m2, m3, c = [], [], [], []
+    for s in tables:
+        m1 += part_bulk(tables[s], s)
+        m1 += [{**r, "readout": r["readout"] + "@FC3"} for r in part_bulk(tables3[s], s)]
     for label, key, pair, seeds in RUNS:
         for seed in seeds:
             for sample in PAIRS[pair]:
@@ -360,6 +387,7 @@ def main():
     print("\n=== D2 fiber states per class (DEV4NF seed 919 fibers) ===")
     print(d2.round(3).to_string(index=False))
     print("\n=== M1 (mean over seeds) ===")
+    print("(Bulk = the bulk tracks on the same tiles: the reference)")
     print(s1[~s1.readout.str.startswith("mean_")].pivot_table(index=["sample", "readout"], columns="model",
                                                                 values="mean").round(3))
     print("\n=== M1 tile means of pred (mean over seeds) ===")
