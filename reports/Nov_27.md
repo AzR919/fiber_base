@@ -3,7 +3,8 @@
 The mixture-trained model, from the choice of mixture recipe to its seed noise. Section 1 is the recipe (R1a),
 section 2 its first run on one pair, section 3 three training seeds on both dev pairs, section 4 the two decisions
 on the success criteria that the seed results raise (deferred 25 Nov), section 5 a new biology test, CTCF × CpG
-methylation. Plan and open items: `TODO.md` §1, `TODO_extended.md` §2.
+methylation, section 6 the baseline ladder (rules, a small MLP on hand-crafted features, the network, the network +
+features). Plan and open items: `TODO.md` §1, `TODO_extended.md` §2.
 
 ## Models
 
@@ -248,6 +249,99 @@ Script `plots_code/26_nov_27/ctcf_cpg.py` (job `ctcf_cpg.sh`), outputs in `plots
   each assay's change by its spread before comparing CTCF with ATAC; HCT116 in the sealed test, whose genome is
   hypermethylated, gives many more methylated fibers at bound sites.
 
+## 6. Baseline ladder: is the network needed? (T11, 25–26 Nov)
+
+> **Question:** "the model just reads the fiber" can't be argued away, but it can be measured. Do simple models with
+> the same inputs and the same supervision do as well? And does the network already know what hand-crafted features
+> carry?
+
+Every rung is trained like R1a (mixtures of the pair, share 0.5, balanced stacks, `train04`) on both dev pairs and
+scored with the same evals and molecule tests:
+
+| Rung | Model | Inputs | Parameters | Seeds |
+|---|---|---|---|---|
+| 0 | floor (dashed lines: AUC / sign accuracy 0.5, differential r 0) | – | – | – |
+| 1 | **Rules:** fixed per-assay rules, only a calibration Softplus(a·s + b) per assay trained (`model24`, `train05`) | fiber + annotations (CGI, TSS, gene body, repeats, ZNF genes, CTCF motif) | 16 | 919 |
+| 2 | **MLP** on 31 hand-crafted per-position features (fiber summaries in 3 windows, large-MSP distances, footprints, GC / CpG density) (`model22`) | fiber + DNA, no annotations | 6.7 k | 3 |
+| 3 | **R1a**, DEV4NF's network (`model16`) | fiber + DNA | – | 3 |
+| 4 | **R1a+F:** the network with the 31 features as extra input channels (`model23`) | fiber + DNA + features | 0.66 M | 3 (seed 3 evals pending) |
+| ref | Pair (own tracks, the ceiling) | fiber + DNA | – | 3 |
+
+Rung 2 → 3 asks whether deep learning is needed, rung 3 → 4 whether the network already has what the features carry.
+"MSP" in the rules and features means a large MSP (a run ≥ 151 bp): fibertools MSPs include linkers, so any MSP is
+almost everywhere. Script `plots_code/26_nov_27/ladder.py`; tables and figures in `plots/26_nov_27/ladder/`.
+
+### Bulk and T3
+
+![Ladder, bulk accuracy](../plots/26_nov_27/ladder/ladder_bulk.png)
+
+![Ladder, T3 readouts](../plots/26_nov_27/ladder/ladder_t3.png)
+
+Mean over seeds (Rules one seed); A = GM12878 + HepG2, B = K562 + H1:
+
+| | Rules | MLP | R1a | R1a+F | Pair |
+|---|---|---|---|---|---|
+| mixture r, A / B | 0.32 / 0.23 | 0.47 / 0.36 | **0.63 / 0.53** | 0.62 / 0.53 | 0.63 / 0.53 |
+| fraction of ceiling, GM12878 / K562 | 0.34 / 0.28 | 0.45 / 0.41 | **0.64 / 0.65** | 0.64 / 0.64 | 0.65 / 0.66 |
+| AUC, A / B | 0.54 / 0.50 | 0.62 / 0.60 | **0.64 / 0.66** | 0.64 / 0.64 | 0.65 / 0.68 |
+| sign accuracy, A / B | 0.60 / 0.38 | 0.76 / 0.71 | 0.75 / **0.79** | 0.77 / 0.74 | 0.80 / 0.84 |
+| differential r, A / B | 0.13 / 0.04 | 0.27 / 0.14 | **0.34 / 0.27** | 0.33 / 0.26 | 0.37 / 0.33 |
+| library \|AUC − 0.5\|, A / B | 0.03 / 0.03 | 0.05 / 0.07 | 0.05 / 0.06 | 0.05 / 0.06 | 0.05 / 0.06 |
+
+- **2 → 3, deep learning is needed.** R1a is above the MLP on mixture r by 0.16 on both pairs (z ≈ 28), on the
+  fraction of the replicate ceiling by about 0.2, and clearly on AUC and differential r (+0.07 / +0.14). The one tie
+  is sign accuracy on pair A (0.76 vs 0.75). On pair B the MLP also reacts more to the library (0.072 vs 0.060).
+- **3 → 4, the features add nothing.** R1a+F equals R1a on every bulk and T3 readout within seed noise. The only
+  clear differences go the other way: a lower AUC on pair B (−0.03, two seeds so far) and a weaker CTCF footprint
+  effect (below).
+- **Rules** are far below everything learned (mixture r about half of R1a's), even with the annotations.
+- R1a vs Pair: the gaps of section 3 (sign accuracy, differential r), level on bulk.
+
+### Per assay
+
+![Ladder, per assay](../plots/26_nov_27/ladder/ladder_assays.png)
+
+- **Mixture r:** the network beats both simple rungs on every assay. The MLP comes closest on ATAC (0.75 vs 0.83 on
+  pair A) and is furthest behind on H3K27me3, H3K4me1 and H3K9me3.
+- **Where an annotation carries the signal, rules beat the MLP:** H3K36me3 on pair A (0.49 vs 0.44, gene bodies) and
+  H3K4me3 on pair B (0.56 vs 0.52, CpG islands). The network gets there without the annotation (0.61, 0.70).
+- **Sign accuracy needs differential r beside it.** The MLP beats R1a on CTCF in pair B (0.74 vs 0.40) and on H3K9me3
+  in pair A (0.71 vs 0.33), R1a's two weak spots. For CTCF the MLP's differential r is negative (−0.07): it calls one
+  cell higher almost everywhere rather than reading the sites. For H3K9me3 its differential r is a little higher
+  than R1a's (0.31 vs 0.25), so that one is a real R1a weakness (Pair: 0.30).
+
+### Molecule tests
+
+![Ladder, biology tests](../plots/26_nov_27/ladder/ladder_bio.png)
+
+![Ladder, CpG flips](../plots/26_nov_27/ladder/ladder_flips.png)
+
+- **CTCF footprints, only the network has them.** H1 (footprint − open pred CTCF at bound sites): MLP −0.02 to
+  −0.35 on all four cells, even though a footprint feature is among its inputs; R1a 0.5–0.9. Adding the features to
+  the network weakens it (pair A GM12878: 0.58 vs 0.87, clear; K562: 0.07 vs 0.51). Rules have the largest effect
+  (2.1–2.5), but their CTCF rule is the footprint, the test's own label, so that is a ceiling, not a competitor.
+- **CpG flips: the MLP shows the same direction.** Methylating the motif ± 100 bp lowers its pred CTCF,
+  unmethylating raises it, flips 1.5 kb away do nothing; its H3K4me3 drop is 3–7× the network's. Rules give 0 by
+  construction (their CTCF and ATAC rules don't use methylation). So "local CpG methylation lowers active marks"
+  (section 5) is what the data teach even a simple model with CpG summaries; it is not evidence that the network
+  learned more.
+- **XI** (silenced CGI promoters on GM12878 fibers): 0.64–0.79 for every rung with overlapping seeds; it does not
+  separate the rungs.
+
+### Outcome
+
+- The network is needed: about 0.16 more mixture r than a small model on hand-crafted features, clearly better
+  cell separation, and it is the only rung with CTCF footprints.
+- It already captures what the hand-crafted features carry: adding them changes nothing, or makes things slightly
+  worse.
+- Rules with annotations do well only where the annotation is the signal (gene bodies for H3K36me3, CpG islands for
+  H3K4me3), and still below the network.
+- Against the expected results fixed before the runs (`TODO_extended.md` T11): the direction held everywhere, but
+  the simple rungs did worse than predicted on ATAC and H3K4me3, where we expected them to come close (ATAC: rules
+  0.67, MLP 0.75 vs 0.83; H3K4me3: MLP 0.34 vs 0.54 on pair A). The MLP's missing footprint effect was not predicted.
+- Not yet: the CTCF specificity test (footprints at other factors' motifs), RepeatMasker for the H3K9me3 rule (the
+  soft-mask for now), and the rung-4 seed-3 evals (`2026-11-25_82`, `_87`; the summary is rerun when they finish).
+
 ## Infrastructure (23–24 Nov)
 
 - **Two clusters:** work moves between nibi and fir, whichever is up. `misc/cluster.sh` does every transfer
@@ -258,8 +352,9 @@ Script `plots_code/26_nov_27/ctcf_cpg.py` (job `ctcf_cpg.sh`), outputs in `plots
 
 ## Next steps
 
-- Settle the two decisions above and finalize the success criteria (`TODO_extended.md` §2f).
-- Stage 4, lock the recipe on the dev cells: more dev pairs (the spread across pairs), one 3-cell mixture (needs
-  cells with every assay, or a per-assay mask, since H1 has no ATAC), the biology tests on those models.
-- Then the sealed test, once: R1a on held-out mixtures (HCT116 + MCF-7, a 3-cell one), 3 seeds, against DEV4NF
-  without retraining.
+- Scope (25 Nov): two cell types at a 0.5 share in this paper; the recipe is locked, no more dev pairs, no 3-cell
+  mixture. The success-criteria decisions above are deferred.
+- More biology tests on the dev models: block-phased XI, poised vs Polycomb, nucleosome positioning at CTCF, the CTCF
+  specificity test (`TODO.md` §3).
+- Then the sealed test, once: R1a on HCT116 + MCF-7, 3 seeds, against DEV4NF without retraining, and XI on the sealed
+  X-inactivation cells (HG008_3E4, GM25455, HEK293T).

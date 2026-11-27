@@ -16,14 +16,26 @@ MODELS = {
     # the same two on the second dev pair, K562 + H1 (seed runs, 23-24 Nov)
     "mixR1aB": "MIXR1A_NF_data37_mix_bal_K562_H1_200U_model16_uct_mid_8A_no_fire_msp_train04",
     "pairNFB": "PAIR_NF_data34_K562_H1_200U_model16_uct_mid_8A_no_fire_msp_train04",
+    # baseline ladder (TODO_extended.md T11, 25 Nov), R1a supervision: rung 1 rules, rung 2 MLP on hand-crafted
+    # features, rung 4 DEV4NF's network + those features; A = GM12878 + HepG2, B = K562 + H1
+    "rulesA": "MIXR1A_RULES_data36_mix_bal_GM12878_HepG2_200U_model24_rules_train05",
+    "rulesB": "MIXR1A_RULES_data37_mix_bal_K562_H1_200U_model24_rules_train05",
+    "mlpA": "MIXR1A_MLP_data36_mix_bal_GM12878_HepG2_200U_model22_mlp_handcrafted_train04",
+    "mlpB": "MIXR1A_MLP_data37_mix_bal_K562_H1_200U_model22_mlp_handcrafted_train04",
+    "hcA": "MIXR1A_HC_data36_mix_bal_GM12878_HepG2_200U_model23_uct_mid_8A_no_fire_msp_handcrafted_train04",
+    "hcB": "MIXR1A_HC_data37_mix_bal_K562_H1_200U_model23_uct_mid_8A_no_fire_msp_handcrafted_train04",
 }
 FLAGS = {"DEV4": [1, 1, 1, 1, 1], "noFIRE": [1, 1, 1, 1, 0], "m6aCpG": [1, 1, 0, 0, 0], "noAcc": [0, 1, 0, 0, 0],
          "noCpG": [1, 0, 1, 1, 1], "mixR0": [1, 1, 1, 1, 0], "mixR1a": [1, 1, 1, 1, 0], "pairNF": [1, 1, 1, 1, 0],
-         "mixR1aB": [1, 1, 1, 1, 0], "pairNFB": [1, 1, 1, 1, 0]}
+         "mixR1aB": [1, 1, 1, 1, 0], "pairNFB": [1, 1, 1, 1, 0],
+         **{k: [1, 1, 1, 1, 0] for k in ["rulesA", "rulesB", "mlpA", "mlpB", "hcA", "hcB"]}}
 NAMES = {"DEV4": "DEV4 (all inputs)", "noFIRE": "no FIRE", "m6aCpG": "m6A + CpG", "noAcc": "no accessibility",
          "noCpG": "no CpG", "mixR0": "R0 mixture (GM12878 + HepG2)", "mixR1a": "R1a mixture (GM12878 + HepG2)",
          "pairNF": "pair (GM12878 + HepG2, own tracks)", "mixR1aB": "R1a mixture (K562 + H1)",
-         "pairNFB": "pair (K562 + H1, own tracks)"}
+         "pairNFB": "pair (K562 + H1, own tracks)",
+         "rulesA": "rules (GM12878 + HepG2)", "rulesB": "rules (K562 + H1)", "mlpA": "MLP on features (GM12878 + HepG2)",
+         "mlpB": "MLP on features (K562 + H1)", "hcA": "network + features (GM12878 + HepG2)",
+         "hcB": "network + features (K562 + H1)"}
 
 
 # Training seeds: 919 (the default, runs above) and 2 (second seed, 11 Nov; slurm_batch_command.sh SEED=2 puts

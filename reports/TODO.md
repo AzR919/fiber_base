@@ -106,23 +106,19 @@ it has seen the sample's cell types.
 1 → 2 asks whether learning to combine the rules helps, 2 → 3 whether deep learning is needed, 3 → 4 whether the
 network already captures what the rules know.
 
-**Status (25 Nov):** all four rungs built and run on fir, seed 919. Mixture r (chr21 mini, balanced mixture), GM12878 +
-HepG2 / K562 + H1: rules 0.32 / 0.23; MLP running / 0.36; R1a 0.62–0.63 / 0.52–0.53; network + features 0.62 / 0.53.
-Deep learning clearly needed; the features add nothing to the network. Seeds 2 and 3 of rungs 2 and 4 running
-(`2026-11-25_50`–`89`). Next: the full side-by-side (T3, bulk, CTCF, CpG flips) once they finish. New CTCF specificity test: at footprints on other factors' motifs a
-motif-free rule fires, but the network's CTCF should not. H3K36me3 with larger windows: proposed not now (25 Nov).
-Its poor pair-A result is likely a data limit; check the differential ceiling first.
-
-"The model just reads the fiber data" can't be argued away, but it can be measured. Run simple per-fiber models
-through the same tests, with the same supervision as the main model (R1a mixtures):
-1. Write the expected results down.
-2. Hand-written rules on the molecule tests, from the existing per-fiber tables (no new predictions).
-3. Shuffle controls (T7): shuffled inputs across fibers or loci should break the per-fiber predictions.
-4. A learned summary model (per-fiber window averages → linear map, same fiber averaging and training), with and
-   without ≈ 25 bp windows, 3 seeds.
-
-Careful: on the CTCF footprint test a footprint rule is the test's own label, so it is a ceiling there, not a
-competitor.
+**Status (26 Nov): done, `Nov_27.md` §6** (rungs 2–4 with 3 seeds, rules 1 seed, both pairs; `ladder.py`).
+- **2 → 3:** the network is needed: +0.16 mixture r on both pairs, clearly better AUC and differential r, and the only
+  rung with CTCF footprints (the MLP has none, though a footprint feature is an input).
+- **3 → 4:** the features add nothing; CTCF footprint effect slightly weaker with them.
+- Rules help only where the annotation is the signal (H3K36me3 / gene bodies, H3K4me3 / CGIs), still below the
+  network. The MLP shows the CpG-flip effect too, so section 5's claim doesn't separate the network from simple models.
+- Open: rerun `ladder.py --step summary` when the rung-4 seed-3 evals finish (`2026-11-25_82`, `_87`); the CTCF
+  specificity test (at footprints on other factors' motifs a motif-free rule fires, but the network's CTCF should
+  not); shuffle controls (T7: shuffled inputs across fibers or loci should break the per-fiber predictions);
+  RepeatMasker for the H3K9me3 rule (user: decide after the results).
+- On the CTCF footprint test the rules' CTCF is the footprint, the test's own label: a ceiling there, not a competitor.
+- H3K36me3 with larger windows: not now (25 Nov); its poor pair-A result is likely a data limit, check the
+  differential ceiling first.
 
 ## 3. Biological tests still open (T5)
 

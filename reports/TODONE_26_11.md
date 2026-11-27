@@ -3,6 +3,13 @@
 What was finished, newest first: a new item goes on top. One file per month (`TODONE_YY_MM.md`). Each item says
 what was done, the result in a line, and where the details are. Open work stays in `TODO.md`.
 
+## 26 Nov
+
+- **Baseline ladder compared (rungs 1–4 + Pair, both pairs, 3 seeds except rules):** the network is needed (+0.16
+  mixture r over the MLP on hand-crafted features, clearly better cell separation, the only rung with CTCF
+  footprints); adding the features to it changes nothing; rules help only where an annotation is the signal. The CpG
+  flip effect shows up in the MLP too. `Nov_27.md` §6, `plots/26_nov_27/ladder/`, `plots_code/26_nov_27/ladder.py`.
+
 ## 25 Nov
 
 - **Baseline ladder, first results (seed 919) and seeds 2 / 3 submitted:** mixture r (chr21 mini), GM12878 + HepG2 /

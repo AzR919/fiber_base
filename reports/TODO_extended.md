@@ -845,8 +845,22 @@ T5a held-out methylation with the no-CpG model.
     0.310 → 0.311): its score is the rules'. Evals and molecules done for rungs 1 and 4 (both pairs) and rung 2 B;
     rung 2 A chain (`_46`–`49`) still running.
   - **Seeds 2 and 3 of rungs 2 and 4 submitted (25 Nov):** both pairs, same chains, jobs `2026-11-25_50`–`89` on fir
-    (run prefixes `MIXR1A_MLP_seed<n>`, `MIXR1A_HC_seed<n>`). Rung 1 stays at one seed (16 parameters). Next: pull,
-    then the ladder side by side in the seed analysis (T3, bulk + ceiling, mixture r, CTCF footprints, CpG flips).
+    (run prefixes `MIXR1A_MLP_seed<n>`, `MIXR1A_HC_seed<n>`). Rung 1 stays at one seed (16 parameters).
+  - **Ladder comparison done (26 Nov), `Nov_27.md` §6:** `plots_code/26_nov_27/ladder.py` (reuses `realism_seeds.py`
+    and `ctcf_cpg.py` part C; per-assay tables added), job `2026-11-26_00_ladder`, outputs `plots/26_nov_27/ladder/`.
+    Rung 2 → 3: +0.16 mixture r on both pairs (z ≈ 28), AUC +0.02 / +0.06, differential r +0.07 / +0.14; sign accuracy
+    tied on pair A. The MLP has no CTCF footprint effect (H1 −0.02 to −0.35; R1a 0.5–0.9). Rung 3 → 4: no gain on
+    any readout; footprint effect weaker (GM12878 0.58 vs 0.87). Rules beat the MLP only on H3K36me3 (pair A) and
+    H3K4me3 (pair B), where the annotation is the signal. CpG flips: the MLP shows the same local effect (H3K4me3
+    drop 3–7× larger), rules 0 by construction; XI does not separate the rungs.
+    **Against the expected results above:** as predicted, the network is better on every assay, CTCF clearly, rung 4
+    is within seed noise, H3K36me3 rules have a moderate gap (0.49 vs 0.61), CpG flips move only CpG-using rules
+    (abruptly: median 0). Not as predicted: the simple rungs are much weaker on ATAC (rules 0.67, MLP 0.75 vs 0.83;
+    predicted close) and H3K4me3 (MLP 0.34 / 0.52 vs 0.54 / 0.70; predicted close); the largest rule gaps are
+    H3K4me1, H3K27me3 and H3K9me3 (0.44–0.49), not only H3K27ac / H3K4me1; the MLP has no CTCF footprint effect at
+    all (not predicted); rung 4 does not gain on CTCF.
+  - **Open:** rerun `ladder.py --step summary` after the rung-4 seed-3 evals (`2026-11-25_82`, `_87`); the CTCF
+    specificity test; RepeatMasker (user decides after the results).
 
 ---
 
