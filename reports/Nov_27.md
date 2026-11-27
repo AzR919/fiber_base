@@ -22,6 +22,40 @@ Pair A = GM12878 + HepG2, pair B = K562 + H1. Every model is scored on chr21 (te
 configs' own seed, so every training seed sees the same fibers. H1 has no ATAC track, so pair B readouts are over the
 7 other assays, and R1a on pair B was trained without an ATAC target.
 
+## Fiber terms
+
+Every term below is per fiber (one molecule) and refers to the fibertools calls in its input channels.
+
+- **MSP** (methyltransferase-sensitive patch): a fibertools call of a stretch the m6A methyltransferase could reach,
+  i.e. not wrapped in a nucleosome. The input channel is 1 on every base inside any MSP call (no quality filter), else
+  0. Fibertools calls MSPs between every pair of neighbouring nucleosomes, so the short linkers count too.
+- **Nucleosome:** a fibertools nucleosome call; the channel is 1 on every base inside one.
+- **Large MSP:** a run of consecutive MSP bases at least **151 bp** long. Touching MSP calls merge into one run.
+  151 bp is longer than the 147 bp of DNA one nucleosome wraps, so such a stretch is a nucleosome-free region: it has
+  room for a nucleosome and none is there. A run cut by the edge of the model's 5 kb input window counts only by its
+  visible length. Code: `handcrafted.large_runs` (rules, features); `molecule_predict.large_msp` (column `lmsp_*`).
+- **Informative A/T:** an A or T base inside the fiber's aligned span. Each one either has an m6A call or is covered
+  without one.
+- **m6A rate** over a stretch: m6A calls / informative A/T bases in it.
+- **Covered CpG:** a CpG with a call on at least one strand of the fiber. It is **methylated** if either strand has a
+  5mC call.
+- **CpG methylation** over a stretch: methylated / covered CpGs. Each section states the stretch, the minimum number of
+  covered CpGs and the thresholds for "methylated" / "unmethylated" fibers. Below that minimum the fiber has no
+  methylation call.
+- **Protected:** a short core stretch has m6A rate ≤ 0.5 × the flank rate. It also needs ≥ 4 informative A/T bases in
+  the core and a flank rate > 0. Bound proteins shield their DNA from the methyltransferase. Two variants:
+  - footprint test: the core is the motif, and the flank rate is the mean of the two 100 bp flank rates;
+  - rules and features: the core is the 15 bp centred on the base, and the flank rate is pooled over the 100 bp on
+    either side.
+- **CTCF fiber states** (the footprint test, `ctcf_footprints.py`; target = the motif, flanks = 100 bp either side):
+  - nucleosome: ≥ 50% of the motif's bases inside a nucleosome call (this state takes precedence);
+  - footprint: ≥ 50% of the motif's bases inside an MSP (any MSP, not only large ones) and the motif protected;
+  - open: ≥ 50% inside an MSP, not protected;
+  - other: anything else (read ends, < 4 informative A/T in the motif, no m6A call in the flanks);
+  - accessible = footprint or open.
+- **Silenced CGI promoter** (XI test, `Nov_20.md` §2): a chrX gene outside the PARs and not on the escape list, with a
+  CpG island at its promoter. "Silenced" is the annotation "subject to X inactivation", not a measurement.
+
 ## 1. The mixture recipe: R1a
 
 > **Question:** the claim is that a model trained on the bulk of the mixture you actually have (one sample, one
@@ -181,9 +215,8 @@ Script `plots_code/26_nov_27/criteria_plots.py`; outputs in `plots/26_nov_27/cri
 > direction inside the model.
 
 **Setup** (defined before running): the chr21 CTCF sites of the footprint test, hole sites excluded. A fiber's
-methylation is the share of methylated CpGs over the motif ± 100 bp (≥ 3 CpGs covered): methylated > 0.5,
-unmethylated < 0.5. Fiber states (footprint, open, nucleosome) are as in the footprint test; accessible = footprint or
-open. Per-site tests compare the two methylation groups at sites with ≥ 3 fibers in each, Wilcoxon over sites. Models:
+methylation is its CpG methylation over the motif ± 100 bp (≥ 3 covered CpGs): methylated > 0.5, unmethylated < 0.5.
+Fiber states (footprint, open, nucleosome; accessible = footprint or open) are defined in "Fiber terms" above. Per-site tests compare the two methylation groups at sites with ≥ 3 fibers in each, Wilcoxon over sites. Models:
 DEV4NF (2 seeds), R1a and Pair (3 seeds, both pairs), each on its own pair's fibers.
 
 Script `plots_code/26_nov_27/ctcf_cpg.py` (job `ctcf_cpg.sh`), outputs in `plots/26_nov_27/ctcf_cpg/`. In-silico flips:
@@ -268,8 +301,68 @@ scored with the same evals and molecule tests:
 | ref | Pair (own tracks, the ceiling) | fiber + DNA | – | 3 |
 
 Rung 2 → 3 asks whether deep learning is needed, rung 3 → 4 whether the network already has what the features carry.
-"MSP" in the rules and features means a large MSP (a run ≥ 151 bp): fibertools MSPs include linkers, so any MSP is
-almost everywhere. Script `plots_code/26_nov_27/ladder.py`; tables and figures in `plots/26_nov_27/ladder/`.
+The rules and most rule-like features use **large MSPs** (runs of ≥ 151 consecutive MSP bases; "Fiber terms"
+above). Fibertools MSPs include the linkers, so "any MSP nearby" is true almost everywhere. Script `plots_code/26_nov_27/ladder.py`; tables and figures in `plots/26_nov_27/ladder/`.
+
+### The rules and the features
+
+Both are fixed (no trainable parameters) and computed inside the model from the same input windows as the network
+(`handcrafted.py`), so the training loop, the evaluator and `molecule_predict.py` (including the CpG flips) run them
+unchanged. They use DEV4NF's channels: m6A, CpG, MSP, nucleosome; no FIRE (its classifier was trained on DNase and
+CTCF peaks).
+
+**Rung 1, the rules.** Each rule gives a 0 / 1 score per fiber and base. A calibration Softplus(a·s + b) per assay,
+trained on the training chromosome by the normal loop, maps it to the bulk scale. That gives 2 parameters per assay,
+16 in all. Conventions in the table:
+- **"within d bp of X":** at least one base of X lies in [position − d, position + d]. For fiber features X is on the
+  same fiber; for annotations it is on the reference.
+- **"on a nucleosome":** the base itself is inside a nucleosome call.
+- **Fiber methylation:** the fiber's CpG methylation over the position ± 500 bp, from ≥ 2 covered CpGs. With fewer than
+  2, every condition on methylation is false, so the score is 0.
+- **Thresholds:** unmethylated < 0.3, not methylated < 0.5, methylated > 0.7.
+
+| Assay | Score 1 at a base that is | Biology behind it |
+|---|---|---|
+| ATAC | inside a large MSP | accessibility is what MSPs measure |
+| CTCF | within 100 bp of a "bound motif base": a base inside a CTCF motif hit that is protected (15 bp variant) and within 10 bp of any MSP base. In effect the footprint test's label | bound CTCF shields its motif from the methyltransferase |
+| H3K4me3 | on a nucleosome, within 300 bp of a large MSP, within 500 bp of a CpG island, fiber unmethylated | the ± 1 nucleosomes of active CGI promoters, which stay unmethylated |
+| H3K27ac | on a nucleosome, within 1 kb of a large MSP, fiber not methylated | active promoters and enhancers |
+| H3K4me1 | on a nucleosome, within 2 kb of a large MSP, fiber not methylated, and not within 2 kb of a protein-coding TSS | enhancers and their flanks; depleted at the TSS itself |
+| H3K36me3 | on a nucleosome, inside a gene body (TSS + 2 kb to the TES), fiber methylated | co-transcriptional mark; gene-body methylation follows it (DNMT3B reads H3K36me3) |
+| H3K27me3 | within 1 kb of a CpG island, fiber unmethylated, no large MSP within 500 bp | Polycomb targets: closed, unmethylated CGIs |
+| H3K9me3 | inside a repeat or a ZNF gene body, fiber methylated, no large MSP within 1 kb | constitutive heterochromatin over repeats and KRAB-ZNF clusters |
+
+The annotations are base-level tracks on chr20 / 21 / 22 / X (`data_prep/build_annotation_tracks.py`, loader option
+`ref_annot`). Only rung 1 sees them:
+- CpG islands: UCSC `cpgIslandExt`;
+- TSS ± 2 kb and gene bodies: GENCODE v44 basic, protein-coding;
+- repeats: the reference's soft-mask, every RepeatMasker / TRF class. This is broader than the LTR / satellite
+  repeats the H3K9me3 rule is about; RepeatMasker classes are left for later;
+- ZNF genes: protein-coding `ZNF*` gene bodies;
+- the CTCF motif: JASPAR MA0139.2 at p ≤ 1e-5, as in the footprint test.
+
+**Rung 2, the 31 hand-crafted features.** They are computed per fiber and position from the fiber and the reference
+DNA only. External annotations are left out, so rungs 2 and 4 see what the network sees: no CpG-island, TSS, gene
+or repeat track, and no motif database.
+
+Windows are centred on the position and run past the input window or the fiber's ends as zeros. Fractions and
+densities divide by the full window width w; rates divide by the informative bases only (0 if there are none). 0 / 1
+features use "within d bp" as for the rules.
+
+| Group | Features | Count |
+|---|---|---|
+| Fiber summaries over w = 51, 201 and 1001 bp | MSP fraction (bases inside any MSP / w); nucleosome fraction (bases inside a nucleosome / w); m6A rate; CpG methylation (no minimum: 0 with no covered CpG); covered-CpG density (covered CpGs / w) | 5 × 3 = 15 |
+| The annotation-free parts of the rules (0 / 1) | inside any MSP; inside a large MSP; a large MSP within 100 / 300 / 1000 / 2000 bp; on a nucleosome and within 300 / 1000 bp of a large MSP | 8 |
+| Motif-free footprint (0 / 1) | inside a large MSP and protected (15 bp variant; no motif required); a footprint base within 100 bp | 2 |
+| Reference sequence over w = 201 and 1001 bp | GC fraction ((C + G) / w); CpG density (CpG dinucleotides / w); CpG observed / expected (CpG × w / (C × G), capped at 3, 0 without C or G): a CpG-island proxy from the DNA | 3 × 2 = 6 |
+
+- **The MLP (rung 2):** per position, 31 → 64 → 64 → 8 (1 × 1 convolutions, GELU), with no spatial filters beyond
+  the fixed windows. It has the same Softplus output and coverage-normalized fiber averaging as the network, 6.7 k
+  parameters (`mlp01`, `model22`).
+- **R1a+F (rung 4):** the network (`unet03`) with the 31 features added as extra fiber input channels
+  (`extra_features: true`, `model23`).
+- **The footprint feature makes the CTCF test partly circular for rung 2.** The MLP still shows no footprint effect
+  (below), so this did not matter.
 
 ### Bulk and T3
 

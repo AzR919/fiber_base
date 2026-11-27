@@ -1,7 +1,7 @@
 """
 Target BEDs for the single-molecule tests (reports/TODO.md section 2), read by molecule_predict.py. Built from
-annotations only: reference, GENCODE, UCSC CpG islands, ENCODE CTCF peaks and the JASPAR CTCF motif (no fibers, no
-model). Not part of setup_data.py; run it when the spec changes.
+annotations only: reference, GENCODE, UCSC CpG islands, ENCODE CTCF peaks, the JASPAR CTCF motif and (poised tiles)
+the ENCODE H3K4me3 / H3K27me3 fold-change tracks (no fibers, no model). Not part of setup_data.py; run it when the spec changes.
 
 Reads data_prep/targets_spec.yaml (rules in its comments) and writes into <regions_root>/targets/:
   ctcf_sites_<chroms>.bed   CTCF motif sites (T5e)     chrom start end name score strand set motif_p
@@ -10,6 +10,13 @@ Reads data_prep/targets_spec.yaml (rules in its comments) and writes into <regio
                             <cell> = that line's peak signalValue at the site (0 = no peak)
   tss_<chroms>.bed          protein-coding TSSs (T5b,  chrom start end name score strand gene class cgi
                             T5c), TSS +- tss_half       class = par / escape / xist / subject (chrX) or autosomal
+  poised_tiles_<chroms>.bed tiles for poised vs        chrom start end name score strand cgi tss
+                            Polycomb (T5g), classed     [class_<cell> k4_<cell> k27_<cell>] per cell line
+                            per cell line from bulk     class = poised (H3K4me3 and H3K27me3 marked), polycomb
+                            H3K4me3 / H3K27me3          (H3K27me3 only), active (H3K4me3 only), neither, mid;
+                                                        k4 / k27 = mean FC over the tile; cgi / tss = overlaps a
+                                                        CpG island / within tss_reach of a protein-coding TSS
+  poised_fractions_<chroms>.tsv  genome fractions: tiles per cell, chromosome and class (all fraction_chroms)
   manifest.json             spec, input md5s, motif threshold, counts per file and class
 
 Each BED's first line is '#chrom start end name score strand <extra columns>' (molecule_predict.py names the extra
@@ -40,6 +47,8 @@ CELLS_ORDER = ["GM12878", "K562", "HepG2", "H1"]
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--spec", default="data_prep/targets_spec.yaml")
+    p.add_argument("--sets", nargs="+", default=["ctcf", "tss", "poised"], choices=["ctcf", "tss", "poised"],
+                   help="Which target sets to (re)build; the others keep their files and manifest entries")
     return p.parse_args()
 
 
@@ -291,6 +300,119 @@ def build_tss(spec, fasta):
 
 
 #--------------------------------------------------------------------------------------------------
+# Poised vs Polycomb (T5g): 1 kb tiles classed per cell line from bulk H3K4me3 / H3K27me3
+
+POISED_CLASSES = ["poised", "polycomb", "active", "neither"]
+
+
+def overlaps(starts, ends, iv_starts, iv_ends):
+    """(n,) bool: does each [start, end) overlap any interval (intervals may overlap each other)."""
+    starts, ends = np.asarray(starts), np.asarray(ends)
+    out = np.zeros(len(starts), dtype=bool)
+    if len(iv_starts) == 0:
+        return out
+    order = np.argsort(iv_starts)
+    s, e = np.asarray(iv_starts)[order], np.maximum.accumulate(np.asarray(iv_ends)[order])
+    k = np.searchsorted(s, ends)                      # intervals starting before the tile end
+    ok = k > 0
+    out[ok] = e[k[ok] - 1] > starts[ok]
+    return out
+
+
+def tile_means(path, chrom, n, tile):
+    """(n,) mean fold change per tile from the chromosome start (no data -> 0), from the base-level values in chunks
+    (bw.stats(exact=True) is far too slow on whole chromosomes)."""
+    import pyBigWig
+    bw = pyBigWig.open(path)
+    out = np.zeros(n, dtype=np.float64)
+    step = 10000                                     # tiles per chunk
+    try:
+        for i in range(0, n, step):
+            m = min(step, n - i)
+            v = np.asarray(bw.values(chrom, i * tile, (i + m) * tile, numpy=True), dtype=np.float64)
+            out[i:i + m] = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0).reshape(m, tile).mean(axis=1)
+    finally:
+        bw.close()
+    return out
+
+
+def poised_class(k4, k27, marked, unmarked):
+    """Per tile: poised (both marked), polycomb (K27 only), active (K4 only), neither, or mid (in between)."""
+    cls = np.full(len(k4), "mid", dtype=object)
+    hi4, lo4, hi27, lo27 = k4 >= marked, k4 < unmarked, k27 >= marked, k27 < unmarked
+    cls[hi4 & hi27], cls[lo4 & hi27], cls[hi4 & lo27], cls[lo4 & lo27] = POISED_CLASSES
+    return cls
+
+
+def build_poised(spec, rspec, fasta):
+    """Tiles of `tile` bp on every fraction chromosome (excluding blacklist / N runs, <regions_root>/exclude.bed),
+    classed per cell line from the mean FC of its bulk H3K4me3 and H3K27me3. Returns the target table (sampled
+    tiles on the target chromosomes), the genome-fraction table and info."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from build_loci import cell_tracks
+    p = spec["poised"]
+    tile, marked, unmarked = p["tile"], p["marked"], p["unmarked"]
+    encode_root = load_yaml(p["encode_spec"])["encode_root"]
+    tracks = cell_tracks(encode_root, p["cells"], ["h3k4me3", "h3k27me3"])
+    ann = spec["annotations"]
+    frac_chroms = p["fraction_chroms"] or rspec["chroms"]
+    excl = pd.read_csv(os.path.join(rspec["regions_root"], "exclude.bed"), sep="\t", comment="#", header=None,
+                       usecols=[0, 1, 2], names=["chrom", "start", "end"])
+    cgi = read_cgi(os.path.join(ann, spec["cpg_islands"]), frac_chroms)
+    genes = read_genes(os.path.join(ann, spec["gtf"]), p["chroms"])
+    frac_rows, tiles = [], []
+    for chrom in frac_chroms:
+        n = fasta.get_reference_length(chrom) // tile
+        st = np.arange(n, dtype=np.int64) * tile
+        en = st + tile
+        ex = excl[excl.chrom == chrom]
+        valid = ~overlaps(st, en, ex.start.values, ex.end.values)
+        ci = cgi[cgi.chrom == chrom]
+        in_cgi = overlaps(st, en, ci.start.values, ci.end.values)
+        df = pd.DataFrame({"chrom": chrom, "start": st, "end": en, "cgi": in_cgi.astype(int)})
+        for cell in p["cells"]:
+            k4 = tile_means(tracks[cell]["h3k4me3"], chrom, n, tile)
+            k27 = tile_means(tracks[cell]["h3k27me3"], chrom, n, tile)
+            df[f"k4_{cell}"], df[f"k27_{cell}"] = np.round(k4, 3), np.round(k27, 3)
+            df[f"class_{cell}"] = poised_class(k4, k27, marked, unmarked)
+            for c in POISED_CLASSES + ["mid"]:
+                sel = valid & (df[f"class_{cell}"].values == c)
+                frac_rows.append({"cell": cell, "chrom": chrom, "class": c, "n_tiles": int(sel.sum()),
+                                  "n_cgi": int((sel & in_cgi).sum()), "n_valid": int(valid.sum()),
+                                  "n_valid_cgi": int((valid & in_cgi).sum())})
+        print(f"  {chrom}: {int(valid.sum())} valid tiles", flush=True)
+        if chrom in p["chroms"]:
+            g = genes[genes.chrom == chrom]
+            df["tss"] = overlaps(st, en, g.tss.values - p["tss_reach"], g.tss.values + p["tss_reach"] + 1).astype(int)
+            tiles.append(df[valid])
+    tiles = pd.concat(tiles, ignore_index=True)
+    rng = np.random.default_rng(p["seed"])
+    pick = np.zeros(len(tiles), dtype=bool)
+    for cell in p["cells"]:
+        for c in POISED_CLASSES:
+            idx = np.flatnonzero(tiles[f"class_{cell}"].values == c)
+            if len(idx) > p["per_class"]:
+                idx = rng.choice(idx, p["per_class"], replace=False)
+            pick[idx] = True
+    out = tiles[pick].copy()
+    out["name"] = [f"tile_{c}_{s}" for c, s in zip(out.chrom, out.start)]
+    out["score"], out["strand"] = 0, "."
+    cols = ["chrom", "start", "end", "name", "score", "strand", "cgi", "tss"]
+    for cell in p["cells"]:
+        cols += [f"class_{cell}", f"k4_{cell}", f"k27_{cell}"]
+    out = out[cols]
+    fr = pd.DataFrame(frac_rows)
+    counts = {f"{cell}_{c}": int((out[f"class_{cell}"] == c).sum()) for cell in p["cells"] for c in POISED_CLASSES}
+    tot = fr.groupby(["cell", "class"])[["n_tiles", "n_valid"]].sum()
+    for cell in p["cells"]:
+        print(f"  {cell} genome fractions: " + ", ".join(
+            f"{c} {tot.loc[(cell, c), 'n_tiles'] / tot.loc[(cell, c), 'n_valid']:.4f}" for c in POISED_CLASSES + ["mid"]),
+            flush=True)
+    print(f"  {len(out)} target tiles; per cell and class: {counts}", flush=True)
+    return out, fr, {"counts": counts, "n_targets": int(len(out)), "tracks": tracks}
+
+
+#--------------------------------------------------------------------------------------------------
 
 def main():
     args = parse_args()
@@ -300,21 +422,35 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     fasta = pysam.FastaFile(rspec["fasta_path"])
     ann = spec["annotations"]
+    mpath = os.path.join(out_dir, "manifest.json")
+    old = json.load(open(mpath)) if os.path.exists(mpath) else {}
     manifest = {"built": _now(), "spec": spec, "script_md5": md5_file(os.path.abspath(__file__)),
                 "inputs": {os.path.basename(p): md5_file(p) for p in
                            [os.path.join(ann, spec[k]) for k in ("gtf", "cpg_islands", "ctcf_motif")] +
                            [os.path.join(ann, v) for v in spec["ctcf_peaks"].values()]},
-                "files": {}}
+                "files": dict(old.get("files", {}))}   # sets not rebuilt keep their entries
 
-    ctcf, info = build_ctcf(spec, fasta)
-    name = f"ctcf_sites_{chrom_tag(spec['ctcf']['chroms'])}.bed"
-    write_targets(os.path.join(out_dir, name), ctcf)
-    manifest["files"][name] = info
+    if "ctcf" in args.sets:
+        ctcf, info = build_ctcf(spec, fasta)
+        name = f"ctcf_sites_{chrom_tag(spec['ctcf']['chroms'])}.bed"
+        write_targets(os.path.join(out_dir, name), ctcf)
+        manifest["files"][name] = info
 
-    tss, info = build_tss(spec, fasta)
-    name = f"tss_{chrom_tag(spec['tss']['chroms'])}.bed"
-    write_targets(os.path.join(out_dir, name), tss)
-    manifest["files"][name] = info
+    if "tss" in args.sets:
+        tss, info = build_tss(spec, fasta)
+        name = f"tss_{chrom_tag(spec['tss']['chroms'])}.bed"
+        write_targets(os.path.join(out_dir, name), tss)
+        manifest["files"][name] = info
+
+    if "poised" in args.sets:
+        tiles, fractions, info = build_poised(spec, rspec, fasta)
+        tag = chrom_tag(spec["poised"]["chroms"])
+        name = f"poised_tiles_{tag}.bed"
+        write_targets(os.path.join(out_dir, name), tiles)
+        fname = f"poised_fractions_{tag}.tsv"
+        fractions.to_csv(os.path.join(out_dir, fname), sep="\t", index=False)
+        manifest["files"][name] = info
+        manifest["files"][fname] = {"rows": int(len(fractions))}
 
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)

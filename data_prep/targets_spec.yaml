@@ -44,3 +44,24 @@ tss:
   # Tukiainen et al. 2017 (escape in most tissues / cell lines). Check against Tukiainen 2017 Suppl. Table 13 and
   # GM12878 allele-specific expression before relying on it. Escape can be cell-line specific.
   escape_genes: [KDM5C, KDM6A, DDX3X, EIF1AX, EIF2S3, ZFX, USP9X, SMC1A, JPX, PRKX, STS, TXLNG, CA5B, PUDP, UBA1]
+
+# --- Poised vs Polycomb (T5g, defined 27 Nov) -> poised_tiles_<chroms>.bed, poised_fractions_<chroms>.tsv ---
+# Tiles of `tile` bp from each chromosome start, minus blacklist / N runs (<regions_root>/exclude.bed). Per cell line,
+# the mean fold change of its ENCODE H3K4me3 and H3K27me3 tracks over the tile; a mark is "marked" at FC >= marked and
+# "unmarked" at FC < unmarked (absolute, not per-cell quantiles, so the genome fractions compare across cells):
+#   poised = both marked; polycomb = H3K27me3 marked, H3K4me3 unmarked; active = H3K4me3 marked, H3K27me3 unmarked;
+#   neither = both unmarked; mid = anything in between (left out).
+# Genome fractions over fraction_chroms (empty = every chromosome of regions_spec). Targets: on `chroms`, up to
+# per_class tiles per cell line and class (sampled with seed), the union over cell lines. Robustness (FC >= 3) is
+# re-classed in the analysis from the k4 / k27 columns.
+poised:
+  chroms: [chr21]
+  cells: [GM12878, HepG2, K562, H1]        # ENCODE folder names
+  encode_spec: data_prep/encode_spec.yaml  # encode_root
+  fraction_chroms: []
+  tile: 1000
+  marked: 2.0
+  unmarked: 1.0
+  tss_reach: 1000
+  per_class: 250
+  seed: 919

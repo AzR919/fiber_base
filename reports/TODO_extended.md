@@ -557,6 +557,42 @@ model, with a known expected difference written down before running, and a null.
   - H3K36me3 and H3K27me3 mutually exclusive (PRC2 is inhibited by H3K36me3).
   - Repressive marks not simply inverted accessibility.
   - Co-actuation of neighbouring elements on the same molecule, with distance decay (Stergachis 2020).
+- **T5g. Poised vs Polycomb on single molecules** (prof; defined 27 Nov, fixed before looking). Bulk ChIP calls
+  some regions poised (H3K4me3 and H3K27me3 both) and others Polycomb (H3K27me3 only). The test asks three things:
+  what the fibers in each class look like; whether bulk "poised" is a mix of open and closed molecules; and whether
+  the model separates the classes, with per-fiber pred H3K4me3 / H3K27me3 following each fiber's own state.
+  - **Regions (bulk only):**
+    - 1 kb tiles, minus the blacklist and N runs. Per cell, the mean FC of its ENCODE H3K4me3 and H3K27me3 tracks
+      over the tile.
+    - A mark is marked at FC ≥ 2 and unmarked at FC < 1. The thresholds are absolute, not per-cell quantiles, so the
+      fractions compare across cells; FC ≥ 3 is the robustness check.
+    - Classes: poised = both marked; Polycomb = H3K27me3 only; active = H3K4me3 only; neither = both unmarked;
+      anything in between is left out.
+    - Columns: CpG-island overlap and TSS (≤ 1 kb of a protein-coding TSS).
+    - Targets: chr21 (test), up to 250 tiles per cell and class, the union over the 4 dev cells
+      (`build_targets.py --sets poised`, `targets_spec.yaml`).
+  - **Fiber states** (per fiber over the tile):
+    - methylated: CpG methylation over the tile (methylated / covered CpGs; a CpG is covered if either strand has a
+      call, methylated if either has a 5mC call) > 0.5 from ≥ 3 covered CpGs; unmethylated < 0.5; otherwise no call;
+    - open: at least one base of the tile, inside the fiber's aligned span, lies in a large MSP. A large MSP is a run
+      of ≥ 151 consecutive MSP bases, i.e. longer than one nucleosome's 147 bp, measured within the 5 kb input window.
+      New column `lmsp_t` in `molecule_predict.py` (fraction of the tile in large MSPs; open = `lmsp_t` > 0). MSPs
+      include linkers, so `msp_t` is high on closed chromatin too;
+    - four groups: unmethylated + open, unmethylated + closed, methylated + open, methylated + closed.
+  - **Tests:**
+
+    | | What | Expected |
+    |---|---|---|
+    | D1 | Genome fractions per cell (all autosomes, bulk only) | H1 has the largest poised fraction; the differentiated lines more Polycomb |
+    | D2 | Fiber states per class (data only) | active: unmethylated, open; poised: unmethylated, less open than active; Polycomb: unmethylated and closed at CGIs. The per-tile open fraction spreads wider at poised tiles (a mix of open and closed molecules) |
+    | M1 | Tile-mean predictions vs class (AUC) | H3K4me3: active > poised > Polycomb; H3K27me3: poised ≈ Polycomb > active. Main readout: poised vs Polycomb on pred H3K4me3 |
+    | M2 | Within poised and within Polycomb tiles, fiber groups (per-tile differences, Wilcoxon over tiles) | H3K4me3: open > closed; H3K27me3: unmethylated + closed highest, methylated fibers lower (DNA methylation and Polycomb exclude each other at CGIs) |
+    | M3 | Across fibers within each poised tile: Spearman of pred H3K4me3 vs pred H3K27me3 | descriptive (no per-fiber truth): negative = the model splits poised tiles into two kinds of molecule, positive = both marks on the same molecules; read beside D2 |
+    | C | In-silico CpG flips over the tile (`--perturb meth unmeth meth_distal`) at Polycomb and poised tiles | methylating unmethylated fibers lowers pred H3K27me3 |
+
+  - **Models:** DEV4NF (2 seeds), R1a and Pair (3 seeds, both pairs); the ladder's rules and MLP as references (the
+    rules model contains "closed, unmethylated CGI → H3K27me3"). H1 (pair B) is the strongest case.
+  - **Sealed test:** the same script on HCT116 + MCF-7; their bulk tracks only define the classes.
 - **Status.** T5b and T5e done (`Nov_20.md`). Open: T5a (in-silico flips, held-out methylation), T5c, T5d, T5f,
   and the T5b follow-ups above (`TODO.md` §3).
 

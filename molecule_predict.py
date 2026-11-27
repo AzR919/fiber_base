@@ -27,7 +27,9 @@ Output, in DIR (default results/<timestamp>_molecules_<run>_<targets>/):
     for x in t (target), l (left flank), r (right flank), over the part of the fiber's alignment inside x:
       m6a_rate_x (methylated A/T calls / A/T positions), m6a_n_x (A/T positions), cpg_meth_x (methylated CpGs /
       covered CpGs, a CpG counts as methylated if either strand's call is), cpg_n_x, msp_x, nuc_x, fire_x
-      (fraction of bp inside an MSP / nucleosome / FIRE). Inputs are read for all 5 channels whatever the model
+      (fraction of bp inside an MSP / nucleosome / FIRE), lmsp_x (fraction of bp inside a large MSP, a run of
+      >= LARGE_MSP bp in the whole window; fibertools MSPs include linkers, so msp_x is high on closed chromatin
+      too). Inputs are read for all 5 channels whatever the model
       uses, so a no-CpG model still reports the molecule's measured methylation (held-out data, T5a).
   arrays_<sample>.npz     with --save_arrays / --array_targets: full per-bp arrays for those targets (per target:
                           pred (n, K, L) float16, inputs (n, 5, L) int8, mask (n, L) bool, reads, hp, ps, window)
@@ -66,6 +68,7 @@ from utils import load_metapaths
 
 ALL_FEATURES = [get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp]   # input_flags order
 M6A, CPG, MSP, NUC, FIRE = range(5)
+LARGE_MSP = 151   # a nucleosome-free region; shorter MSP runs are linkers (as in handcrafted.py)
 PERTURB_MODES = {"meth": (1, False), "unmeth": (-1, False), "meth_distal": (1, True), "unmeth_distal": (-1, True)}
 
 
@@ -127,11 +130,22 @@ def cpg_starts(seq):
     return np.flatnonzero((b[:-1] == ord("C")) & (b[1:] == ord("G")))
 
 
-def input_summary(x, aln, cg, lo, hi):
+def large_msp(msp, min_len=LARGE_MSP):
+    """(L,) bool: positions inside a run of >= min_len MSP bp."""
+    m = (np.asarray(msp) > 0).astype(np.int8)
+    d = np.diff(np.concatenate([[0], m, [0]]))
+    out = np.zeros(len(m), dtype=bool)
+    for s0, e0 in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        if e0 - s0 >= min_len:
+            out[s0:e0] = True
+    return out
+
+
+def input_summary(x, aln, cg, lo, hi, lmsp):
     """Summaries of one fiber's inputs over window positions [lo, hi), restricted to its alignment (aln: (L,) bool).
-    x: (5, L) channels; cg: CpG start positions in the window."""
+    x: (5, L) channels; cg: CpG start positions in the window; lmsp: (L,) bool large-MSP mask (large_msp)."""
     if hi <= lo:
-        return [np.nan, 0, np.nan, 0, np.nan, np.nan, np.nan]
+        return [np.nan, 0, np.nan, 0, np.nan, np.nan, np.nan, np.nan]
     a = aln[lo:hi]
     nbp = int(a.sum())
     m6 = x[M6A, lo:hi]
@@ -144,7 +158,8 @@ def input_summary(x, aln, cg, lo, hi):
     cpg_n = int(covered.sum())
     cpg_meth = float((meth & covered).sum() / cpg_n) if cpg_n else np.nan
     frac = (lambda ch: float(x[ch, lo:hi][a].mean()) if nbp else np.nan)
-    return [m6_rate, m6_n, cpg_meth, cpg_n, frac(MSP), frac(NUC), frac(FIRE)]
+    return [m6_rate, m6_n, cpg_meth, cpg_n, frac(MSP), frac(NUC), frac(FIRE),
+            float(lmsp[lo:hi][a].mean()) if nbp else np.nan]
 
 
 def perturb_region(mode, lo, hi, flank, shift, context_length):
@@ -272,11 +287,12 @@ def run_sample(sample, model, assays, active, targets, args, m, context_length, 
             for mode, (nflip, means) in pert.items():
                 row[f"nflip_{mode}"] = int(nflip[j])
                 row.update({f"pred_{a_}__{mode}": float(v) for a_, v in zip(assays, means[j])})
+            lm = large_msp(x[i, MSP])
             for tag, (l0, h0) in (("t", (lo, hi)), ("l", (max(0, lo - args.flank), lo)),
                                   ("r", (hi, min(context_length, hi + args.flank)))):
-                s = input_summary(x[i], a, cg, l0, h0)
+                s = input_summary(x[i], a, cg, l0, h0, lm)
                 row.update(dict(zip([f"m6a_rate_{tag}", f"m6a_n_{tag}", f"cpg_meth_{tag}", f"cpg_n_{tag}",
-                                     f"msp_{tag}", f"nuc_{tag}", f"fire_{tag}"], s)))
+                                     f"msp_{tag}", f"nuc_{tag}", f"fire_{tag}", f"lmsp_{tag}"], s)))
             rows.append(row)
         if t["target"] in array_names or k < args.save_arrays:
             arrays[t["target"]] = {"pred": pred.astype(np.float16), "inputs": x[keep].astype(np.int8),

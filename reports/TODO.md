@@ -147,7 +147,9 @@ tags. Check over 19 Fiber-seq lines (`plots_code/26_nov_27/xi_cells_check.py`, `
    left out). Check it on GM12878 by pretending its phasing is in blocks, so the sealed run needs no new code.
 3. **Poised vs Polycomb** (prof): genome fractions from bulk H3K4me3 / H3K27me3 (poised = +K4me3 +K27me3,
    Polycomb = −K4me3 +K27me3), then per fiber split by CpG and MSP; do pred K4me3 / K27me3 follow? H1 is the
-   strongest dev case.
+   strongest dev case. **Defined 27 Nov** (`TODO_extended.md` T5g): 1 kb tiles, FC ≥ 2 marked / < 1 unmarked,
+   tests D1–D2 (data), M1–M3 (model), C (CpG flips); DEV4NF, R1a, Pair, rules, MLP. Targets built (2,755 chr21 tiles; poised genome fraction H1 0.77% vs
+   0.05–0.14% in the other lines); molecule runs `2026-11-27_02`–`25` on fir; then `plots_code/26_dec_04/poised.py`.
 4. **Nucleosome positioning at CTCF** (prof): phased flanking nucleosomes on footprinted fibers; does pred CTCF
    follow? Needs per-position arrays (`--save_arrays`).
 5. GM12878-only showcases: imprinted control regions per haplotype (H19/IGF2: CTCF on the unmethylated allele),

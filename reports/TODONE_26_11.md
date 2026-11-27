@@ -3,6 +3,16 @@
 What was finished, newest first: a new item goes on top. One file per month (`TODONE_YY_MM.md`). Each item says
 what was done, the result in a line, and where the details are. Open work stays in `TODO.md`.
 
+## 27 Nov
+
+- **Poised vs Polycomb (T5g) defined and started:** 1 kb tiles classed from bulk H3K4me3 / H3K27me3 (FC ≥ 2 marked,
+  < 1 unmarked), tests D1–D2, M1–M3, C. Genome fractions: poised 0.77% of autosomal tiles in H1 vs 0.05–0.14% in
+  the other dev lines; Polycomb the other way round (1.9% vs 3.8–4.2%). New `build_targets.py --sets poised`,
+  `lmsp_*` column (large-MSP fraction) in `molecule_predict.py`; molecule runs `2026-11-27_02`–`25` on fir.
+  `TODO_extended.md` T5g.
+- **Nov_27 report, definitions:** a "Fiber terms" section (MSP, large MSP = a run of ≥ 151 MSP bases, protected,
+  CTCF fiber states, ...) and the exact rules and hand-crafted features of the ladder. `Nov_27.md` §6.
+
 ## 26 Nov
 
 - **Baseline ladder compared (rungs 1–4 + Pair, both pairs, 3 seeds except rules):** the network is needed (+0.16
