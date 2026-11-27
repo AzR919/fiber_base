@@ -434,13 +434,13 @@ def main():
         ctcf, info = build_ctcf(spec, fasta)
         name = f"ctcf_sites_{chrom_tag(spec['ctcf']['chroms'])}.bed"
         write_targets(os.path.join(out_dir, name), ctcf)
-        manifest["files"][name] = info
+        manifest["files"][name] = {**info, "spec": args.spec}
 
     if "tss" in args.sets:
         tss, info = build_tss(spec, fasta)
         name = f"tss_{chrom_tag(spec['tss']['chroms'])}.bed"
         write_targets(os.path.join(out_dir, name), tss)
-        manifest["files"][name] = info
+        manifest["files"][name] = {**info, "spec": args.spec}
 
     if "poised" in args.sets:
         tiles, fractions, info = build_poised(spec, rspec, fasta)
@@ -449,7 +449,7 @@ def main():
         write_targets(os.path.join(out_dir, name), tiles)
         fname = f"poised_fractions_{tag}.tsv"
         fractions.to_csv(os.path.join(out_dir, fname), sep="\t", index=False)
-        manifest["files"][name] = info
+        manifest["files"][name] = {**info, "spec": args.spec}
         manifest["files"][fname] = {"rows": int(len(fractions))}
 
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:

@@ -5,6 +5,7 @@ No torch dependency — safe to import anywhere, including outside training loop
 
 import os
 import sys
+import zlib
 import contextlib
 import numpy as np
 
@@ -199,10 +200,24 @@ def nucleosome_span(fiber):
     return min(s for s, _ in spans), max(e for _, e in spans)
 
 
+class ReadHalf:
+    """keep= filter for get_fiber_data: fibers whose read name hashes (CRC32) to `half` (0 or 1). Splits one library
+    into two disjoint random halves of the same cells (random-split control, reports/sealed_test_protocol.md P2);
+    the hash is fixed, so every window and run sees the same split."""
+    def __init__(self, half):
+        if half not in (0, 1):
+            raise ValueError(f"read_half must be 0 or 1, got {half!r}")
+        self.half = half
+
+    def __call__(self, qname):
+        q = qname if isinstance(qname, bytes) else str(qname).encode()
+        return zlib.crc32(q) % 2 == self.half
+
+
 def get_fiber_data(
     fiber_bam, chrom, start, end, fasta,
     fibers_per_entry, context_length, input_features,
-    return_fiber_dna=False, min_overlap=50, return_meta=False,
+    return_fiber_dna=False, min_overlap=50, return_meta=False, keep=None,
 ):
     """
     Collect fiber reads over [chrom:start-end] and extract per-fiber feature arrays.
@@ -224,6 +239,8 @@ def get_fiber_data(
                       nucleosome at all, are skipped)
     return_meta     : also return one dict per collected fiber (qname, hp, start, end, strand), row-aligned with
                       fibers_array (used by molecule_predict.py to split molecules by haplotype)
+    keep            : optional fn(qname) -> bool; fibers it rejects are skipped before anything else (the
+                      random-split control keeps one half of a library, see read_half_filter)
 
     Returns
     -------
@@ -247,6 +264,8 @@ def get_fiber_data(
     for fiber in possible_fibers:
         if n_fibers == fibers_per_entry:
             break
+        if keep is not None and not keep(fiber.qname):
+            continue
 
         span = nucleosome_span(fiber)
         if span is None:

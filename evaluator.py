@@ -590,7 +590,8 @@ def run_final_eval(model, eval_configs, train_args, wandb_run, device, plots_out
             ds_kwargs["mix_balance"] = eval_cfg.get("mix_balance", False)
             ds_kwargs["mix_min_fibers"] = eval_cfg.get("mix_min_fibers", 10)
         else:
-            ds_kwargs.update(baseline_cells=baseline_meta, baseline_include_own=baseline_include_own)
+            ds_kwargs.update(baseline_cells=baseline_meta, baseline_include_own=baseline_include_own,
+                             shuffle_fibers=bool(eval_cfg.get("shuffle_fibers", False)))
         test_set = make_fiber_dataset(dataset_type, mode="eval", **ds_kwargs)
 
         save_path = None

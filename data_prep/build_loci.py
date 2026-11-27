@@ -178,10 +178,21 @@ def pair_name(pair):
     return f"{pair[0]}__{pair[1]}"
 
 
+def pair_entries(spec):
+    """(A, B, tile set) per pair: a pair is [A, B] (scored on the spec's tiles) or {cells: [A, B], tiles: <set>}."""
+    out = []
+    for p in spec.get("pairs", []):
+        if isinstance(p, dict):
+            out.append((p["cells"][0], p["cells"][1], p.get("tiles", spec["tiles"])))
+        else:
+            out.append((p[0], p[1], spec["tiles"]))
+    return out
+
+
 def output_paths(spec):
     return [f"{split}/table.tsv" for split in spec["splits"]] + \
            [f"{split}/{cell}.bed" for split, cells in spec["splits"].items() for cell in cells] + \
-           [f"pairs/{pair_name(p)}.{ext}" for p in spec.get("pairs", []) for ext in ("tsv", "bed")]
+           [f"pairs/{pair_name(p)}.{ext}" for p in pair_entries(spec) for ext in ("tsv", "bed")]
 
 
 def rebuild_reason(spec, root, fp, force):
@@ -225,12 +236,14 @@ def main():
     root = os.path.join(regions_root, "loci")
     manifest_path = os.path.join(root, "manifest.json")
     all_cells = list(dict.fromkeys([c for cells in spec["splits"].values() for c in cells]
-                                   + [c for pair in spec.get("pairs", []) for c in pair]))
+                                   + [c for a, b, _ in pair_entries(spec) for c in (a, b)]))
     print(f"Spec: {args.spec} | loci root: {root} | tiles: {spec['tiles']} | cell lines: {', '.join(all_cells)}",
           flush=True)
 
-    tiles = read_tiles(regions_root, spec["tiles"])
-    if any((tiles["end"] - tiles["start"]) % spec["bin_size"]):
+    tile_sets = {name: read_tiles(regions_root, name)
+                 for name in dict.fromkeys([spec["tiles"]] + [t for _, _, t in pair_entries(spec)])}
+    tiles = tile_sets[spec["tiles"]]
+    if any(((t["end"] - t["start"]) % spec["bin_size"]).any() for t in tile_sets.values()):
         sys.exit(f"Tile length is not a multiple of bin_size {spec['bin_size']}.")
     tracks = cell_tracks(encode_root, all_cells, spec["assays"])
     fp = fingerprint(spec, regions_root, tracks)
@@ -247,8 +260,9 @@ def main():
 
     # Bin means of every track on the tiles' chromosomes (read once, shared by the splits)
     fc_cache = {}
-    for chrom in tiles["chrom"].unique():
-        n_bins = int(tiles.loc[tiles["chrom"] == chrom, "end"].max()) // spec["bin_size"]
+    all_tiles = pd.concat(tile_sets.values())
+    for chrom in all_tiles["chrom"].unique():
+        n_bins = int(all_tiles.loc[all_tiles["chrom"] == chrom, "end"].max()) // spec["bin_size"]
         for cell in all_cells:
             for assay, path in tracks[cell].items():
                 fc_cache[(cell, assay, chrom)] = bin_means(path, chrom, n_bins, spec["bin_size"])
@@ -280,13 +294,12 @@ def main():
         splits_info[split] = {"cells": cells, "table_rows": len(table), "counts": counts}
 
     pairs_info = {}
-    for pair in spec.get("pairs", []):
-        a, b = pair
-        name = pair_name(pair)
-        table = build_pair(a, b, tiles, tracks, fc_cache, spec)
+    for a, b, tiles_name in pair_entries(spec):
+        name = pair_name((a, b))
+        table = build_pair(a, b, tile_sets[tiles_name], tracks, fc_cache, spec)
         write_bed(os.path.join(root, "pairs", f"{name}.tsv"), table,
                   [f"Pairwise loci table {a} vs {b}. Built {built} by data_prep/build_loci.py from {args.spec}.",
-                   f"Rows: tiles of {spec['tiles']} with a {spec['bin_size']} bp bin where max(a, b) >= "
+                   f"Rows: tiles of {tiles_name} with a {spec['bin_size']} bp bin where max(a, b) >= "
                    f"{spec['min_signal']} (asinh); d = asinh(a) - asinh(b) at the counting bin with the largest |d|.",
                    "columns: " + " ".join(table.columns)])
         sel = selected(table, spec["threshold"])
@@ -296,7 +309,7 @@ def main():
                    f"gain = higher in {a}. Built {built} by data_prep/build_loci.py.",
                    "One row per tile and assay (a tile can appear for several assays).",
                    "columns: chrom start end region_id assay d direction bin_start (0-based, half-open)"])
-        pairs_info[name] = {"cells": [a, b], "table_rows": len(table),
+        pairs_info[name] = {"cells": [a, b], "tiles": tiles_name, "table_rows": len(table),
                             "counts": {a_: {"gain": int((g["d"] > 0).sum()), "loss": int((g["d"] < 0).sum())}
                                        for a_, g in sel.groupby("assay")}}
 

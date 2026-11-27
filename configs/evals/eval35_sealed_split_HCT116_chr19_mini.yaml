@@ -1,0 +1,17 @@
+# SEALED TEST (reports/sealed_test_protocol.md P2, random-split control): HCT116_200U's fibers split into two random halves by
+# read name (fiber_utils.ReadHalf), at the 2,000 chr19 tiles of test_chr19_mini2000. Same cells, same true track: the
+# fiber-origin AUC at the HCT116 vs MCF-7 differential bins should be 0.5 (pass: within 0.5 +- 0.02). Replaces the
+# library control (the sealed cells have one digestion level).
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr19_mini2000
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/HCT116__MCF-7
+loci: [pairs/HCT116__MCF-7]
+
+cell_types:
+  HCT116_200U_h0: {sample: HCT116_200U, read_half: 0}
+  HCT116_200U_h1: {sample: HCT116_200U, read_half: 1}

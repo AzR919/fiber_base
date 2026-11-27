@@ -1,0 +1,15 @@
+# SEALED TEST (reports/sealed_test_protocol.md §5, shuffle control reference): eval33 on the 2,000 chr19 tiles of
+# test_chr19_mini2000, the same tiles as the shuffle control (eval38), so the two compare tile for tile.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr19_mini2000
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/HCT116__MCF-7
+loci: [pairs/HCT116__MCF-7]
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

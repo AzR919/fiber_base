@@ -28,3 +28,7 @@ window_sets:
   test_chr21_tiles:        {method: tiles, chroms: [chr21]}
   test_chr21_mini2000:     {method: stratified, chroms: [chr21], n: 2000, seed: 919}
   test_chr21_ccre_centred: {method: ccre_centred, chroms: [chr21]}
+  # Sealed test (reports/sealed_test_protocol.md): chr19, from the reference and cCREs only. Scored once, after the
+  # protocol was frozen (27 Nov); no model output on chr19 before that.
+  test_chr19_tiles:        {method: tiles, chroms: [chr19]}
+  test_chr19_mini2000:     {method: stratified, chroms: [chr19], n: 2000, seed: 919}

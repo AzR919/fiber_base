@@ -36,8 +36,11 @@ has been finished, newest first: `TODONE_26_11.md` (one file per month).
     claim uses 3 seeds.
   - The dev test set is not clean: the held-out cells and chr21 entered decisions. Hence the sealed test (§1,
     stage 4) on a fresh chromosome, run once.
-- **Next:** nucleosome positioning at CTCF (§3 #4), the CTCF specificity test and shuffle controls (§2); then pick
-  the sealed chromosome and run the sealed test. Block-phased XI is ready (§3 #2).
+- **Now: the sealed test** (chr19, HCT116 + MCF-7; protocol frozen 27 Nov, `reports/sealed_test_protocol.md`).
+  Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`). Still to do before
+  scoring: the two downloads (CTCF peaks, chr19 replicates; ask first), chr19 targets, the dry run on a dev pair
+  (`eval40`, `eval41`, analysis scripts). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
+  sealed test (deferred).
 
 ## 1. Main direction: the mixture-trained model (details: `TODO_extended.md` §2)
 
@@ -49,8 +52,10 @@ it has seen the sample's cell types.
 **Test hygiene, from now on:**
 - Development: the 4 dev cell types; train chr20, validation chr22, development evaluation chr21 (and chrX for the
   X-inactivation test).
-- Sealed test: the held-out cell types (HCT116, MCF-7, H9) on a fresh chromosome, never evaluated before (to
-  pick, e.g. chr19 or chr18).
+- Sealed test: the held-out cell types (HCT116, MCF-7, H9) on a fresh chromosome, never evaluated before:
+  **chr19 (user, 27 Nov).** Protocol (endpoints, expected results, procedure): `reports/sealed_test_protocol.md`,
+  **frozen 27 Nov** (D1 gap to Pair = cost; D2 seed mean + 2 of 3 seeds; Pair-S, MLP-S, Rules-S trained; shuffle
+  control in).
 - The test is run once, with the locked recipe, and reported whatever it shows. The earlier use of the held-out
   cells on chr21 is stated in the paper.
 
@@ -83,7 +88,8 @@ it has seen the sample's cell types.
   a real sample has one of each. Fixed 0.5 share of two cells (above).
 
 **Stages:**
-1. **Write the protocol and success criteria down before running** (draft in `TODO_extended.md` §2).
+1. **Write the protocol and success criteria down before running: done, frozen 27 Nov**
+   (`reports/sealed_test_protocol.md`).
 2. **Seed noise: done (24 Nov),** see above. The success-criteria details (sign accuracy / differential r; CTCF
    per seed) are deferred: one problem run per set (user, 25 Nov).
 3. **Recipe locked on the dev cells (25 Nov):** R1a, two cells, 0.5 share. No more dev pairs (user: they would not

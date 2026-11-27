@@ -1,0 +1,16 @@
+# SEALED TEST (reports/sealed_test_protocol.md P4, P5; mixture r): HCT116_200U + MCF_7_200U fibers pooled at every
+# valid chr19 tile, HCT116's share fixed at 0.5 with balanced stacks (tiles below 10 fibers skipped), scored against the
+# mixture target. As data38 trains.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr19_tiles
+seed: 919
+dataset_type: mixed
+mix_range: [0.5, 0.5]
+mix_balance: true
+mix_min_fibers: 10
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

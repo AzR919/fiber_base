@@ -16,6 +16,8 @@ Steps:
 Usage (from the repo root):
     python data_prep/setup_replicates.py --dry-run   # select and report sizes, download nothing
     python data_prep/setup_replicates.py             # download + crop + write outputs
+    python data_prep/setup_replicates.py --cells HCT116 MCF-7 --chroms chr19 chr21
+                                     # only these cell lines (the others keep their lock entries and files)
 Re-running is safe: cropped files already listed in the manifest are skipped; partial downloads resume.
 """
 
@@ -43,6 +45,8 @@ def parse_args():
     p.add_argument("--lock", default="data_prep/encode_lock.yaml", help="main lock: the pooled training tracks")
     p.add_argument("--rep-lock", default="data_prep/encode_replicates_lock.yaml")
     p.add_argument("--chroms", nargs="+", default=["chr21"], help="chromosomes kept in the cropped files")
+    p.add_argument("--cells", nargs="+", default=None,
+                   help="only these cell lines (ENCODE folder names); the others keep their lock entries and files")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--reselect", action="store_true", help="ignore the replicate lock and select again")
     p.add_argument("--workers", type=int, default=4)
@@ -151,6 +155,8 @@ def main():
 
     todo = []
     for cell, tracks in plan.items():
+        if args.cells and cell not in args.cells:
+            continue
         rep_dir = os.path.join(encode_root, cell, "replicates")
         for assay, entry in tracks.items():
             for r in entry["replicates"]:
@@ -194,6 +200,8 @@ def main():
                 "# output type as the pooled training track in encode_lock.yaml) used for the noise ceiling.\n")
         yaml.safe_dump(plan, f, sort_keys=False)
     for cell, tracks in plan.items():
+        if args.cells and cell not in args.cells:
+            continue
         rep_dir = os.path.join(encode_root, cell, "replicates")
         if os.path.isdir(rep_dir):
             with open(os.path.join(rep_dir, "manifest.json"), "w") as f:

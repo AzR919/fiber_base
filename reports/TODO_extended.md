@@ -293,7 +293,10 @@ Pair B means are over 7 assays (H1 has no ATAC). "Clear" = |Δ| > 2 SE and every
     for X inactivation);
   - **sealed test:** the held-out cell types on a fresh chromosome, never evaluated before. Pick it now by
     criteria fixed in advance (size and gene density similar to chr21, ENCODE coverage in every held-out cell,
-    enough CTCF sites and CGI promoters), e.g. chr18 or chr19;
+    enough CTCF sites and CGI promoters), e.g. chr18 or chr19. **Picked: chr19 (user, 27 Nov).** Never used for
+    training, validation or evaluation; the only contact so far is the bulk-only genome fractions of the 4 dev cells
+    in the poised test (D1, all autosomes). chr19 is gene- and CGI-dense with the KRAB-ZNF clusters (H3K9me3), so it
+    is a harder and richer test than chr21, not a matched one;
   - the test is run once with the locked recipe and reported whatever it shows. The earlier use of the held-out
     cells on chr21 is stated in the paper.
 - **Held-out mixture:** HCT116 + MCF-7 at a 0.5 share (the cleanest pair: different tissues, same Fiber-seq

@@ -5,6 +5,12 @@ what was done, the result in a line, and where the details are. Open work stays 
 
 ## 27 Nov
 
+- **Sealed test started:** protocol frozen (chr19, HCT116 + MCF-7; endpoints P1–P7, decisions D1–D5, Rules-S added,
+  the XI test described). New: random-split control (`read_half`, `fiber_utils.ReadHalf`) and shuffle control
+  (`shuffle_fibers`) in the eval; chr19 window sets; per-pair tile sets in `build_loci.py` (HCT116__MCF-7 on chr19);
+  `setup_replicates.py --cells`; `targets_spec_sealed.yaml`; configs `data38`, `data39`, `eval33`–`eval41`. Data
+  prep and the training of R1a-S / Pair-S / MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`).
+  `reports/sealed_test_protocol.md`.
 - **X inactivation with block phasing:** Xi set per HiPhase block from the other promoters' haplotype methylation,
   tested gene left out. Validated on GM12878 with the block layouts of the sealed XI cells: Xi call right ≥ 0.995,
   silenced-CGI result within 0.05 of chromosome-wide phasing in all 14 runs, ~200 of 425 genes called; escape + PAR

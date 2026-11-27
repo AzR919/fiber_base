@@ -1,0 +1,16 @@
+# Check that a sealed-test training ran (not part of the sealed scoring): the sealed pair's balanced 0.5 mixture on the
+# 2,000 chr21 tiles of test_chr21_mini2000 (chr21 is not sealed; these cells' chr21 was used before). The end-of-training
+# eval of data38 / data39 runs. Not used for any decision (reports/sealed_test_protocol.md §7).
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr21_mini2000
+seed: 919
+dataset_type: mixed
+mix_range: [0.5, 0.5]
+mix_balance: true
+mix_min_fibers: 10
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

@@ -75,6 +75,12 @@ case "${CELL:-gm12878}" in
   # rung 1 = fixed rules, only a per-assay calibration trained (model24, train05: 3 epochs; eval with EPOCH=3)
   r1a_rules)   DATA=data36_mix_bal_GM12878_HepG2_200U; EVAL=eval31_mix_bal_GM12878_HepG2_200U_mini; PREFIX=MIXR1A_RULES; MODEL=model24_rules; TRAIN=train05 ;;
   r1a_rules_b) DATA=data37_mix_bal_K562_H1_200U;       EVAL=eval32_mix_bal_K562_H1_200U_mini;       PREFIX=MIXR1A_RULES; MODEL=model24_rules; TRAIN=train05 ;;
+  # SEALED TEST (reports/sealed_test_protocol.md), HCT116 + MCF-7, train chr20 / val chr22, never chr19. The end eval is
+  # a chr21 check that training ran (eval39), not sealed scoring. R1a-S, Pair-S, MLP-S: 3 seeds; Rules-S: 1 (as on dev).
+  s_r1a)   DATA=data38_mix_bal_HCT116_MCF_7_200U; EVAL=eval39_mix_bal_HCT116_MCF_7_200U_chr21_mini; PREFIX=SEALED_R1A;   MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  s_pair)  DATA=data39_HCT116_MCF_7_200U;         EVAL=eval39_mix_bal_HCT116_MCF_7_200U_chr21_mini; PREFIX=SEALED_PAIR;  MODEL=model16_uct_mid_8A_no_fire_msp ;;
+  s_mlp)   DATA=data38_mix_bal_HCT116_MCF_7_200U; EVAL=eval39_mix_bal_HCT116_MCF_7_200U_chr21_mini; PREFIX=SEALED_MLP;   MODEL=model22_mlp_handcrafted ;;
+  s_rules) DATA=data38_mix_bal_HCT116_MCF_7_200U; EVAL=eval39_mix_bal_HCT116_MCF_7_200U_chr21_mini; PREFIX=SEALED_RULES; MODEL=model24_rules; TRAIN=train05 ;;
   *) echo "Unknown CELL=${CELL}"; exit 1 ;;
 esac
 if [ -n "${SEED:-}" ]; then PREFIX="${PREFIX}_seed${SEED}"; fi

@@ -1,0 +1,13 @@
+# SEALED TEST (reports/sealed_test_protocol.md): Pair-S, the ceiling. data28's recipe on the sealed pair: HCT116_200U
+# and MCF_7_200U trained as single cell types, each sample on its own track. Same windows, context and fibers as data38.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: single
+
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

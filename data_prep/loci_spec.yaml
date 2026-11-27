@@ -27,7 +27,9 @@ splits:
   test: [GM12878, K562, HepG2, Panc1, H1, HCT116, MCF-7, H9]
 
 # --- Pairs (mixture tests, T3): d = asinh(A) - asinh(B) per bin, same bins / min_signal / threshold.
-# Writes pairs/<A>__<B>.{tsv,bed}; gain = higher in A.
+# Writes pairs/<A>__<B>.{tsv,bed}; gain = higher in A. A pair given as {cells: [A, B], tiles: <window set>} is scored
+# on that set instead of `tiles` (the sealed pair on chr19, reports/sealed_test_protocol.md).
 pairs:
   - [GM12878, HepG2]
   - [K562, H1]
+  - {cells: [HCT116, MCF-7], tiles: test_chr19_tiles}

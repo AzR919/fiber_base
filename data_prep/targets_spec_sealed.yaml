@@ -1,0 +1,46 @@
+# SEALED TEST target spec (reports/sealed_test_protocol.md): the single-molecule targets of the sealed pair on chr19,
+# built like data_prep/targets_spec.yaml (read its comments for every rule) from annotations and HCT116 / MCF-7 bulk only;
+# no fibers, no model. Writes into the same <regions_root>/targets/ (file names carry the chromosome: *_chr19.*):
+#   python data_prep/build_targets.py --spec data_prep/targets_spec_sealed.yaml --sets ctcf poised
+# Promoters for X inactivation are the existing tss_chrX_chr21.bed (the XI cells' test is on chrX + chr21).
+
+regions_spec: data_prep/regions_spec.yaml
+annotations:  /home/azr/projects/def-maxwl/azr/data/misc/annotations
+gtf:          gencode.v44.basic.annotation.gtf.gz
+cpg_islands:  cpgIslandExt.hg38.txt.gz
+ctcf_motif:   MA0139.2.jaspar
+# ENCODE conservative IDR thresholded peaks (the dev cells' kind), each from the same ENCODE analysis as our CTCF track:
+#   HCT116 ENCFF463FGL (ENCSR240PRQ, analysis ENCAN642OXI, track ENCFF825ECI)
+#   MCF-7  ENCFF157RWH (ENCSR000AHD, analysis ENCAN297MXV, track ENCFF775RBW)
+ctcf_peaks:
+  HCT116: ctcf_peaks_HCT116_ENCSR240PRQ.bed.gz
+  MCF-7:  ctcf_peaks_MCF-7_ENCSR000AHD.bed.gz
+
+# bound = best motif hit in a peak of either sealed cell; unbound = matched-score motif hits outside both cells' peaks
+ctcf:
+  chroms: [chr19]
+  motif_pvalue: 1.0e-5
+  pseudocount: 0.1
+  unbound_margin: 500
+  score_bin: 1.0
+  unbound_per_bound: 1
+  seed: 919
+
+tss:
+  chroms: [chr19]
+  tss_half: 500
+  par: []
+  escape_genes: []
+
+# Genome fractions over every autosome (as on dev); targets on chr19 only.
+poised:
+  chroms: [chr19]
+  cells: [HCT116, MCF-7]
+  encode_spec: data_prep/encode_spec.yaml
+  fraction_chroms: []
+  tile: 1000
+  marked: 2.0
+  unmarked: 1.0
+  tss_reach: 1000
+  per_class: 250
+  seed: 919

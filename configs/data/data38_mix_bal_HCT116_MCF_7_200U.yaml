@@ -1,0 +1,19 @@
+# SEALED TEST (reports/sealed_test_protocol.md): R1a-S, the model under test. data36's recipe on the sealed pair:
+# every training sample pools HCT116_200U and MCF_7_200U fibers at the same window, HCT116's share fixed at 0.5 with
+# balanced stacks; target = the fold-change mixture weighted by each cell type's fibers present at each position.
+# Train chr20, validation chr22 (mixed too); neither cell's own track is used. chr19 is never touched in training.
+# Also the training data of MLP-S (model22) and Rules-S (model24). Pair-S: data39.
+
+context_length: 5000
+fibers_per_entry: 100
+dataset_type: mixed
+mix_range: [0.5, 0.5]
+mix_balance: true
+mix_min_fibers: 10
+
+train_windows: {sources: {ccre: 0.5, random: 0.5}, jitter: 200}
+val_windows: val_chr22_n200
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

@@ -1,0 +1,17 @@
+# SEALED TEST (reports/sealed_test_protocol.md §5, shuffle control): eval37 with each tile's fibers read at a random
+# other tile of chr19 (a seeded derangement, same partner for both cells); target and reference DNA stay the tile's own.
+# Expected: fiber-origin AUC and differential r fall to near their floors; bulk r falls less.
+
+context_length: 5000
+fibers_per_entry: 100
+windows: test_chr19_mini2000
+seed: 919
+dataset_type: single
+paired: true
+pair_loci: pairs/HCT116__MCF-7
+loci: [pairs/HCT116__MCF-7]
+shuffle_fibers: true
+
+cell_types:
+  HCT116_200U:
+  MCF_7_200U:

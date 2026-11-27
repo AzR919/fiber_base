@@ -19,6 +19,7 @@ from regions import Regions, TrainSampler, DEFAULT_TRAIN_WINDOWS
 from fiber_utils import (
     get_m6a, get_cpg, get_msp, get_nuc, get_fire_msp,
     get_fiber_data as _get_fiber_data_np,
+    ReadHalf,
     get_locus_onehot,
     load_annot,
     suppress_stdout_stderr,
@@ -52,6 +53,10 @@ class SingleCellFiberDataset(IterableDataset):
                   also carry 'strata': (len(STRATA), L) per-bp cCRE-class masks for stratified metrics.
                   With baseline_cells ({cell: metadata entry}, the cells a model was trained on), samples also
                   carry the cross-cell-average baseline (see get_baseline).
+                  shuffle_fibers (shuffle control, reports/sealed_test_protocol.md §5): each region's fibers are
+                  read at a partner region of the same chromosome (a seeded derangement of the window set); the
+                  target, reference DNA and strata stay the region's own.
+    A cell type with read_half in its metadata entry keeps only that half of its library's fibers (fiber_utils.ReadHalf).
     With DataLoader workers, training samples and eval regions are split across workers.
     """
 
@@ -59,7 +64,7 @@ class SingleCellFiberDataset(IterableDataset):
                  mode, input_flags, seed=919,
                  dna_type="none", output_assays=None,
                  samples_per_epoch=1000, train_windows=None, windows=None, max_regions=None,
-                 baseline_cells=None, baseline_include_own=False):
+                 baseline_cells=None, baseline_include_own=False, shuffle_fibers=False):
 
         if output_assays is None:
             output_assays = ["atac"]
@@ -82,6 +87,10 @@ class SingleCellFiberDataset(IterableDataset):
             bw_paths = [None if cell["bulk"].get(a) is None else os.path.join(bulk_bases.get(a, ""), cell["bulk"][a])
                         for a in self.output_assays]
             self.other_bw_paths.append(bw_paths)
+
+        # Per cell type: None (all fibers) or ReadHalf (one random half of the library)
+        self.fiber_keeps = [None if metadata["cell_types"][c].get("read_half") is None
+                            else ReadHalf(metadata["cell_types"][c]["read_half"]) for c in self.cell_type_names]
 
         # Per cell type: (K,) float mask, 1 where the assay has bulk data
         self.assay_masks = [torch.tensor([p is not None for p in paths], dtype=torch.float32)
@@ -132,6 +141,7 @@ class SingleCellFiberDataset(IterableDataset):
                 raise ValueError("mode='eval' needs a window set name (windows=...), e.g. 'test_chr21_mini2000'.")
             self.windows = windows
             self.region_list = self.regions.window_set(windows, max_regions=max_regions, seed=seed)
+            self.fiber_partner = self._derangement(self.region_list, seed) if shuffle_fibers else None
         else:
             raise ValueError(f"Unknown mode: {mode!r}. Expected 'train' or 'eval'.")
 
@@ -153,6 +163,24 @@ class SingleCellFiberDataset(IterableDataset):
             self.baseline_index = [[i for i, (d, _) in enumerate(self.baseline_sources)
                                     if baseline_include_own or d != own_dir]
                                    for own_dir in own]
+
+    @staticmethod
+    def _derangement(regions, seed):
+        """{region: partner region}: within each chromosome, a seeded random cycle through its regions, so every
+        region gets another region's fibers and every region's fibers are used once."""
+        rng = random.Random(seed + 7)
+        by_chrom = {}
+        for r in regions:
+            by_chrom.setdefault(r[0], []).append(tuple(r))
+        partner = {}
+        for rs in by_chrom.values():
+            if len(rs) < 2:
+                raise ValueError(f"shuffle_fibers needs >= 2 regions per chromosome ({rs[0][0]} has {len(rs)})")
+            order = rs[:]
+            rng.shuffle(order)
+            for i, r in enumerate(order):
+                partner[r] = order[(i + 1) % len(order)]
+        return partner
 
     def set_epoch(self, epoch):
         """Call at the start of each training epoch for seeded-deterministic data ordering."""
@@ -219,6 +247,7 @@ class SingleCellFiberDataset(IterableDataset):
             self.fiber_bams[cell_idx], chrom, start, end, self.fasta,
             self.fibers_per_entry, self.context_length, self.input_features,
             return_fiber_dna=self.return_fiber_dna, min_overlap=min_overlap,
+            keep=getattr(self, "fiber_keeps", [None] * self.num_cell_types)[cell_idx],   # getattr: older pickles
         )
         return {
             "fiber_features": torch.from_numpy(fibers_np).permute(1, 2, 0),
@@ -306,12 +335,14 @@ class SingleCellFiberDataset(IterableDataset):
                 yield self._make_sample(fibers, other_tensor, locus, cell_type_name, self.assay_masks[cell_idx])
 
         else:  # eval mode: deterministic, no retry
+            partner = getattr(self, "fiber_partner", None)
             for region in self._eval_regions():
                 locus = self.window_for_region(region)
+                fiber_locus = self.window_for_region(partner[tuple(region)]) if partner else locus
                 strata = self.strata_for(locus)
 
                 for cell_idx, cell_type_name in enumerate(self.cell_type_names):
-                    fibers = self._collect_fiber_tensors(cell_idx, *locus, min_overlap=self.context_length // 8)
+                    fibers = self._collect_fiber_tensors(cell_idx, *fiber_locus, min_overlap=self.context_length // 8)
                     if fibers["n_fibers"] == 0:
                         continue
 
