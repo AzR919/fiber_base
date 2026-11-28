@@ -32,6 +32,8 @@ if ! curl -s -o /dev/null --max-time 30 https://www.encodeproject.org/; then
     exit 1
 fi
 
-python -u data_prep/setup_replicates.py --workers 4
+# REP_ARGS overrides the arguments, e.g. the sealed test (reports/sealed_test_protocol.md):
+#   sbatch --export=ALL,REP_ARGS="--cells HCT116 MCF-7 --chroms chr19 chr21 --workers 4" data_prep/slurm_setup_replicates.sh
+python -u data_prep/setup_replicates.py ${REP_ARGS:---workers 4}
 
 echo "Job finished on $(date)"

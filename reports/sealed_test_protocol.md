@@ -63,8 +63,13 @@ run config is the last epoch, as on dev. Run prefixes in `slurm_batch_command.sh
 | Pair-S | own tracks of HCT116 and MCF-7 | `data39`, `model16`, `train04` | 3 | ceiling (C3) |
 | MLP-S | the R1a-S mixtures; MLP on the 31 hand-crafted features | `data38`, `model22`, `train04` | 3 | simple model (C4) |
 | Rules-S | the R1a-S mixtures; fixed rules, only the calibration trained | `data38`, `model24`, `train05` | 1 (as on dev) | simplest model (C4) |
+| R1a-A, R1a-B | R1a on the dev pairs (GM12878 + HepG2, `data36`; K562 + H1, `data37`); applied without retraining | existing | 3 + 3 (existing) | a mixture model trained on another sample (secondary) |
 
 Seeds are 919, 2, 3. The network + features model is not rerun: on dev it equalled R1a.
+
+R1a-S is the R1a recipe trained on the sealed pair; R1a-A / R1a-B are the same recipe trained on the dev pairs. R1a-S
+vs R1a-A / R1a-B differ only in the cells trained on, so they show whether a mixture model must be trained on the sample
+itself (DEV4NF also differs in supervision: own tracks of four cells).
 
 ## 4. Primary endpoints (pass / fail)
 
@@ -119,7 +124,10 @@ pair, like DEV4NF on any new cell).
 
 ## 5. Secondary readouts (reported, no pass / fail)
 
-The bulk and T3 readouts are given for each of R1a-S, Pair-S, MLP-S, Rules-S and DEV4NF:
+The bulk and T3 readouts are given for each of R1a-S, Pair-S, MLP-S, Rules-S, DEV4NF and R1a-A / R1a-B (the
+molecule readouts below too):
+- **R1a-S vs R1a-A / R1a-B:** the same comparisons as P3 (fiber-origin AUC, differential r), plus own-track and
+  mixture r; reported, no pass / fail.
 - **Bulk:** own-track r and fraction of the replicate ceiling per cell and assay; MSE; mixture r per assay.
 - **T3:**
   - sign accuracy and differential r per assay;
@@ -211,3 +219,5 @@ These follow from the dev results. They are not a reason to change anything:
 - 27 Nov: draft.
 - 27 Nov: frozen with D1–D5 as above; Rules-S added; XI test described; shuffle control scoped to the eval readouts
   (AUC, differential r, own-track r); the end-of-training check on chr21 allowed.
+- 27 Nov (user, before any chr19 output): the dev R1a models (R1a-A, R1a-B, 3 seeds each) added as a secondary
+  reference, applied without retraining. No primary endpoint changed.

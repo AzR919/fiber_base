@@ -37,9 +37,11 @@ has been finished, newest first: `TODONE_26_11.md` (one file per month).
   - The dev test set is not clean: the held-out cells and chr21 entered decisions. Hence the sealed test (§1,
     stage 4) on a fresh chromosome, run once.
 - **Now: the sealed test** (chr19, HCT116 + MCF-7; protocol frozen 27 Nov, `reports/sealed_test_protocol.md`).
-  Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`). Still to do before
-  scoring: the two downloads (CTCF peaks, chr19 replicates; ask first), chr19 targets, the dry run on a dev pair
-  (`eval40`, `eval41`, analysis scripts). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
+  Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`); chr19 windows and
+  differential bins built; CTCF peaks downloaded; replicates (`_52`), chr19 targets (`_53`) and the dry run of the two
+  controls on R1a-A (`_54`) submitted. Still to do before scoring: the sealed analysis scripts (endpoints P1–P7 and
+  the secondary readouts, dry-run on dev outputs) and the scoring job scripts. The dev R1a models (R1a-A / R1a-B) are
+  scored too (secondary, change log 27 Nov). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
   sealed test (deferred).
 
 ## 1. Main direction: the mixture-trained model (details: `TODO_extended.md` §2)
