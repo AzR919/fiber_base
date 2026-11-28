@@ -38,10 +38,13 @@ has been finished, newest first: `TODONE_26_11.md` (one file per month).
     stage 4) on a fresh chromosome, run once.
 - **Now: the sealed test** (chr19, HCT116 + MCF-7; protocol frozen 27 Nov, `reports/sealed_test_protocol.md`).
   Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`); chr19 windows and
-  differential bins built; CTCF peaks downloaded; replicates (`_52`), chr19 targets (`_53`) and the dry run of the two
-  controls on R1a-A (`_54`) submitted. Still to do before scoring: the sealed analysis scripts (endpoints P1–P7 and
-  the secondary readouts, dry-run on dev outputs) and the scoring job scripts. The dev R1a models (R1a-A / R1a-B) are
-  scored too (secondary, change log 27 Nov). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
+  differential bins built; CTCF peaks downloaded; replicates (`_52`, 32 files) and chr19 targets (`_53`: 1,916 CTCF
+  sites, 1,518 poised-class tiles, 14 / 42 of them poised in HCT116 / MCF-7) done. Analysis and scoring scripts written
+  (`plots_code/sealed/`: `sealed_evals.py` P1–P5, `sealed_molecules.py` P6–P7 and the molecule readouts, `analyze.sh`,
+  `score_sealed.sh` submits every scoring job once, `molecules_sealed.sh`); the XI cells added to `metapaths.yaml`.
+  Dry run on dev pair A: control evals on R1a-A (`_54`) and the analysis (`_55`) submitted. Then, after training:
+  `START=<NN> bash plots_code/sealed/score_sealed.sh` on fir (56 jobs). The dev R1a models (R1a-A / R1a-B) are scored
+  too (secondary, change log 27 Nov). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
   sealed test (deferred).
 
 ## 1. Main direction: the mixture-trained model (details: `TODO_extended.md` §2)

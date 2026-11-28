@@ -22,6 +22,9 @@ fiber_paths:
   H1_200U: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/H1_Fiber_seq_200U_1M_cells_200U_PS01373-fire-v0.1-filtered.cram
   H9_100U: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/H9_Fiber_seq_100U_1M_cells_100U_PS01375-fire-v0.1-filtered.cram
   H9_200U: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/H9_Fiber_seq_200U_1M_cells_200U_PS01376-fire-v0.1-filtered.cram
+  HG008_3E4: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/HG008_3E4_PS01682-fire-v0.1-filtered.cram
+  GM25455_LCL: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/GM25455_LCL_PS01520-fire-v0.1-filtered.cram
+  HEK293T_200U: /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/Hek293T_Fiber_seq_200U_1M_cells_200U_PS01332-fire-v0.1-filtered.cram
 
 # Fiber-seq sample -> ENCODE folder of its cell line. At runtime the folder's manifest.json says which
 # assays exist; requested assays a cell lacks are masked out of the loss. Samples without ENCODE data

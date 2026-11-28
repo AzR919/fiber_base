@@ -52,3 +52,7 @@ fiber_samples:
   H1_200U:            H1_Fiber_seq_200U_1M_cells_200U_PS01373-fire-v0.1-filtered.cram
   H9_100U:            H9_Fiber_seq_100U_1M_cells_100U_PS01375-fire-v0.1-filtered.cram
   H9_200U:            H9_Fiber_seq_200U_1M_cells_200U_PS01376-fire-v0.1-filtered.cram
+  # fiber only, no ENCODE tracks: the sealed X-inactivation cells (reports/sealed_test_protocol.md, section 4)
+  HG008_3E4:          HG008_3E4_PS01682-fire-v0.1-filtered.cram
+  GM25455_LCL:        GM25455_LCL_PS01520-fire-v0.1-filtered.cram
+  HEK293T_200U:       Hek293T_Fiber_seq_200U_1M_cells_200U_PS01332-fire-v0.1-filtered.cram

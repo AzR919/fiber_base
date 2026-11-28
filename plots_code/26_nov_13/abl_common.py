@@ -24,18 +24,26 @@ MODELS = {
     "mlpB": "MIXR1A_MLP_data37_mix_bal_K562_H1_200U_model22_mlp_handcrafted_train04",
     "hcA": "MIXR1A_HC_data36_mix_bal_GM12878_HepG2_200U_model23_uct_mid_8A_no_fire_msp_handcrafted_train04",
     "hcB": "MIXR1A_HC_data37_mix_bal_K562_H1_200U_model23_uct_mid_8A_no_fire_msp_handcrafted_train04",
+    # sealed test (reports/sealed_test_protocol.md), HCT116 + MCF-7, trained 27 Nov
+    "sR1a": "SEALED_R1A_data38_mix_bal_HCT116_MCF_7_200U_model16_uct_mid_8A_no_fire_msp_train04",
+    "sPair": "SEALED_PAIR_data39_HCT116_MCF_7_200U_model16_uct_mid_8A_no_fire_msp_train04",
+    "sMLP": "SEALED_MLP_data38_mix_bal_HCT116_MCF_7_200U_model22_mlp_handcrafted_train04",
+    "sRules": "SEALED_RULES_data38_mix_bal_HCT116_MCF_7_200U_model24_rules_train05",
 }
 FLAGS = {"DEV4": [1, 1, 1, 1, 1], "noFIRE": [1, 1, 1, 1, 0], "m6aCpG": [1, 1, 0, 0, 0], "noAcc": [0, 1, 0, 0, 0],
          "noCpG": [1, 0, 1, 1, 1], "mixR0": [1, 1, 1, 1, 0], "mixR1a": [1, 1, 1, 1, 0], "pairNF": [1, 1, 1, 1, 0],
          "mixR1aB": [1, 1, 1, 1, 0], "pairNFB": [1, 1, 1, 1, 0],
-         **{k: [1, 1, 1, 1, 0] for k in ["rulesA", "rulesB", "mlpA", "mlpB", "hcA", "hcB"]}}
+         **{k: [1, 1, 1, 1, 0] for k in ["rulesA", "rulesB", "mlpA", "mlpB", "hcA", "hcB",
+                                         "sR1a", "sPair", "sMLP", "sRules"]}}
 NAMES = {"DEV4": "DEV4 (all inputs)", "noFIRE": "no FIRE", "m6aCpG": "m6A + CpG", "noAcc": "no accessibility",
          "noCpG": "no CpG", "mixR0": "R0 mixture (GM12878 + HepG2)", "mixR1a": "R1a mixture (GM12878 + HepG2)",
          "pairNF": "pair (GM12878 + HepG2, own tracks)", "mixR1aB": "R1a mixture (K562 + H1)",
          "pairNFB": "pair (K562 + H1, own tracks)",
          "rulesA": "rules (GM12878 + HepG2)", "rulesB": "rules (K562 + H1)", "mlpA": "MLP on features (GM12878 + HepG2)",
          "mlpB": "MLP on features (K562 + H1)", "hcA": "network + features (GM12878 + HepG2)",
-         "hcB": "network + features (K562 + H1)"}
+         "hcB": "network + features (K562 + H1)",
+         "sR1a": "R1a-S (HCT116 + MCF-7 mixtures)", "sPair": "Pair-S (HCT116 + MCF-7, own tracks)",
+         "sMLP": "MLP-S (HCT116 + MCF-7 mixtures)", "sRules": "Rules-S (HCT116 + MCF-7 mixtures)"}
 
 
 # Training seeds: 919 (the default, runs above) and 2 (second seed, 11 Nov; slurm_batch_command.sh SEED=2 puts

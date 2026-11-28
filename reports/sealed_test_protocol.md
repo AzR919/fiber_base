@@ -221,3 +221,14 @@ These follow from the dev results. They are not a reason to change anything:
   (AUC, differential r, own-track r); the end-of-training check on chr21 allowed.
 - 27 Nov (user, before any chr19 output): the dev R1a models (R1a-A, R1a-B, 3 seeds each) added as a secondary
   reference, applied without retraining. No primary endpoint changed.
+- 27 Nov (before any chr19 output): analysis scripts written (`plots_code/sealed/`; scoring jobs:
+  `score_sealed.sh`). How they compute the endpoints, where section 4 leaves it open (no endpoint changed):
+  - model-level readouts are means over assays, as on dev; P1's floor is R1a-S's pair eval run with
+    `--mixture_reference` (the same positions as its own-track r);
+  - P2's random split uses the same AUC as P2 (oriented by the pair's bulk differential, mean over bins and
+    assays), seed mean;
+  - P6 seed mean: per bound site the mean of H1 over the 3 seeds (sites scored in every seed), then the Wilcoxon test;
+    CTCF sites with no short-read data in either cell (CTCF or ATAC fold change exactly 0 over motif ± 1 kb) are left
+    out first, as on dev;
+  - P7 seed mean: per gene the mean of Xa − Xi over the 3 seeds; per target the majority HiPhase block among the
+    HP-tagged fibers, and only that block's fibers.
