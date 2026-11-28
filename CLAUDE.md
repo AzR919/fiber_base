@@ -15,7 +15,9 @@ Claude does every transfer explicitly with `misc/cluster.sh` (Windows: `wsl bash
 local repo is the hub: code goes local → cluster, results / logs / plots come cluster → local, and anything one
 cluster needs from the other goes through the local buffer.
 
-## Remote clusters (nibi and fir; work on whichever is up)
+## Remote clusters (nibi is the main cluster from 28 Nov; fir is secondary)
+- **From 28 Nov nibi is the main cluster** (its GPU queue was about a third of fir's). Submit new work on nibi. Jobs
+  already queued on fir stay there (no duplicates on nibi). If nibi keeps finishing work sooner, move more over.
 - Both clusters have the same layout: code `/home/azr/projects/def-maxwl/azr/code/fiber_base`, data
   `/home/azr/projects/def-maxwl/azr/data/...`, venv `/home/azr/projects/def-maxwl/azr/misc/menv` (`~/project/...`
   is the same place). The filesystems are separate: data, results and the venv exist per cluster.
@@ -50,6 +52,14 @@ need). After jobs finish, `pull` from that cluster: the analysis and reports are
 Keep the local buffer small: results, logs and plots (a few GB) stay; CRAMs (~30 GB each) and ENCODE bigWigs
 (~1 GB each) only pass through, and `copy-data` refuses anything that would leave less than 20 GB free.
 Both clusters have the same data since 24 Nov (fir's older `regions/` kept as `DATA_FIBER/regions_fir_oct`).
+On 28 Nov fir's sealed `regions/` (from `2026-11-27_32`), the HCT116 / MCF-7 replicates and the CTCF peak files
+were copied to nibi; nibi's previous `regions/` is kept as `DATA_FIBER/regions_nibi_pre_sealed`. Upload from local
+to a cluster runs at only ~0.3 MB/s, so `copy-data` is only practical for small things.
+**Every Fiber-seq CRAM is in the original archive on nibi** `data/misc/google-filtered-crams.tar` (837 GB, members
+named `PS<id>-fire-v0.1-filtered.cram[.crai]`; `misc/fiber_cram_rename.py` maps PS IDs to our names). Extract
+single members with `tar -xOf <tar> <member> > <new name>` (seeks, fast) instead of copying from fir; nibi's project
+space is near quota (4.3 / 4.6 TiB on 28 Nov), so extract only what a job needs. The three XI CRAMs (`HG008_3E4`,
+`GM25455_LCL`, `HEK293T_200U`) were extracted this way on 28 Nov (`2026-11-28_19`).
 
 ## Slurm jobs
 - Training: `slurm_batch_command.sh` → `main.py`. Eval of a saved checkpoint: `slurm_batch_command_eval.sh` → `eval.py`.

@@ -8,8 +8,8 @@ has been finished, newest first: `TODONE_26_11.md` (one file per month).
 
 - **Pipeline:** ENCODE fold-change tracks, region files, cell-specific and pairwise loci, per-fiber predictions at
   target BEDs (`molecule_predict.py`, with in-silico CpG flips). Split v2: 4 dev cell types (GM12878, K562, HepG2,
-  H1), 3 held out (H9, HCT116, MCF-7), Panc1 separately. Train chr20, validation chr22, evaluation chr21. Work runs
-  on fir (nibi down since 24 Nov).
+  H1), 3 held out (H9, HCT116, MCF-7), Panc1 separately. Train chr20, validation chr22, evaluation chr21. Main
+  cluster nibi from 28 Nov (fir's queue was ~3× longer); fir keeps the jobs already queued there.
 - **Main model of the paper: R1a,** DEV4NF's network (`model16`, no FIRE) trained only on balanced 0.5 mixtures of
   two cells (`data36` GM12878 + HepG2, `data37` K562 + H1). Scope: two cells at a 0.5 share (user, 25 Nov). DEV4NF
   (own tracks of the 4 dev cells) is the pretrained reference, Pair (own tracks of the pair) the ceiling.
@@ -37,13 +37,15 @@ has been finished, newest first: `TODONE_26_11.md` (one file per month).
   - The dev test set is not clean: the held-out cells and chr21 entered decisions. Hence the sealed test (§1,
     stage 4) on a fresh chromosome, run once.
 - **Now: the sealed test** (chr19, HCT116 + MCF-7; protocol frozen 27 Nov, `reports/sealed_test_protocol.md`).
-  Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S submitted on fir (`2026-11-27_32`–`51`); chr19 windows and
+  Training of R1a-S, Pair-S, MLP-S (3 seeds) and Rules-S moved to nibi on 28 Nov (`2026-11-28_00`–`18`, with the
+  resumes; fir's `2026-11-27_33`–`51` cancelled before starting; sealed `regions/`, replicates, CTCF peaks and the
+  dev checkpoints copied to nibi; the XI CRAMs extracted on nibi from the original archive, `_19`); chr19 windows and
   differential bins built; CTCF peaks downloaded; replicates (`_52`, 32 files) and chr19 targets (`_53`: 1,916 CTCF
   sites, 1,518 poised-class tiles, 14 / 42 of them poised in HCT116 / MCF-7) done. Analysis and scoring scripts written
   (`plots_code/sealed/`: `sealed_evals.py` P1–P5, `sealed_molecules.py` P6–P7 and the molecule readouts, `analyze.sh`,
   `score_sealed.sh` submits every scoring job once, `molecules_sealed.sh`); the XI cells added to `metapaths.yaml`.
   Dry run on dev pair A: control evals on R1a-A (`_54`) and the analysis (`_55`) submitted. Then, after training:
-  `START=<NN> bash plots_code/sealed/score_sealed.sh` on fir (56 jobs). The dev R1a models (R1a-A / R1a-B) are scored
+  `START=<NN> bash plots_code/sealed/score_sealed.sh` on nibi (56 jobs; it checks the XI CRAMs are there). The dev R1a models (R1a-A / R1a-B) are scored
   too (secondary, change log 27 Nov). Nucleosome positioning at CTCF and the CTCF specificity test are out of the
   sealed test (deferred).
 

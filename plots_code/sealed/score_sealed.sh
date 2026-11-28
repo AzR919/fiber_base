@@ -1,6 +1,7 @@
 #!/bin/bash
-# Score the sealed test once (reports/sealed_test_protocol.md, section 7 step 5). Run on the fir login node from the
-# repo root, after every training run has finished and the dry run is done:
+# Score the sealed test once (reports/sealed_test_protocol.md, section 7 step 5). Run on the login node of the cluster
+# that holds the checkpoints and the XI CRAMs (nibi from 28 Nov), after every training run has finished and the dry
+# run is done:
 #   START=<NN> [DATE=YYYY-MM-DD] [DRY=1] bash plots_code/sealed/score_sealed.sh
 # START = the first free job index of the day (count across both clusters). DRY=1 prints the jobs without submitting.
 #
@@ -13,11 +14,17 @@
 #                            unmeth_distal) and poised tiles (flips meth, unmeth, meth_distal); on the XI cells' fibers
 #                            at the chrX + chr21 promoters
 # Once: sealed_ceiling (replicate_ceiling.py on eval33), then sealed_analysis (analyze.sh, SETUP=sealed) after all.
-# fir sizes: 2g.20gb evals with 3 CPUs, 1g.10gb molecules with 1 CPU / 35 GB (CLAUDE.md).
+# Sizes: the scripts' headers fit nibi; on fir 2g.20gb evals get 3 CPUs, 1g.10gb molecules 1 CPU / 35 GB (CLAUDE.md).
 set -euo pipefail
 cd /home/azr/projects/def-maxwl/azr/code/fiber_base
 : "${START:?set START=<first free job index of the day>}"
 DATE=${DATE:-$(date +%F)}
+if [ "${CC_CLUSTER:-}" = fir ]; then EVAL_SZ="--cpus-per-task=3"; MOL_SZ="--cpus-per-task=1 --mem=35G"
+else EVAL_SZ=""; MOL_SZ=""; fi
+for f in HG008_3E4_PS01682 GM25455_LCL_PS01520 Hek293T_Fiber_seq_200U_1M_cells_200U_PS01332; do
+  ls /home/azr/projects/def-maxwl/azr/data/DATA_FIBER/fiber_multi_cell/${f}-fire-v0.1-filtered.cram >/dev/null \
+    || { echo "XI CRAM missing on ${CC_CLUSTER:-this cluster}: $f" >&2; exit 1; }
+done
 E=configs/evals
 T_PAIR=0-1:45:00; T_MIX=0-2:00:00; T_MIX_R1A=0-2:45:00; T_CTCF_POISED=0-2:30:00; T_XI=0-1:30:00
 
@@ -47,23 +54,23 @@ sub() {   # sub <name> <sbatch args...>
 
 while IFS="|" read -r label tag run; do
   if [ "$label" = "R1a-S" ]; then
-    sub "eval_sealed_pair_$tag" --cpus-per-task=3 --time=$T_PAIR \
+    sub "eval_sealed_pair_$tag" $EVAL_SZ --time=$T_PAIR \
       --export=ALL,EVAL_SET=one,RUN="$run",MIXREF=1,CONFIGS="$E/eval33_sealed_pair_HCT116_MCF_7_chr19.yaml" \
       slurm_batch_command_eval.sh
-    sub "eval_sealed_mix_$tag" --cpus-per-task=3 --time=$T_MIX_R1A \
+    sub "eval_sealed_mix_$tag" $EVAL_SZ --time=$T_MIX_R1A \
       --export=ALL,EVAL_SET=one,RUN="$run",BASELINE=0,CONFIGS="$E/eval34_sealed_mix_bal_HCT116_MCF_7_chr19.yaml $E/eval35_sealed_split_HCT116_chr19_mini.yaml $E/eval36_sealed_split_MCF_7_chr19_mini.yaml $E/eval37_sealed_pair_HCT116_MCF_7_chr19_mini.yaml $E/eval38_sealed_shuffle_pair_HCT116_MCF_7_chr19_mini.yaml" \
       slurm_batch_command_eval.sh
   else
-    sub "eval_sealed_pair_$tag" --cpus-per-task=3 --time=$T_PAIR \
+    sub "eval_sealed_pair_$tag" $EVAL_SZ --time=$T_PAIR \
       --export=ALL,EVAL_SET=one,RUN="$run",CONFIGS="$E/eval33_sealed_pair_HCT116_MCF_7_chr19.yaml" \
       slurm_batch_command_eval.sh
-    sub "eval_sealed_mix_$tag" --cpus-per-task=3 --time=$T_MIX \
+    sub "eval_sealed_mix_$tag" $EVAL_SZ --time=$T_MIX \
       --export=ALL,EVAL_SET=one,RUN="$run",BASELINE=0,CONFIGS="$E/eval34_sealed_mix_bal_HCT116_MCF_7_chr19.yaml" \
       slurm_batch_command_eval.sh
   fi
-  sub "molecules_sealed_ctcf_poised_$tag" --cpus-per-task=1 --mem=35G --time=$T_CTCF_POISED \
+  sub "molecules_sealed_ctcf_poised_$tag" $MOL_SZ --time=$T_CTCF_POISED \
     --export=ALL,RUN="$run",PARTS="ctcf poised" plots_code/sealed/molecules_sealed.sh
-  sub "molecules_sealed_xi_$tag" --cpus-per-task=1 --mem=35G --time=$T_XI \
+  sub "molecules_sealed_xi_$tag" $MOL_SZ --time=$T_XI \
     --export=ALL,RUN="$run",PARTS="xi" plots_code/sealed/molecules_sealed.sh
 done <<< "$RUNS"
 
